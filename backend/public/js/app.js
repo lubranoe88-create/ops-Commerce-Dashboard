@@ -1,6 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { destroyMapGlobe, mountMapGlobe } from "./mapGlobe.js";
+import {
+  destroyMapGlobe,
+  flyToTop,
+  mountMapGlobe,
+  resetNorth,
+  searchPlace,
+} from "./mapGlobe.js";
 
 const state = {
   module: "map",
@@ -122,13 +128,25 @@ function initThree(container, { autoRotate = true, minDistance = 2.4, maxDistanc
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.06;
+  controls.dampingFactor = 0.08;
   controls.minDistance = minDistance;
   controls.maxDistance = maxDistance;
-  controls.rotateSpeed = 0.65;
-  controls.zoomSpeed = 0.9;
+  controls.rotateSpeed = 0.75;
+  controls.zoomSpeed = 1.05;
+  controls.autoRotate = Boolean(autoRotate);
+  controls.autoRotateSpeed = 0.55;
+  let resumeTimer = null;
   controls.addEventListener("start", () => {
-    state.autoRotate = false;
+    controls.autoRotate = false;
+    clearTimeout(resumeTimer);
+  });
+  controls.addEventListener("end", () => {
+    clearTimeout(resumeTimer);
+    if (autoRotate) {
+      resumeTimer = setTimeout(() => {
+        controls.autoRotate = true;
+      }, 4500);
+    }
   });
 
   scene.add(new THREE.AmbientLight(0x6f8799, 0.55));
@@ -163,11 +181,12 @@ function initThree(container, { autoRotate = true, minDistance = 2.4, maxDistanc
 
   const tick = (t) => {
     state.animId = requestAnimationFrame(tick);
-    if (state.autoRotate && state.rootGroup) state.rootGroup.rotation.y += 0.0022;
     for (const p of state.pulse) {
-      const s = 1 + Math.sin(t * 0.004 + p.phase) * 0.18;
-      p.mesh.scale.setScalar(s);
-      if (p.mat) p.mat.opacity = 0.35 + (Math.sin(t * 0.004 + p.phase) + 1) * 0.2;
+      const wave = 1 + Math.sin(t * 0.004 + p.phase) * 0.16;
+      const bx = p.baseX || 1;
+      const by = p.baseY || bx;
+      p.mesh.scale.set(bx * wave, by * wave, 1);
+      if (p.mat) p.mat.opacity = 0.4 + (Math.sin(t * 0.004 + p.phase) + 1) * 0.22;
     }
     controls.update();
     renderer.render(scene, camera);
@@ -523,7 +542,7 @@ async function buildMap(root, tops) {
     ring.scale.set(scale, scale, 1);
     ring.position.copy(pos);
     root.add(ring);
-    state.pulse.push({ mesh: ring, phase: i });
+    state.pulse.push({ mesh: ring, phase: i, baseX: scale, baseY: scale });
 
     const core = new THREE.Mesh(
       new THREE.SphereGeometry(0.022 + (t.score || 0.5) * 0.018, 16, 16),
@@ -887,6 +906,9 @@ async function showModule(mod) {
   const chatPanel = $("chatPanel");
   const gl = $("glCanvas");
   const snap = state.snapshot || {};
+  const mapChrome = $("mapChrome");
+  if (mapChrome) mapChrome.hidden = mod !== "map";
+
   if (mod === "chat") {
     disposeScene();
     destroyMapGlobe();
@@ -900,15 +922,22 @@ async function showModule(mod) {
     if (mod === "map") {
       // Progressive 5-level LOD satellite globe (Cesium). Falls back to Three.js Blue Marble.
       disposeScene();
-      $("moduleLegend").textContent = "Map · loading 5-level satellite LOD…";
+      $("moduleLegend").textContent = "Map · loading interactive globe…";
       try {
         await mountMapGlobe(gl, {
           tops: snap.tops,
           onLod: (lod, heightM) => {
             if (state.module !== "map") return;
             const km = heightM > 1000 ? `${(heightM / 1000).toFixed(0)} km` : `${Math.round(heightM)} m`;
-            $("moduleLegend").textContent = `GLOBE 5D ZOOM · ${lod.label} · alt ${km}`;
-            $("coverageMini").textContent = `${lod.detail} · scroll to descend · L${lod.level}/5`;
+            $("moduleLegend").textContent = `GLOBE LIVE · ${lod.label} · alt ${km}`;
+            $("coverageMini").textContent = `${lod.detail} · drag rotate · scroll zoom · L${lod.level}/5`;
+          },
+          onSelect: (sel) => {
+            const card = $("mapPickCard");
+            if (!card) return;
+            card.hidden = false;
+            $("mapPickTitle").textContent = sel.title || "Selection";
+            $("mapPickDetail").textContent = sel.detail || `${sel.lat?.toFixed?.(3)}, ${sel.lon?.toFixed?.(3)}`;
           },
         });
         state.mapEngine = "cesium";
@@ -917,7 +946,7 @@ async function showModule(mod) {
         state.mapEngine = "three";
         destroyMapGlobe();
         gl.innerHTML = "";
-        $("moduleLegend").textContent = "Map · Three.js satellite fallback…";
+        $("moduleLegend").textContent = "Map · Three.js live fallback · drag / scroll";
         const root = initThree(gl, { autoRotate: true, minDistance: 2.6, maxDistance: 12 });
         await buildMap(root, snap.tops);
       }
@@ -1040,6 +1069,36 @@ function wireUi() {
     await api("/api/auth/logout", { method: "POST", body: "{}" }).catch(() => {});
     window.location.href = "/login";
   };
+
+  const searchForm = $("mapSearchForm");
+  if (searchForm) {
+    searchForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const q = $("mapSearchInput")?.value?.trim();
+      if (!q) return;
+      try {
+        const hit = await searchPlace(q);
+        if (!hit) {
+          $("mapPickCard").hidden = false;
+          $("mapPickTitle").textContent = "No results";
+          $("mapPickDetail").textContent = q;
+        }
+      } catch (err) {
+        $("mapPickCard").hidden = false;
+        $("mapPickTitle").textContent = "Search failed";
+        $("mapPickDetail").textContent = err.message || "Try again";
+      }
+    });
+  }
+  $("mapNorthBtn")?.addEventListener("click", () => resetNorth());
+  $("mapOrbitBtn")?.addEventListener("click", () => {
+    const t0 = state.snapshot?.tops?.[0];
+    flyToTop(
+      Number.isFinite(t0?.lon) ? t0.lon : 12.5,
+      Number.isFinite(t0?.lat) ? t0.lat : 30,
+      12_000_000,
+    );
+  });
   setupMic($("globalMic"), (text) => {
     const lower = text.toLowerCase();
     if (lower.includes("map")) showModule("map");
