@@ -174,62 +174,111 @@ function initThree(container, { autoRotate = true, minDistance = 2.4, maxDistanc
   return root;
 }
 
-/** Dark military “satellite” albedo painted procedurally (no external tiles). */
-function makeSatelliteTexture() {
+/** Public-domain / open demo Earth textures (NOT Palantir assets). Dark ops tone applied in material. */
+const EARTH_TEX = {
+  // Blue Marble day (NASA-style equirectangular via three-globe examples CDN)
+  day: "https://cdn.jsdelivr.net/npm/three-globe@2.41.12/example/img/earth-blue-marble.jpg",
+  night: "https://cdn.jsdelivr.net/npm/three-globe@2.41.12/example/img/earth-night.jpg",
+  topo: "https://cdn.jsdelivr.net/npm/three-globe@2.41.12/example/img/earth-topology.png",
+  water: "https://cdn.jsdelivr.net/npm/three-globe@2.41.12/example/img/earth-water.png",
+  // NASA Visible Earth fallback (public)
+  nasaDay:
+    "https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57752/land_shallow_topo_2048.jpg",
+};
+
+function loadTexture(url) {
+  return new Promise((resolve, reject) => {
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin("anonymous");
+    loader.load(
+      url,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 8;
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        resolve(tex);
+      },
+      undefined,
+      reject,
+    );
+  });
+}
+
+async function loadSatelliteMaps() {
+  try {
+    const [day, night, topo, water] = await Promise.all([
+      loadTexture(EARTH_TEX.day),
+      loadTexture(EARTH_TEX.night),
+      loadTexture(EARTH_TEX.topo),
+      loadTexture(EARTH_TEX.water),
+    ]);
+    return { day, night, topo, water, source: "satellite-dark" };
+  } catch (err) {
+    console.warn("Primary satellite textures failed, trying NASA day map", err);
+    try {
+      const day = await loadTexture(EARTH_TEX.nasaDay);
+      return { day, night: null, topo: null, water: null, source: "nasa-day" };
+    } catch (err2) {
+      console.warn("NASA texture failed, procedural fallback", err2);
+      return { day: makeProceduralFallback(), night: null, topo: null, water: null, source: "procedural" };
+    }
+  }
+}
+
+function makeProceduralFallback() {
   const w = 2048;
   const h = 1024;
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
-
-  // Ocean base
-  const ocean = ctx.createLinearGradient(0, 0, 0, h);
-  ocean.addColorStop(0, "#061018");
-  ocean.addColorStop(0.5, "#0a1820");
-  ocean.addColorStop(1, "#061018");
-  ctx.fillStyle = ocean;
+  ctx.fillStyle = "#0a1820";
   ctx.fillRect(0, 0, w, h);
-
-  // Speckle / sensor noise
-  const img = ctx.getImageData(0, 0, w, h);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const n = (Math.random() - 0.5) * 10;
-    img.data[i] = Math.max(0, img.data[i] + n);
-    img.data[i + 1] = Math.max(0, img.data[i + 1] + n * 1.1);
-    img.data[i + 2] = Math.max(0, img.data[i + 2] + n * 0.8);
-  }
-  ctx.putImageData(img, 0, 0);
-
-  // Simplified landmass blobs (equirectangular-ish)
   const lands = [
-    [0.18, 0.38, 0.14, 0.18], [0.28, 0.32, 0.1, 0.12], [0.48, 0.3, 0.22, 0.16],
-    [0.62, 0.42, 0.16, 0.2], [0.72, 0.55, 0.08, 0.14], [0.12, 0.62, 0.08, 0.18],
-    [0.38, 0.68, 0.1, 0.16], [0.82, 0.28, 0.12, 0.1], [0.55, 0.58, 0.07, 0.08],
+    [0.18, 0.38, 0.14, 0.18], [0.48, 0.3, 0.22, 0.16], [0.62, 0.42, 0.16, 0.2],
+    [0.12, 0.62, 0.08, 0.18], [0.82, 0.28, 0.12, 0.1],
   ];
   for (const [cx, cy, rw, rh] of lands) {
     const g = ctx.createRadialGradient(cx * w, cy * h, 0, cx * w, cy * h, Math.max(rw, rh) * w);
-    g.addColorStop(0, "#1c3a2a");
-    g.addColorStop(0.45, "#143024");
+    g.addColorStop(0, "#2a4a38");
     g.addColorStop(1, "rgba(8,20,18,0)");
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.ellipse(cx * w, cy * h, rw * w, rh * h, 0, 0, Math.PI * 2);
     ctx.fill();
   }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
-  // Macro borders — cyan hairlines
-  ctx.strokeStyle = "rgba(61,214,255,0.28)";
-  ctx.lineWidth = 1.2;
-  for (const [cx, cy, rw, rh] of lands) {
-    ctx.beginPath();
-    ctx.ellipse(cx * w, cy * h, rw * w * 0.92, rh * h * 0.92, 0, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
-  // Lat/lon graticule
-  ctx.strokeStyle = "rgba(61,214,255,0.12)";
-  ctx.lineWidth = 1;
+/** Darken day map toward ops/military COP look while keeping continent detail. */
+function makeDarkOpsAlbedo(dayTex) {
+  const img = dayTex.image;
+  if (!img || !img.width) return dayTex;
+  const w = img.width;
+  const h = img.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+  // Crush brightness + teal military grade
+  ctx.globalCompositeOperation = "source-atop";
+  ctx.fillStyle = "rgba(4, 14, 18, 0.55)";
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = "multiply";
+  ctx.fillStyle = "rgba(90, 140, 130, 0.55)";
+  ctx.fillRect(0, 0, w, h);
+  // Cyan macro border hint on coasts via soft overlay
+  ctx.globalCompositeOperation = "screen";
+  ctx.fillStyle = "rgba(20, 60, 70, 0.15)";
+  ctx.fillRect(0, 0, w, h);
+  // Graticule
+  ctx.globalCompositeOperation = "source-over";
+  ctx.strokeStyle = "rgba(61,214,255,0.14)";
+  ctx.lineWidth = Math.max(1, w / 1400);
   for (let i = 1; i < 12; i++) {
     const y = (i / 12) * h;
     ctx.beginPath();
@@ -244,22 +293,10 @@ function makeSatelliteTexture() {
     ctx.lineTo(x, h);
     ctx.stroke();
   }
-
-  // Equator / prime stronger
-  ctx.strokeStyle = "rgba(61,255,154,0.22)";
-  ctx.beginPath();
-  ctx.moveTo(0, h / 2);
-  ctx.lineTo(w, h / 2);
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(61,214,255,0.2)";
-  ctx.beginPath();
-  ctx.moveTo(w / 2, 0);
-  ctx.lineTo(w / 2, h);
-  ctx.stroke();
-
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
+  tex.needsUpdate = true;
   return tex;
 }
 
@@ -283,117 +320,148 @@ function greatCirclePoints(a, b, radius, segments = 48) {
   return points;
 }
 
-function buildMap(root, tops) {
+async function buildMap(root, tops) {
   const R = 1.85;
-  const tex = makeSatelliteTexture();
-  const globe = new THREE.Mesh(
-    new THREE.SphereGeometry(R, 96, 96),
-    new THREE.MeshStandardMaterial({
-      map: tex,
-      color: 0xffffff,
-      metalness: 0.18,
-      roughness: 0.82,
-      emissive: 0x071510,
-      emissiveIntensity: 0.25,
-    }),
-  );
+  $("moduleLegend").textContent = "Map · loading satellite imagery…";
+  const maps = await loadSatelliteMaps();
+  if (state.module !== "map" || !state.rootGroup) return;
+
+  const albedo = makeDarkOpsAlbedo(maps.day);
+  const mat = new THREE.MeshStandardMaterial({
+    map: albedo,
+    color: 0xb8c8c4,
+    metalness: maps.water ? 0.35 : 0.15,
+    roughness: 0.78,
+    bumpMap: maps.topo || null,
+    bumpScale: maps.topo ? 0.045 : 0,
+    emissiveMap: maps.night || null,
+    emissive: maps.night ? new THREE.Color(0x3a6a88) : new THREE.Color(0x071510),
+    emissiveIntensity: maps.night ? 0.85 : 0.2,
+    roughnessMap: maps.water || null,
+  });
+
+  const globe = new THREE.Mesh(new THREE.SphereGeometry(R, 128, 128), mat);
   root.add(globe);
 
-  // Atmosphere shells
-  const atmo = new THREE.Mesh(
-    new THREE.SphereGeometry(R * 1.035, 64, 64),
-    new THREE.MeshBasicMaterial({
-      color: 0x3dd6ff,
-      transparent: true,
-      opacity: 0.08,
-      side: THREE.BackSide,
-      depthWrite: false,
-    }),
-  );
-  root.add(atmo);
-  const atmo2 = new THREE.Mesh(
-    new THREE.SphereGeometry(R * 1.08, 48, 48),
-    new THREE.MeshBasicMaterial({
-      color: 0x1a6a88,
-      transparent: true,
-      opacity: 0.045,
-      side: THREE.BackSide,
-      depthWrite: false,
-    }),
-  );
-  root.add(atmo2);
+  // Specular ocean hint shell
+  if (maps.water) {
+    const ocean = new THREE.Mesh(
+      new THREE.SphereGeometry(R * 1.0015, 96, 96),
+      new THREE.MeshStandardMaterial({
+        map: maps.water,
+        color: 0x0a3040,
+        transparent: true,
+        opacity: 0.22,
+        metalness: 0.85,
+        roughness: 0.25,
+        depthWrite: false,
+      }),
+    );
+    root.add(ocean);
+  }
 
-  // Night terminator sheen
-  const sheen = new THREE.Mesh(
-    new THREE.SphereGeometry(R * 1.002, 64, 64),
-    new THREE.MeshBasicMaterial({
-      color: 0x3dff9a,
-      transparent: true,
-      opacity: 0.04,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    }),
+  // Atmosphere shells (ops cyan)
+  root.add(
+    new THREE.Mesh(
+      new THREE.SphereGeometry(R * 1.035, 64, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0x3dd6ff,
+        transparent: true,
+        opacity: 0.09,
+        side: THREE.BackSide,
+        depthWrite: false,
+      }),
+    ),
   );
-  root.add(sheen);
+  root.add(
+    new THREE.Mesh(
+      new THREE.SphereGeometry(R * 1.09, 48, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0x145a72,
+        transparent: true,
+        opacity: 0.05,
+        side: THREE.BackSide,
+        depthWrite: false,
+      }),
+    ),
+  );
+
+  // Thin cyan country/coast wire overlay sphere
+  root.add(
+    new THREE.Mesh(
+      new THREE.SphereGeometry(R * 1.004, 72, 36),
+      new THREE.MeshBasicMaterial({
+        color: 0x3dd6ff,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.06,
+      }),
+    ),
+  );
 
   const markers = [];
   (tops || []).slice(0, 10).forEach((t, i) => {
-    const lat = Number.isFinite(t.lat) ? t.lat : (20 - i * 8);
-    const lon = Number.isFinite(t.lon) ? t.lon : (-40 + i * 28);
-    const pos = latLonToVec3(lat, lon, R * 1.02);
+    const lat = Number.isFinite(t.lat) ? t.lat : 20 - i * 8;
+    const lon = Number.isFinite(t.lon) ? t.lon : -40 + i * 28;
+    const pos = latLonToVec3(lat, lon, R * 1.018);
     const color = t.verified ? 0x3dff9a : 0xffc14a;
 
     const glowMat = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.5,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
     });
-    const glow = new THREE.Mesh(new THREE.SphereGeometry(0.09 + (t.score || 0.5) * 0.08, 16, 16), glowMat);
+    const glow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.1 + (t.score || 0.5) * 0.09, 20, 20),
+      glowMat,
+    );
     glow.position.copy(pos);
     root.add(glow);
     state.pulse.push({ mesh: glow, mat: glowMat, phase: i });
 
     const core = new THREE.Mesh(
-      new THREE.SphereGeometry(0.035 + (t.score || 0.5) * 0.03, 12, 12),
+      new THREE.SphereGeometry(0.032 + (t.score || 0.5) * 0.028, 14, 14),
       new THREE.MeshBasicMaterial({ color: 0xffffff }),
     );
     core.position.copy(pos);
     root.add(core);
 
-    // Beam along surface normal
     const normal = pos.clone().normalize();
-    const beamLen = 0.45 + (t.score || 0.5) * 0.25;
+    const beamLen = 0.42 + (t.score || 0.5) * 0.28;
     const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.01, 0.004, beamLen, 8),
-      new THREE.MeshBasicMaterial({ color: 0x3dd6ff, transparent: true, opacity: 0.7 }),
+      new THREE.CylinderGeometry(0.012, 0.003, beamLen, 10),
+      new THREE.MeshBasicMaterial({ color: 0x3dd6ff, transparent: true, opacity: 0.75 }),
     );
-    beam.position.copy(normal.clone().multiplyScalar(R * 1.02 + beamLen / 2));
+    beam.position.copy(normal.clone().multiplyScalar(R * 1.018 + beamLen / 2));
     beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
     root.add(beam);
 
     const label = makeSprite(t.title || t.id, true);
-    label.position.copy(normal.clone().multiplyScalar(R * 1.02 + beamLen + 0.12));
+    label.position.copy(normal.clone().multiplyScalar(R * 1.018 + beamLen + 0.14));
     root.add(label);
     markers.push(pos);
   });
 
-  // Great-circle links between consecutive tops
   for (let i = 0; i < markers.length - 1; i++) {
-    const pts = greatCirclePoints(markers[i], markers[i + 1], R * 1.03, 40);
-    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const pts = greatCirclePoints(markers[i], markers[i + 1], R * 1.035, 48);
     root.add(
       new THREE.Line(
-        geo,
-        new THREE.LineBasicMaterial({ color: 0x3dd6ff, transparent: true, opacity: 0.35 }),
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({ color: 0x3dd6ff, transparent: true, opacity: 0.4 }),
       ),
     );
   }
 
-  state.camera.position.set(0, 1.15, 5.2);
+  state.camera.position.set(0, 1.05, 4.9);
   state.controls.target.set(0, 0, 0);
-  state.controls.minDistance = 2.6;
-  state.controls.maxDistance = 12;
+  state.controls.minDistance = 2.55;
+  state.controls.maxDistance = 11;
+  $("moduleLegend").textContent =
+    maps.source === "procedural"
+      ? "Map · procedural fallback (satellite CDN blocked)"
+      : "Map · dark satellite COP · drag to orbit · public Earth imagery";
 }
 
 function buildPipeline(root, nodes, edges) {
@@ -671,9 +739,9 @@ async function showModule(mod) {
     chatPanel.hidden = true;
     gl.hidden = false;
     if (mod === "map") {
-      $("moduleLegend").textContent = "Map · 3D satellite · dark military · drag to orbit";
+      $("moduleLegend").textContent = "Map · loading satellite imagery…";
       const root = initThree(gl, { autoRotate: true, minDistance: 2.6, maxDistance: 12 });
-      buildMap(root, snap.tops);
+      await buildMap(root, snap.tops);
     } else if (mod === "pipeline") {
       $("moduleLegend").textContent = "Pipeline · 3D graph · zoomable";
       const root = initThree(gl, { autoRotate: false, minDistance: 3, maxDistance: 22 });
