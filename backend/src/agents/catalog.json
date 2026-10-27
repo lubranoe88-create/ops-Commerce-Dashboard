@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "description": "Curated starter pool for commerce revenue analysis and failure detection. Expand toward a larger GitHub agent collection later via addAgent/removeAgent.",
+  "ossBackends": {
+    "collection": ["browser-use"],
+    "orchestration": ["langgraph", "crewai"],
+    "preliminaryScore": ["pyod"],
+    "selectedAgents": ["finrobot", "fingpt"],
+    "postVerificationDeepen": ["openbusiness"],
+    "docs": "docs/OSS_INTEGRATION.md"
+  },
+  "agents": [
+    {
+      "id": "financial-analysis",
+      "name": "Financial analysis",
+      "enabled": true,
+      "domains": ["revenue", "filings", "margins", "cashflow"],
+      "keywords": [
+        "revenue", "fatturato", "bilancio", "earnings", "profit", "utile",
+        "10-k", "10-q", "xbrl", "filing", "ricavi", "cash flow", "margine"
+      ],
+      "description": "Interprets financial filings and revenue signals from registries.",
+      "ossTools": ["finrobot"]
+    },
+    {
+      "id": "market-research",
+      "name": "Market research",
+      "enabled": true,
+      "domains": ["demand", "competition", "pricing", "reviews", "traffic"],
+      "keywords": [
+        "market", "mercato", "domanda", "competitor", "prezzo", "pricing",
+        "trustpilot", "reviews", "recensioni", "similarweb", "traffico",
+        "marketplace", "alibaba", "etsy", "gumroad"
+      ],
+      "description": "Reads demand, pricing, reviews, and traffic as volume proxies.",
+      "ossTools": ["fingpt", "browser-use"]
+    },
+    {
+      "id": "supply-chain",
+      "name": "Supply chain",
+      "enabled": true,
+      "domains": ["logistics", "customs", "bottlenecks", "freight"],
+      "keywords": [
+        "supply chain", "filiera", "dogana", "customs", "import", "export",
+        "porto", "port", "freight", "noli", "shortage", "collo di bottiglia",
+        "gscpi", "container", "satellit"
+      ],
+      "description": "Tracks trade flows, freight pressure, and logistics bottlenecks.",
+      "ossTools": ["browser-use", "pyod"]
+    },
+    {
+      "id": "business-model",
+      "name": "Business model analysis",
+      "enabled": true,
+      "domains": ["model", "patents", "structure", "offshore"],
+      "keywords": [
+        "business model", "modello di business", "brevetto", "patent",
+        "holding", "offshore", "delaware", "luxembourg", "lussemburgo",
+        "whois", "dominio", "licensing", "licenza", "paddle", "stripe atlas"
+      ],
+      "description": "Maps how value is captured: patents, holdings, licenses, indie rails.",
+      "ossTools": ["openbusiness", "browser-use"],
+      "ossTrigger": "post_verification_only"
+    },
+    {
+      "id": "failure-detection",
+      "name": "Failure / insolvency detection",
+      "enabled": true,
+      "domains": ["insolvency", "bankruptcy", "distress"],
+      "keywords": [
+        "fallimento", "insolvenza", "bankruptcy", "insolvency", "liquidazione",
+        "chiusura", "default", "distress", "cessazione", "layoff", "licenziament"
+      ],
+      "description": "Flags business failure and distress signals across jurisdictions.",
+      "ossTools": ["finrobot", "fingpt", "pyod", "browser-use"]
+    },
+    {
+      "id": "hiring-signals",
+      "name": "Hiring signals",
+      "enabled": true,
+      "domains": ["workforce", "expansion"],
+      "keywords": [
+        "hiring", "assunzion", "linkedin", "indeed", "job", "lavoro",
+        "headcount", "recruit"
+      ],
+      "description": "Uses job posts as leading expansion or contraction indicators.",
+      "ossTools": ["browser-use", "pyod"]
+    }
+  ]
+}

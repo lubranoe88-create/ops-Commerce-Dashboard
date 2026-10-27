@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: ops-commerce-dashboard
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci --omit=dev
+    startCommand: node src/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 8787
+      - key: SITE_PASSWORD
+        value: CHANGE_ME_SITE_PASSWORD
+      - key: OPENROUTER_API_KEY
+        value: CHANGE_ME_OPENROUTER_KEY
+      - key: OPENROUTER_MODEL
+        value: meta-llama/llama-3.2-3b-instruct
+      - key: MEMORY_DB_PATH
+        value: /opt/render/project/src/data/memory.sqlite
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: VERIFICATION_THRESHOLD
+        value: "0.72"

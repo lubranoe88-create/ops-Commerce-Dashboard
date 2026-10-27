@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "pipeline": [
+    "mechanical_collection",
+    "preliminary_score",
+    "agent_router",
+    "selected_agents",
+    "openrouter_judge",
+    "memory",
+    "post_verification_deepen"
+  ],
+  "verified": [
+    {
+      "id": "browser-use",
+      "priority": 1,
+      "repo": "browser-use/browser-use",
+      "starsApprox": 119000,
+      "language": "Python",
+      "license": "MIT",
+      "stage": "mechanical_collection",
+      "fit": "verified",
+      "fitSummary": "Public-web collection for the 17 research leads; not a judge.",
+      "constraints": [
+        "Python + browser runtime",
+        "Respect site ToS and rate limits",
+        "Write raw artifacts only — never call OpenRouter per page"
+      ],
+      "installHeavyDeps": false,
+      "adapter": "browserUse"
+    },
+    {
+      "id": "langgraph",
+      "priority": 2,
+      "repo": "langchain-ai/langgraph",
+      "starsApprox": 44000,
+      "language": "Python",
+      "license": "MIT",
+      "stage": "agent_router",
+      "role": "primary_orchestrator",
+      "fit": "verified",
+      "fitSummary": "Stateful graph for router → selected agents → judge → memory.",
+      "constraints": [
+        "Python sidecar",
+        "OpenRouter only on final judge node (or via Node /api/chat)",
+        "Must not fan out LLM calls for collection"
+      ],
+      "installHeavyDeps": false,
+      "adapter": "langGraph"
+    },
+    {
+      "id": "crewai",
+      "priority": 2,
+      "repo": "crewAIInc/crewAI",
+      "starsApprox": 60000,
+      "language": "Python",
+      "license": "MIT",
+      "stage": "agent_router",
+      "role": "alternative_orchestrator",
+      "fit": "verified",
+      "fitSummary": "Role-based crews aligned with curated agent ids; alternative to LangGraph.",
+      "constraints": [
+        "Python sidecar",
+        "Same token policy as LangGraph"
+      ],
+      "installHeavyDeps": false,
+      "adapter": "crewAi"
+    },
+    {
+      "id": "pyod",
+      "priority": 3,
+      "repo": "yzhao062/pyod",
+      "starsApprox": 10000,
+      "language": "Python",
+      "license": "BSD-2-Clause",
+      "stage": "preliminary_score",
+      "fit": "verified",
+      "fitSummary": "Zero-token mechanical anomaly scores on collection features.",
+      "constraints": [
+        "Needs numeric feature matrices from collectors",
+        "No LLM dependency"
+      ],
+      "installHeavyDeps": false,
+      "adapter": "pyod"
+    },
+    {
+      "id": "finrobot",
+      "priority": 4,
+      "repo": "AI4Finance-Foundation/FinRobot",
+      "starsApprox": 8300,
+      "language": "Python",
+      "license": "Apache-2.0",
+      "stage": "selected_agents",
+      "mapsToAgents": ["financial-analysis", "failure-detection"],
+      "fit": "verified_limited",
+      "fitSummary": "Formal finance/filing/risk dossiers only when router selects finance agents.",
+      "constraints": [
+        "Weak alone on low-capital informal commerce",
+        "Heavy Python stack — sidecar later",
+        "Normalize outputs to dossier schema"
+      ],
+      "installHeavyDeps": false,
+      "adapter": "finRobot"
+    },
+    {
+      "id": "fingpt",
+      "priority": 5,
+      "repo": "AI4Finance-Foundation/FinGPT",
+      "starsApprox": 21000,
+      "language": "Python",
+      "license": "MIT",
+      "stage": "selected_agents",
+      "mapsToAgents": ["market-research", "failure-detection"],
+      "fit": "verified_limited",
+      "fitSummary": "Finance NLP assist for news/sentiment; not a global low-cap ranker.",
+      "constraints": [
+        "Prefer local inference over OpenRouter",
+        "Model/weight size may be large",
+        "Router-gated only"
+      ],
+      "installHeavyDeps": false,
+      "adapter": "finGpt"
+    },
+    {
+      "id": "openbusiness",
+      "priority": 6,
+      "repo": "wanikua/OpenBusiness",
+      "starsApprox": 12,
+      "language": "Python",
+      "license": "MIT",
+      "stage": "post_verification_deepen",
+      "mapsToAgents": ["business-model"],
+      "fit": "verified_post_verification_only",
+      "fitSummary": "Business model / sector / core operations from public evidence; second-level deepen after revenue verification.",
+      "trigger": "only_after_revenues_verified",
+      "constraints": [
+        "Do not run on raw unverified stream",
+        "Early/low-star project — monitor quality",
+        "External search/scrape providers may need keys",
+        "LLM spend only on confirmed top businesses"
+      ],
+      "alternatives": [
+        {
+          "id": "gpt-researcher",
+          "repo": "assafelovic/gpt-researcher",
+          "starsApprox": 30000,
+          "license": "Apache-2.0",
+          "note": "Generic deep research fallback for company dossiers"
+        }
+      ],
+      "installHeavyDeps": false,
+      "adapter": "openBusiness"
+    }
+  ],
+  "rejectedAsCore": [
+    {
+      "id": "TradingAgents",
+      "reason": "Trading-first; poor fit for all-sector low-cap commerce tops"
+    },
+    {
+      "id": "daily_stock_analysis",
+      "reason": "Equity market intel, not invisible commerce failures worldwide"
+    },
+    {
+      "id": "ai-hedge-fund",
+      "reason": "Hedge-fund simulation domain"
+    },
+    {
+      "id": "qlib",
+      "reason": "Quant investment platform, not commerce discovery"
+    }
+  ]
+}

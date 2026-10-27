@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ops Dashboard — Commerce Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;650&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">OPS · COMMERCE INTEL</div>
+      <div id="healthBadge" class="health warn">HEALTH —</div>
+      <nav class="nav" id="moduleNav">
+        <button data-module="map" class="active">Map</button>
+        <button data-module="pipeline">Pipeline</button>
+        <button data-module="memory">Memory</button>
+        <button data-module="chat">Chat</button>
+      </nav>
+      <button id="globalMic" class="icon-btn mic" title="Voice command (all modules)">MIC</button>
+      <button id="logoutBtn" class="pill-btn" title="Logout">Logout</button>
+    </header>
+
+    <main class="stage">
+      <section class="viewport" id="viewport">
+        <div class="overlay-hud">
+          <div class="legend" id="moduleLegend">Loading…</div>
+          <div class="legend mono" id="coverageMini"></div>
+        </div>
+        <div id="glCanvas" style="position:absolute;inset:0;"></div>
+        <div id="chatPanel" class="chat-wrap" hidden>
+          <div class="threads" id="threadList"></div>
+          <div class="messages" id="messageList"></div>
+          <div class="composer">
+            <button id="chatMic" class="icon-btn mic" title="Dictate">MIC</button>
+            <input id="chatInput" type="text" placeholder="Ask about tops, sources, memory…" autocomplete="off" />
+            <button id="sendChat" class="pill-btn primary">Send</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side" id="sidePanel">
+        <h2 id="sideTitle">Ops</h2>
+        <div id="sideBody" class="list"></div>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <span id="footerLeft">Verification threshold raised · mechanical first</span>
+      <span id="footerRight" class="mono"></span>
+    </footer>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
