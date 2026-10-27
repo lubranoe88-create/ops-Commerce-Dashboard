@@ -61,11 +61,11 @@ export function lodFromHeight(meters) {
 }
 
 function applyDarkOpsImagery(Cesium, layer) {
-  // Crush satellite toward dark military COP without proprietary styles
-  layer.brightness = 0.72;
-  layer.contrast = 1.25;
-  layer.gamma = 0.85;
-  layer.saturation = 0.55;
+  // Dark UI chrome, but landmasses must stay readable (raised vs prior crush)
+  layer.brightness = 1.12;
+  layer.contrast = 1.22;
+  layer.gamma = 1.02;
+  layer.saturation = 0.8;
 }
 
 function buildImagery(Cesium, viewer) {
@@ -89,7 +89,7 @@ function buildImagery(Cesium, viewer) {
       credit: "Esri Boundaries",
     }),
   );
-  ref.alpha = 0.55;
+  ref.alpha = 0.7;
 
   // Transportation / streets — fades in as we descend (toggled by LOD watcher)
   const roads = viewer.imageryLayers.addImageryProvider(
@@ -153,26 +153,27 @@ function addTopEntities(Cesium, viewer, tops) {
       name: t.title || t.id,
       position: Cesium.Cartesian3.fromDegrees(lon, lat),
       point: {
-        pixelSize: 10 + (t.score || 0.5) * 8,
+        pixelSize: 14 + (t.score || 0.5) * 10,
         color: Cesium.Color.WHITE,
         outlineColor: color,
-        outlineWidth: 3,
+        outlineWidth: 4,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        scaleByDistance: new Cesium.NearFarScalar(1.5e3, 1.4, 8.0e6, 0.55),
+        scaleByDistance: new Cesium.NearFarScalar(1.5e3, 1.55, 8.0e6, 0.65),
       },
       label: {
         text: t.title || t.id,
-        font: "600 12px IBM Plex Sans, sans-serif",
-        fillColor: Cesium.Color.fromCssColorString("#d7e0ea"),
+        font: "650 13px IBM Plex Sans, sans-serif",
+        fillColor: Cesium.Color.fromCssColorString("#f2f6fa"),
         outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 3,
+        outlineWidth: 4,
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        pixelOffset: new Cesium.Cartesian2(0, -16),
+        pixelOffset: new Cesium.Cartesian2(0, -18),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        scaleByDistance: new Cesium.NearFarScalar(2.0e3, 1.0, 6.0e6, 0.0),
+        scaleByDistance: new Cesium.NearFarScalar(2.0e3, 1.05, 6.0e6, 0.15),
         showBackground: true,
-        backgroundColor: Cesium.Color.fromCssColorString("#0a1018").withAlpha(0.72),
+        backgroundColor: Cesium.Color.fromCssColorString("#0a1018").withAlpha(0.9),
+        backgroundPadding: new Cesium.Cartesian2(8, 5),
       },
       description: `${t.region || ""} · score ${Math.round((t.score || 0) * 100)}%`,
     });

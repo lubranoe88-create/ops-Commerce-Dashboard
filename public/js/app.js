@@ -256,8 +256,8 @@ function makeProceduralFallback() {
 }
 
 /**
- * Gotham/AIP-like dark ops grade: near-black oceans, muted continents,
- * hairline cyan graticule. Public Blue Marble only — no Palantir tiles.
+ * Dark-ops grade with legible continents (public Blue Marble — no Palantir tiles).
+ * Oceans stay dark teal-black; land keeps most Blue Marble luminance.
  */
 function makeDarkOpsAlbedo(dayTex, topoTex) {
   const img = dayTex.image;
@@ -270,15 +270,14 @@ function makeDarkOpsAlbedo(dayTex, topoTex) {
   const ctx = canvas.getContext("2d");
   ctx.drawImage(img, 0, 0);
 
-  // Optional topo modulate for continental relief read
+  // Light topo for relief only — do not crush land
   if (topoTex?.image) {
     ctx.globalCompositeOperation = "overlay";
-    ctx.globalAlpha = 0.35;
+    ctx.globalAlpha = 0.18;
     ctx.drawImage(topoTex.image, 0, 0, w, h);
     ctx.globalAlpha = 1;
   }
 
-  // Crush to near-black COP grade
   const data = ctx.getImageData(0, 0, w, h);
   const px = data.data;
   for (let i = 0; i < px.length; i += 4) {
@@ -286,36 +285,34 @@ function makeDarkOpsAlbedo(dayTex, topoTex) {
     let g = px[i + 1];
     let b = px[i + 2];
     const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    // Oceans (low green relative / blue-dominant low lum) → near black with teal whisper
-    const isOcean = lum < 78 && b >= g * 0.92;
+    const isOcean = lum < 72 && b >= g * 0.9 && b >= r * 0.95;
     if (isOcean) {
-      px[i] = 4 + lum * 0.04;
-      px[i + 1] = 8 + lum * 0.06;
-      px[i + 2] = 12 + lum * 0.1;
+      // Readable dark ocean (not crushed to void)
+      px[i] = 12 + lum * 0.12;
+      px[i + 1] = 22 + lum * 0.16;
+      px[i + 2] = 32 + lum * 0.22;
     } else {
-      // Continents: desaturate, darken, keep relief
-      const des = lum;
-      r = des * 0.28 + r * 0.12;
-      g = des * 0.34 + g * 0.18;
-      b = des * 0.26 + b * 0.1;
-      // Lift ridges slightly
-      const lift = Math.max(0, lum - 90) * 0.15;
-      px[i] = Math.min(255, r * 0.55 + 18 + lift);
-      px[i + 1] = Math.min(255, g * 0.62 + 28 + lift * 1.1);
-      px[i + 2] = Math.min(255, b * 0.5 + 22 + lift * 0.7);
+      // Keep ~80–90% of source luminance, mild cool desaturate
+      const lift = Math.max(0, lum - 70) * 0.22;
+      const nr = lum * 0.22 + r * 0.58 + 28 + lift;
+      const ng = lum * 0.2 + g * 0.62 + 32 + lift;
+      const nb = lum * 0.18 + b * 0.5 + 30 + lift * 0.85;
+      px[i] = Math.min(255, nr);
+      px[i + 1] = Math.min(255, ng);
+      px[i + 2] = Math.min(255, nb);
     }
   }
   ctx.putImageData(data, 0, 0);
 
-  // Soft teal grade pass
+  // Very light teal grade — legibility first
   ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = "rgba(70, 110, 105, 0.55)";
+  ctx.fillStyle = "rgba(140, 170, 165, 0.18)";
   ctx.fillRect(0, 0, w, h);
   ctx.globalCompositeOperation = "source-over";
 
-  // Hairline graticule baked into albedo (screen-space thin)
-  ctx.strokeStyle = "rgba(90, 190, 220, 0.11)";
-  ctx.lineWidth = Math.max(1, w / 2200);
+  // Hairline graticule (visible over land)
+  ctx.strokeStyle = "rgba(120, 210, 235, 0.22)";
+  ctx.lineWidth = Math.max(1, w / 1800);
   for (let i = 1; i < 18; i++) {
     const y = (i / 18) * h;
     ctx.beginPath();
@@ -330,8 +327,7 @@ function makeDarkOpsAlbedo(dayTex, topoTex) {
     ctx.lineTo(x, h);
     ctx.stroke();
   }
-  // Equator / prime slightly stronger
-  ctx.strokeStyle = "rgba(61, 214, 255, 0.2)";
+  ctx.strokeStyle = "rgba(61, 214, 255, 0.35)";
   ctx.beginPath();
   ctx.moveTo(0, h / 2);
   ctx.lineTo(w, h / 2);
@@ -385,9 +381,9 @@ function greatCirclePoints(a, b, radius, segments = 64) {
 
 function addHairlineGraticule(root, radius) {
   const mat = new THREE.LineBasicMaterial({
-    color: 0x5ec8e6,
+    color: 0x7adfff,
     transparent: true,
-    opacity: 0.14,
+    opacity: 0.28,
     depthWrite: false,
   });
   // Parallels every 20°
@@ -413,17 +409,22 @@ function makeMarkerRing(color) {
   canvas.width = 128;
   canvas.height = 128;
   const ctx = canvas.getContext("2d");
-  const g = ctx.createRadialGradient(64, 64, 8, 64, 64, 60);
-  g.addColorStop(0, "rgba(255,255,255,0.95)");
-  g.addColorStop(0.18, color);
-  g.addColorStop(0.45, color.replace(")", ",0.35)").replace("rgb", "rgba"));
+  const g = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(0.12, color);
+  g.addColorStop(0.4, color.replace(")", ",0.55)").replace("rgb", "rgba"));
   g.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 128, 128);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(64, 64, 28, 0, Math.PI * 2);
+  ctx.arc(64, 64, 26, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(64, 64, 32, 0, Math.PI * 2);
   ctx.stroke();
   const tex = new THREE.CanvasTexture(canvas);
   return new THREE.SpriteMaterial({
@@ -443,49 +444,49 @@ async function buildMap(root, tops) {
   const albedo = makeDarkOpsAlbedo(maps.day, maps.topo);
   const mat = new THREE.MeshStandardMaterial({
     map: albedo,
-    color: 0xc5d0cc,
-    metalness: 0.12,
-    roughness: 0.88,
+    color: 0xffffff,
+    metalness: 0.08,
+    roughness: 0.82,
     bumpMap: maps.topo || null,
-    bumpScale: maps.topo ? 0.085 : 0,
+    bumpScale: maps.topo ? 0.06 : 0,
     displacementMap: maps.topo || null,
-    displacementScale: maps.topo ? 0.028 : 0,
+    displacementScale: maps.topo ? 0.018 : 0,
     emissiveMap: maps.night || null,
-    emissive: maps.night ? new THREE.Color(0x1c4a5c) : new THREE.Color(0x050a0c),
-    emissiveIntensity: maps.night ? 1.05 : 0.15,
+    emissive: maps.night ? new THREE.Color(0x4a8aaa) : new THREE.Color(0x0a1218),
+    emissiveIntensity: maps.night ? 1.35 : 0.12,
   });
 
   const globe = new THREE.Mesh(new THREE.SphereGeometry(R, 160, 160), mat);
   root.add(globe);
 
-  // Near-black oceans with faint cyan specular glow (water mask)
+  // Soft ocean specular only — low opacity so land stays readable
   if (maps.water) {
     root.add(
       new THREE.Mesh(
         new THREE.SphereGeometry(R * 1.0012, 128, 128),
         new THREE.MeshStandardMaterial({
           map: maps.water,
-          color: 0x020608,
+          color: 0x0a1820,
           transparent: true,
-          opacity: 0.55,
-          metalness: 0.92,
-          roughness: 0.18,
-          emissive: new THREE.Color(0x0a2a33),
-          emissiveIntensity: 0.22,
+          opacity: 0.18,
+          metalness: 0.75,
+          roughness: 0.28,
+          emissive: new THREE.Color(0x0c3038),
+          emissiveIntensity: 0.15,
           depthWrite: false,
         }),
       ),
     );
   }
 
-  // Thin atmosphere — Palantir-like subtle limb glow
+  // Stronger limb atmosphere for silhouette against dark UI
   root.add(
     new THREE.Mesh(
       new THREE.SphereGeometry(R * 1.028, 64, 64),
       new THREE.MeshBasicMaterial({
-        color: 0x4db8d4,
+        color: 0x5ec8e6,
         transparent: true,
-        opacity: 0.07,
+        opacity: 0.11,
         side: THREE.BackSide,
         depthWrite: false,
       }),
@@ -495,9 +496,9 @@ async function buildMap(root, tops) {
     new THREE.Mesh(
       new THREE.SphereGeometry(R * 1.07, 48, 48),
       new THREE.MeshBasicMaterial({
-        color: 0x0d3a48,
+        color: 0x1a5a6e,
         transparent: true,
-        opacity: 0.045,
+        opacity: 0.07,
         side: THREE.BackSide,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
@@ -518,7 +519,7 @@ async function buildMap(root, tops) {
     const rgb = verified ? green : amber;
 
     const ring = new THREE.Sprite(makeMarkerRing(rgb));
-    const scale = 0.28 + (t.score || 0.5) * 0.22;
+    const scale = 0.36 + (t.score || 0.5) * 0.28;
     ring.scale.set(scale, scale, 1);
     ring.position.copy(pos);
     root.add(ring);
@@ -631,21 +632,22 @@ function buildPipeline(root, nodes, edges) {
 
 function makeSprite(text, compact = false) {
   const canvas = document.createElement("canvas");
-  canvas.width = compact ? 320 : 256;
-  canvas.height = compact ? 48 : 64;
+  canvas.width = compact ? 360 : 280;
+  canvas.height = compact ? 56 : 68;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "rgba(5,10,16,0.72)";
+  ctx.fillStyle = "rgba(6,12,20,0.92)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = "rgba(61,214,255,0.35)";
-  ctx.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
-  ctx.fillStyle = "#d7e0ea";
-  ctx.font = compact ? "20px IBM Plex Sans" : "22px IBM Plex Sans";
-  ctx.fillText(String(text).slice(0, compact ? 28 : 22), 10, compact ? 30 : 40);
+  ctx.strokeStyle = "rgba(61,214,255,0.75)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+  ctx.fillStyle = "#f2f6fa";
+  ctx.font = compact ? "600 22px IBM Plex Sans" : "600 24px IBM Plex Sans";
+  ctx.fillText(String(text).slice(0, compact ? 28 : 22), 12, compact ? 36 : 44);
   const tex = new THREE.CanvasTexture(canvas);
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
   const spr = new THREE.Sprite(mat);
-  spr.scale.set(compact ? 1.05 : 1.2, compact ? 0.16 : 0.3, 1);
+  spr.scale.set(compact ? 1.25 : 1.35, compact ? 0.2 : 0.34, 1);
   return spr;
 }
 
