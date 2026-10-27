@@ -214,12 +214,22 @@ function addTopEntities(Cesium, v, tops) {
   });
 }
 
+function setEntityPos(Cesium, entity, lon, lat) {
+  if (!Number.isFinite(lon) || !Number.isFinite(lat) || !entity) return false;
+  const cart = Cesium.Cartesian3.fromDegrees(lon, lat);
+  if (!Cesium.defined(cart)) return false;
+  entity.position = new Cesium.ConstantPositionProperty(cart);
+  return true;
+}
+
 function ensureHoverSelect(Cesium, v) {
+  // Never park entities at Cartesian3.ZERO (earth center) — breaks ENU / ellipse math.
+  const safePos = Cesium.Cartesian3.fromDegrees(12.5, 30.0);
   if (!hoverEntity) {
     hoverEntity = v.entities.add({
       id: "hover-ring",
       show: false,
-      position: Cesium.Cartesian3.ZERO,
+      position: safePos,
       ellipse: {
         semiMajorAxis: 120000,
         semiMinorAxis: 120000,
@@ -227,7 +237,8 @@ function ensureHoverSelect(Cesium, v) {
         outline: true,
         outlineColor: Cesium.Color.fromCssColorString("#3dd6ff").withAlpha(0.85),
         outlineWidth: 2,
-        height: 0,
+        height: 1,
+        heightReference: Cesium.HeightReference.NONE,
       },
     });
   }
@@ -235,7 +246,7 @@ function ensureHoverSelect(Cesium, v) {
     selectEntity = v.entities.add({
       id: "select-ring",
       show: false,
-      position: Cesium.Cartesian3.ZERO,
+      position: safePos,
       ellipse: {
         semiMajorAxis: 180000,
         semiMinorAxis: 180000,
@@ -243,7 +254,8 @@ function ensureHoverSelect(Cesium, v) {
         outline: true,
         outlineColor: Cesium.Color.fromCssColorString("#ffc14a"),
         outlineWidth: 2,
-        height: 0,
+        height: 1,
+        heightReference: Cesium.HeightReference.NONE,
       },
       label: {
         text: "",
@@ -267,17 +279,33 @@ function ringSizeForHeight(heightM) {
 }
 
 function pickCartesian(Cesium, v, windowPosition) {
-  const scene = v.scene;
-  const picked = scene.pick(windowPosition);
-  let cartesian = null;
-  if (Cesium.defined(picked) && picked.id && picked.id.position) {
-    cartesian = picked.id.position.getValue?.(v.clock.currentTime) || null;
+  if (
+    !windowPosition ||
+    !Cesium.defined(windowPosition) ||
+    !Number.isFinite(windowPosition.x) ||
+    !Number.isFinite(windowPosition.y)
+  ) {
+    return { picked: undefined, cartesian: null };
   }
-  if (!cartesian) {
-    const ray = v.camera.getPickRay(windowPosition);
-    if (ray) cartesian = scene.globe.pick(ray, scene);
+  try {
+    const scene = v.scene;
+    const picked = scene.pick(windowPosition);
+    let cartesian = null;
+    if (Cesium.defined(picked) && picked.id?.position) {
+      const pos = picked.id.position.getValue?.(v.clock.currentTime);
+      if (Cesium.defined(pos)) cartesian = pos;
+    }
+    if (!Cesium.defined(cartesian)) {
+      const ray = v.camera.getPickRay(windowPosition);
+      if (Cesium.defined(ray)) {
+        const hit = scene.globe.pick(ray, scene);
+        if (Cesium.defined(hit)) cartesian = hit;
+      }
+    }
+    return { picked, cartesian: Cesium.defined(cartesian) ? cartesian : null };
+  } catch {
+    return { picked: undefined, cartesian: null };
   }
-  return { picked, cartesian };
 }
 
 async function reverseGeocode(lat, lon) {
@@ -327,11 +355,12 @@ export async function searchPlace(query) {
 
 function showSelection(Cesium, { lon, lat, title, detail, kind, top }) {
   if (!selectEntity || !viewer) return;
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
   const h = viewer.camera.positionCartographic?.height || 1e6;
   const r = ringSizeForHeight(h);
-  selectEntity.position = Cesium.Cartesian3.fromDegrees(lon, lat);
-  selectEntity.ellipse.semiMajorAxis = r;
-  selectEntity.ellipse.semiMinorAxis = r;
+  if (!setEntityPos(Cesium, selectEntity, lon, lat)) return;
+  selectEntity.ellipse.semiMajorAxis = new Cesium.ConstantProperty(r);
+  selectEntity.ellipse.semiMinorAxis = new Cesium.ConstantProperty(r);
   selectEntity.label.text = title || "";
   selectEntity.show = true;
   const payload = {
@@ -395,33 +424,45 @@ function wireInteraction(Cesium, v) {
   handler.setInputAction(markInteract, Cesium.ScreenSpaceEventType.WHEEL);
   handler.setInputAction(markInteract, Cesium.ScreenSpaceEventType.PINCH_START);
 
-  // Hover highlight
+  // Hover highlight (guard undefined endPosition — common on iPad)
   handler.setInputAction((movement) => {
-    if (!hoverEntity) return;
-    const { picked, cartesian } = pickCartesian(Cesium, v, movement.endPosition);
-    if (!cartesian) {
-      hoverEntity.show = false;
-      v.canvas.style.cursor = "grab";
-      return;
+    try {
+      if (!hoverEntity) return;
+      const pos = movement?.endPosition || movement?.startPosition;
+      const { picked, cartesian } = pickCartesian(Cesium, v, pos);
+      if (!cartesian) {
+        hoverEntity.show = false;
+        v.canvas.style.cursor = "grab";
+        return;
+      }
+      const carto = Cesium.Cartographic.fromCartesian(cartesian);
+      if (!Cesium.defined(carto)) return;
+      const lon = Cesium.Math.toDegrees(carto.longitude);
+      const lat = Cesium.Math.toDegrees(carto.latitude);
+      const h = v.camera.positionCartographic?.height || 1e6;
+      const r = ringSizeForHeight(h) * 0.85;
+      if (!setEntityPos(Cesium, hoverEntity, lon, lat)) return;
+      hoverEntity.ellipse.semiMajorAxis = new Cesium.ConstantProperty(r);
+      hoverEntity.ellipse.semiMinorAxis = new Cesium.ConstantProperty(r);
+      hoverEntity.show = true;
+      const kind =
+        picked?.id?.properties?.kind?.getValue?.(v.clock.currentTime) ??
+        picked?.id?.properties?.kind;
+      v.canvas.style.cursor = kind === "top" ? "pointer" : "crosshair";
+    } catch (err) {
+      console.warn("hover pick skipped", err);
+      if (hoverEntity) hoverEntity.show = false;
     }
-    const carto = Cesium.Cartographic.fromCartesian(cartesian);
-    const lon = Cesium.Math.toDegrees(carto.longitude);
-    const lat = Cesium.Math.toDegrees(carto.latitude);
-    const h = v.camera.positionCartographic?.height || 1e6;
-    const r = ringSizeForHeight(h) * 0.85;
-    hoverEntity.position = Cesium.Cartesian3.fromDegrees(lon, lat);
-    hoverEntity.ellipse.semiMajorAxis = r;
-    hoverEntity.ellipse.semiMinorAxis = r;
-    hoverEntity.show = true;
-    v.canvas.style.cursor = picked?.id?.properties?.kind === "top" ? "pointer" : "crosshair";
   }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
   // Click / tap select
   handler.setInputAction(async (click) => {
     markInteract();
-    const { picked, cartesian } = pickCartesian(Cesium, v, click.position);
+    const pos = click?.position;
+    const { picked, cartesian } = pickCartesian(Cesium, v, pos);
     if (!cartesian) return;
     const carto = Cesium.Cartographic.fromCartesian(cartesian);
+    if (!Cesium.defined(carto)) return;
     const lon = Cesium.Math.toDegrees(carto.longitude);
     const lat = Cesium.Math.toDegrees(carto.latitude);
 
@@ -514,8 +555,13 @@ function startOrbitDrift(Cesium, v) {
   stopOrbitDrift();
   const tick = () => {
     if (!viewer || viewer.isDestroyed?.()) return;
-    if (!userInteracting) {
-      v.scene.camera.rotate(Cesium.Cartesian3.UNIT_Z, -0.00035);
+    try {
+      if (!userInteracting && Cesium.defined(v.camera?.positionWC)) {
+        // Rotate about world Z only when camera position is valid
+        v.camera.rotate(Cesium.Cartesian3.UNIT_Z, -0.00035);
+      }
+    } catch (err) {
+      console.warn("orbit drift skipped", err);
     }
     orbitTick = requestAnimationFrame(tick);
   };
@@ -569,6 +615,14 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   viewer = new Cesium.Viewer(container, viewerOpts);
   hoverEntity = null;
   selectEntity = null;
+
+  // Soften Cesium crash panel; log instead of hard-stopping UX when possible
+  if (viewer.cesiumWidget) {
+    viewer.cesiumWidget.showErrorPanel = (title, message, error) => {
+      console.error("[cesium]", title, message, error);
+    };
+  }
+  viewer.scene.rethrowRenderErrors = false;
 
   // Live render loop + sun motion (avoids "frozen still" look)
   viewer.clock.shouldAnimate = true;
