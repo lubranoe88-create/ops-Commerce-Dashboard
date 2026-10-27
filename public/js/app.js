@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { destroyMapGlobe, mountMapGlobe } from "./mapGlobe.js";
 
 const state = {
   module: "map",
@@ -16,6 +17,7 @@ const state = {
   autoRotate: true,
   resizeObserver: null,
   pulse: [],
+  mapEngine: "cesium", // progressive 5-level LOD satellite zoom
 };
 
 const $ = (id) => document.getElementById(id);
@@ -253,8 +255,11 @@ function makeProceduralFallback() {
   return tex;
 }
 
-/** Darken day map toward ops/military COP look while keeping continent detail. */
-function makeDarkOpsAlbedo(dayTex) {
+/**
+ * Gotham/AIP-like dark ops grade: near-black oceans, muted continents,
+ * hairline cyan graticule. Public Blue Marble only — no Palantir tiles.
+ */
+function makeDarkOpsAlbedo(dayTex, topoTex) {
   const img = dayTex.image;
   if (!img || !img.width) return dayTex;
   const w = img.width;
@@ -264,35 +269,78 @@ function makeDarkOpsAlbedo(dayTex) {
   canvas.height = h;
   const ctx = canvas.getContext("2d");
   ctx.drawImage(img, 0, 0);
-  // Crush brightness + teal military grade
-  ctx.globalCompositeOperation = "source-atop";
-  ctx.fillStyle = "rgba(4, 14, 18, 0.55)";
-  ctx.fillRect(0, 0, w, h);
+
+  // Optional topo modulate for continental relief read
+  if (topoTex?.image) {
+    ctx.globalCompositeOperation = "overlay";
+    ctx.globalAlpha = 0.35;
+    ctx.drawImage(topoTex.image, 0, 0, w, h);
+    ctx.globalAlpha = 1;
+  }
+
+  // Crush to near-black COP grade
+  const data = ctx.getImageData(0, 0, w, h);
+  const px = data.data;
+  for (let i = 0; i < px.length; i += 4) {
+    let r = px[i];
+    let g = px[i + 1];
+    let b = px[i + 2];
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    // Oceans (low green relative / blue-dominant low lum) → near black with teal whisper
+    const isOcean = lum < 78 && b >= g * 0.92;
+    if (isOcean) {
+      px[i] = 4 + lum * 0.04;
+      px[i + 1] = 8 + lum * 0.06;
+      px[i + 2] = 12 + lum * 0.1;
+    } else {
+      // Continents: desaturate, darken, keep relief
+      const des = lum;
+      r = des * 0.28 + r * 0.12;
+      g = des * 0.34 + g * 0.18;
+      b = des * 0.26 + b * 0.1;
+      // Lift ridges slightly
+      const lift = Math.max(0, lum - 90) * 0.15;
+      px[i] = Math.min(255, r * 0.55 + 18 + lift);
+      px[i + 1] = Math.min(255, g * 0.62 + 28 + lift * 1.1);
+      px[i + 2] = Math.min(255, b * 0.5 + 22 + lift * 0.7);
+    }
+  }
+  ctx.putImageData(data, 0, 0);
+
+  // Soft teal grade pass
   ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = "rgba(90, 140, 130, 0.55)";
+  ctx.fillStyle = "rgba(70, 110, 105, 0.55)";
   ctx.fillRect(0, 0, w, h);
-  // Cyan macro border hint on coasts via soft overlay
-  ctx.globalCompositeOperation = "screen";
-  ctx.fillStyle = "rgba(20, 60, 70, 0.15)";
-  ctx.fillRect(0, 0, w, h);
-  // Graticule
   ctx.globalCompositeOperation = "source-over";
-  ctx.strokeStyle = "rgba(61,214,255,0.14)";
-  ctx.lineWidth = Math.max(1, w / 1400);
-  for (let i = 1; i < 12; i++) {
-    const y = (i / 12) * h;
+
+  // Hairline graticule baked into albedo (screen-space thin)
+  ctx.strokeStyle = "rgba(90, 190, 220, 0.11)";
+  ctx.lineWidth = Math.max(1, w / 2200);
+  for (let i = 1; i < 18; i++) {
+    const y = (i / 18) * h;
     ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(w, y);
     ctx.stroke();
   }
-  for (let i = 1; i < 24; i++) {
-    const x = (i / 24) * w;
+  for (let i = 1; i < 36; i++) {
+    const x = (i / 36) * w;
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, h);
     ctx.stroke();
   }
+  // Equator / prime slightly stronger
+  ctx.strokeStyle = "rgba(61, 214, 255, 0.2)";
+  ctx.beginPath();
+  ctx.moveTo(0, h / 2);
+  ctx.lineTo(w, h / 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(w / 2, 0);
+  ctx.lineTo(w / 2, h);
+  ctx.stroke();
+
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
@@ -310,14 +358,80 @@ function latLonToVec3(lat, lon, radius) {
   );
 }
 
-function greatCirclePoints(a, b, radius, segments = 48) {
+function slerpVec(a, b, t) {
+  const aa = a.clone().normalize();
+  const bb = b.clone().normalize();
+  let dot = THREE.MathUtils.clamp(aa.dot(bb), -1, 1);
+  const omega = Math.acos(dot);
+  if (omega < 1e-4) return aa.lerp(bb, t).normalize();
+  const so = Math.sin(omega);
+  return aa
+    .multiplyScalar(Math.sin((1 - t) * omega) / so)
+    .add(bb.multiplyScalar(Math.sin(t * omega) / so))
+    .normalize();
+}
+
+function greatCirclePoints(a, b, radius, segments = 64) {
   const points = [];
+  const altitude = 1.0;
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
-    const v = new THREE.Vector3().copy(a).lerp(b, t).normalize().multiplyScalar(radius);
-    points.push(v);
+    // Arc loft: peak mid-arc for COP link readability
+    const loft = 1 + Math.sin(Math.PI * t) * 0.06 * altitude;
+    points.push(slerpVec(a, b, t).multiplyScalar(radius * loft));
   }
   return points;
+}
+
+function addHairlineGraticule(root, radius) {
+  const mat = new THREE.LineBasicMaterial({
+    color: 0x5ec8e6,
+    transparent: true,
+    opacity: 0.14,
+    depthWrite: false,
+  });
+  // Parallels every 20°
+  for (let lat = -60; lat <= 60; lat += 20) {
+    const pts = [];
+    for (let lon = -180; lon <= 180; lon += 4) {
+      pts.push(latLonToVec3(lat, lon, radius));
+    }
+    root.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+  }
+  // Meridians every 30°
+  for (let lon = -180; lon < 180; lon += 30) {
+    const pts = [];
+    for (let lat = -90; lat <= 90; lat += 3) {
+      pts.push(latLonToVec3(lat, lon, radius));
+    }
+    root.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat.clone()));
+  }
+}
+
+function makeMarkerRing(color) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  const g = ctx.createRadialGradient(64, 64, 8, 64, 64, 60);
+  g.addColorStop(0, "rgba(255,255,255,0.95)");
+  g.addColorStop(0.18, color);
+  g.addColorStop(0.45, color.replace(")", ",0.35)").replace("rgb", "rgba"));
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(64, 64, 28, 0, Math.PI * 2);
+  ctx.stroke();
+  const tex = new THREE.CanvasTexture(canvas);
+  return new THREE.SpriteMaterial({
+    map: tex,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
 }
 
 async function buildMap(root, tops) {
@@ -326,48 +440,52 @@ async function buildMap(root, tops) {
   const maps = await loadSatelliteMaps();
   if (state.module !== "map" || !state.rootGroup) return;
 
-  const albedo = makeDarkOpsAlbedo(maps.day);
+  const albedo = makeDarkOpsAlbedo(maps.day, maps.topo);
   const mat = new THREE.MeshStandardMaterial({
     map: albedo,
-    color: 0xb8c8c4,
-    metalness: maps.water ? 0.35 : 0.15,
-    roughness: 0.78,
+    color: 0xc5d0cc,
+    metalness: 0.12,
+    roughness: 0.88,
     bumpMap: maps.topo || null,
-    bumpScale: maps.topo ? 0.045 : 0,
+    bumpScale: maps.topo ? 0.085 : 0,
+    displacementMap: maps.topo || null,
+    displacementScale: maps.topo ? 0.028 : 0,
     emissiveMap: maps.night || null,
-    emissive: maps.night ? new THREE.Color(0x3a6a88) : new THREE.Color(0x071510),
-    emissiveIntensity: maps.night ? 0.85 : 0.2,
-    roughnessMap: maps.water || null,
+    emissive: maps.night ? new THREE.Color(0x1c4a5c) : new THREE.Color(0x050a0c),
+    emissiveIntensity: maps.night ? 1.05 : 0.15,
   });
 
-  const globe = new THREE.Mesh(new THREE.SphereGeometry(R, 128, 128), mat);
+  const globe = new THREE.Mesh(new THREE.SphereGeometry(R, 160, 160), mat);
   root.add(globe);
 
-  // Specular ocean hint shell
+  // Near-black oceans with faint cyan specular glow (water mask)
   if (maps.water) {
-    const ocean = new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.0015, 96, 96),
-      new THREE.MeshStandardMaterial({
-        map: maps.water,
-        color: 0x0a3040,
-        transparent: true,
-        opacity: 0.22,
-        metalness: 0.85,
-        roughness: 0.25,
-        depthWrite: false,
-      }),
+    root.add(
+      new THREE.Mesh(
+        new THREE.SphereGeometry(R * 1.0012, 128, 128),
+        new THREE.MeshStandardMaterial({
+          map: maps.water,
+          color: 0x020608,
+          transparent: true,
+          opacity: 0.55,
+          metalness: 0.92,
+          roughness: 0.18,
+          emissive: new THREE.Color(0x0a2a33),
+          emissiveIntensity: 0.22,
+          depthWrite: false,
+        }),
+      ),
     );
-    root.add(ocean);
   }
 
-  // Atmosphere shells (ops cyan)
+  // Thin atmosphere — Palantir-like subtle limb glow
   root.add(
     new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.035, 64, 64),
+      new THREE.SphereGeometry(R * 1.028, 64, 64),
       new THREE.MeshBasicMaterial({
-        color: 0x3dd6ff,
+        color: 0x4db8d4,
         transparent: true,
-        opacity: 0.09,
+        opacity: 0.07,
         side: THREE.BackSide,
         depthWrite: false,
       }),
@@ -375,93 +493,101 @@ async function buildMap(root, tops) {
   );
   root.add(
     new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.09, 48, 48),
+      new THREE.SphereGeometry(R * 1.07, 48, 48),
       new THREE.MeshBasicMaterial({
-        color: 0x145a72,
+        color: 0x0d3a48,
         transparent: true,
-        opacity: 0.05,
+        opacity: 0.045,
         side: THREE.BackSide,
         depthWrite: false,
+        blending: THREE.AdditiveBlending,
       }),
     ),
   );
 
-  // Thin cyan country/coast wire overlay sphere
-  root.add(
-    new THREE.Mesh(
-      new THREE.SphereGeometry(R * 1.004, 72, 36),
-      new THREE.MeshBasicMaterial({
-        color: 0x3dd6ff,
-        wireframe: true,
-        transparent: true,
-        opacity: 0.06,
-      }),
-    ),
-  );
+  addHairlineGraticule(root, R * 1.006);
 
   const markers = [];
+  const green = "rgb(61,255,154)";
+  const amber = "rgb(255,193,74)";
   (tops || []).slice(0, 10).forEach((t, i) => {
     const lat = Number.isFinite(t.lat) ? t.lat : 20 - i * 8;
     const lon = Number.isFinite(t.lon) ? t.lon : -40 + i * 28;
-    const pos = latLonToVec3(lat, lon, R * 1.018);
-    const color = t.verified ? 0x3dff9a : 0xffc14a;
+    const pos = latLonToVec3(lat, lon, R * 1.02);
+    const verified = Boolean(t.verified);
+    const rgb = verified ? green : amber;
 
-    const glowMat = new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.5,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const glow = new THREE.Mesh(
-      new THREE.SphereGeometry(0.1 + (t.score || 0.5) * 0.09, 20, 20),
-      glowMat,
-    );
-    glow.position.copy(pos);
-    root.add(glow);
-    state.pulse.push({ mesh: glow, mat: glowMat, phase: i });
+    const ring = new THREE.Sprite(makeMarkerRing(rgb));
+    const scale = 0.28 + (t.score || 0.5) * 0.22;
+    ring.scale.set(scale, scale, 1);
+    ring.position.copy(pos);
+    root.add(ring);
+    state.pulse.push({ mesh: ring, phase: i });
 
     const core = new THREE.Mesh(
-      new THREE.SphereGeometry(0.032 + (t.score || 0.5) * 0.028, 14, 14),
+      new THREE.SphereGeometry(0.022 + (t.score || 0.5) * 0.018, 16, 16),
       new THREE.MeshBasicMaterial({ color: 0xffffff }),
     );
     core.position.copy(pos);
     root.add(core);
 
     const normal = pos.clone().normalize();
-    const beamLen = 0.42 + (t.score || 0.5) * 0.28;
+    const beamLen = 0.28 + (t.score || 0.5) * 0.2;
     const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.012, 0.003, beamLen, 10),
-      new THREE.MeshBasicMaterial({ color: 0x3dd6ff, transparent: true, opacity: 0.75 }),
+      new THREE.CylinderGeometry(0.006, 0.002, beamLen, 8),
+      new THREE.MeshBasicMaterial({
+        color: verified ? 0x3dff9a : 0x3dd6ff,
+        transparent: true,
+        opacity: 0.65,
+      }),
     );
-    beam.position.copy(normal.clone().multiplyScalar(R * 1.018 + beamLen / 2));
+    beam.position.copy(normal.clone().multiplyScalar(R * 1.02 + beamLen / 2));
     beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
     root.add(beam);
 
     const label = makeSprite(t.title || t.id, true);
-    label.position.copy(normal.clone().multiplyScalar(R * 1.018 + beamLen + 0.14));
+    label.position.copy(normal.clone().multiplyScalar(R * 1.02 + beamLen + 0.12));
     root.add(label);
-    markers.push(pos);
+    markers.push({ pos, verified, score: t.score || 0.5 });
   });
 
+  // High-confidence arcs only (verified pairs / consecutive tops)
   for (let i = 0; i < markers.length - 1; i++) {
-    const pts = greatCirclePoints(markers[i], markers[i + 1], R * 1.035, 48);
+    if (!(markers[i].score > 0.7 && markers[i + 1].score > 0.7)) continue;
+    const pts = greatCirclePoints(markers[i].pos, markers[i + 1].pos, R * 1.01, 72);
     root.add(
       new THREE.Line(
         new THREE.BufferGeometry().setFromPoints(pts),
-        new THREE.LineBasicMaterial({ color: 0x3dd6ff, transparent: true, opacity: 0.4 }),
+        new THREE.LineBasicMaterial({
+          color: 0x3dd6ff,
+          transparent: true,
+          opacity: 0.42,
+        }),
+      ),
+    );
+    // Soft pulse twin (wider, dimmer)
+    root.add(
+      new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({
+          color: 0x7adfff,
+          transparent: true,
+          opacity: 0.12,
+        }),
       ),
     );
   }
 
-  state.camera.position.set(0, 1.05, 4.9);
+  state.camera.position.set(0.15, 0.85, 4.55);
   state.controls.target.set(0, 0, 0);
-  state.controls.minDistance = 2.55;
-  state.controls.maxDistance = 11;
+  state.controls.minDistance = 2.5;
+  state.controls.maxDistance = 10;
+  state.autoRotate = true;
   $("moduleLegend").textContent =
     maps.source === "procedural"
-      ? "Map · procedural fallback (satellite CDN blocked)"
-      : "Map · dark satellite COP · drag to orbit · public Earth imagery";
+      ? "Map · procedural fallback"
+      : "GLOBE · dark satellite COP · public Blue Marble · drag to orbit";
+  $("coverageMini").textContent = "Layer: satellite · tops · arcs · atmosphere";
 }
 
 function buildPipeline(root, nodes, edges) {
@@ -664,6 +790,36 @@ function sideForModule(mod, snap) {
         await refresh();
       });
     });
+    // Zoom affordances for 5-level LOD globe
+    const zoomHelp = document.createElement("div");
+    zoomHelp.className = "card";
+    zoomHelp.innerHTML = `<strong>5D zoom</strong>
+      <div class="muted">Scroll: orbita → continente → paese → città → strade → dettaglio. Tile satellitari fino a Z19 + overlay vie.</div>
+      <div class="actions" id="lodJumps"></div>`;
+    body.appendChild(zoomHelp);
+    const jumps = [
+      ["Continente", 12_000_000],
+      ["Paese", 1_500_000],
+      ["Città", 80_000],
+      ["Strade", 8_000],
+      ["Dettaglio", 600],
+    ];
+    const box = zoomHelp.querySelector("#lodJumps");
+    jumps.forEach(([label, h]) => {
+      const b = document.createElement("button");
+      b.className = "pill-btn";
+      b.textContent = label;
+      b.onclick = () => {
+        if (!window.Cesium) return;
+        const v = window.Cesium;
+        // fly relative to first top or Europe
+        const t0 = (state.snapshot?.tops || [])[0];
+        const lon = Number.isFinite(t0?.lon) ? t0.lon : 12.5;
+        const lat = Number.isFinite(t0?.lat) ? t0.lat : 42;
+        import("./mapGlobe.js").then(({ flyToTop }) => flyToTop(lon, lat, h));
+      };
+      box.appendChild(b);
+    });
   } else if (mod === "pipeline") {
     title.textContent = "Pipeline · errors";
     (snap.pipeline?.nodes || []).forEach((n) => {
@@ -731,6 +887,7 @@ async function showModule(mod) {
   const snap = state.snapshot || {};
   if (mod === "chat") {
     disposeScene();
+    destroyMapGlobe();
     gl.hidden = true;
     chatPanel.hidden = false;
     $("moduleLegend").textContent = "Chat · saved history · voice";
@@ -739,21 +896,45 @@ async function showModule(mod) {
     chatPanel.hidden = true;
     gl.hidden = false;
     if (mod === "map") {
-      $("moduleLegend").textContent = "Map · loading satellite imagery…";
-      const root = initThree(gl, { autoRotate: true, minDistance: 2.6, maxDistance: 12 });
-      await buildMap(root, snap.tops);
+      // Progressive 5-level LOD satellite globe (Cesium). Falls back to Three.js Blue Marble.
+      disposeScene();
+      $("moduleLegend").textContent = "Map · loading 5-level satellite LOD…";
+      try {
+        await mountMapGlobe(gl, {
+          tops: snap.tops,
+          onLod: (lod, heightM) => {
+            if (state.module !== "map") return;
+            const km = heightM > 1000 ? `${(heightM / 1000).toFixed(0)} km` : `${Math.round(heightM)} m`;
+            $("moduleLegend").textContent = `GLOBE 5D ZOOM · ${lod.label} · alt ${km}`;
+            $("coverageMini").textContent = `${lod.detail} · scroll to descend · L${lod.level}/5`;
+          },
+        });
+        state.mapEngine = "cesium";
+      } catch (err) {
+        console.warn("Cesium LOD globe failed, Three.js fallback", err);
+        state.mapEngine = "three";
+        destroyMapGlobe();
+        gl.innerHTML = "";
+        $("moduleLegend").textContent = "Map · Three.js satellite fallback…";
+        const root = initThree(gl, { autoRotate: true, minDistance: 2.6, maxDistance: 12 });
+        await buildMap(root, snap.tops);
+      }
     } else if (mod === "pipeline") {
+      destroyMapGlobe();
+      gl.innerHTML = "";
       $("moduleLegend").textContent = "Pipeline · 3D graph · zoomable";
       const root = initThree(gl, { autoRotate: false, minDistance: 3, maxDistance: 22 });
       buildPipeline(root, snap.pipeline?.nodes, snap.pipeline?.edges);
     } else if (mod === "memory") {
+      destroyMapGlobe();
+      gl.innerHTML = "";
       $("moduleLegend").textContent = "Memory · 5D rotatable graph · drag / scroll";
       const root = initThree(gl, { autoRotate: true, minDistance: 3, maxDistance: 18 });
       buildMemory(root, snap.memory?.concepts, snap.memory?.links);
     }
   }
   sideForModule(mod, snap);
-  renderCoverageMini(snap.coverage);
+  if (mod !== "map") renderCoverageMini(snap.coverage);
   if (snap.health) setHealth(snap.health);
 }
 

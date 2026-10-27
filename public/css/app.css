@@ -1,13 +1,14 @@
 :root {
-  --bg: #070a0f;
-  --panel: #0e141d;
-  --stroke: #1c2736;
-  --text: #d7e0ea;
-  --muted: #7f8b9a;
-  --cyan: #3dd6ff;
+  /* Foundry/Gotham-like COP chrome (colors only — no Palantir assets) */
+  --bg: #0b0e13;
+  --panel: #12171f;
+  --stroke: #243041;
+  --text: #d8dee8;
+  --muted: #8b96a8;
+  --cyan: #2ec4e6;
   --green: #3dff9a;
-  --amber: #ffc14a;
-  --red: #ff5a6a;
+  --amber: #e8b84a;
+  --red: #e85a6a;
   --font: "IBM Plex Sans", "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;
 }
@@ -113,6 +114,44 @@ a { color: var(--cyan); }
   display: block;
   width: 100% !important;
   height: 100% !important;
+}
+
+/* Cesium dark-ops embed */
+#glCanvas.cesium-ops,
+#glCanvas .cesium-viewer,
+#glCanvas .cesium-viewer-cesiumWidgetContainer,
+#glCanvas .cesium-widget,
+#glCanvas .cesium-widget canvas {
+  width: 100% !important;
+  height: 100% !important;
+  background: #05080d !important;
+}
+#glCanvas .cesium-viewer-bottom,
+#glCanvas .cesium-viewer-animationContainer,
+#glCanvas .cesium-viewer-timelineContainer {
+  display: none !important;
+}
+#glCanvas .cesium-viewer-toolbar {
+  top: 52px;
+  right: 10px;
+}
+#glCanvas .cesium-button {
+  background: rgba(12, 18, 26, 0.88);
+  border-color: var(--stroke);
+  color: var(--cyan);
+  fill: var(--cyan);
+}
+#glCanvas .cesium-infoBox {
+  background: rgba(12, 18, 26, 0.94);
+  border: 1px solid var(--stroke);
+  color: var(--text);
+  font-family: var(--font);
+}
+.overlay-hud .legend {
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 500;
 }
 .overlay-hud {
   position: absolute;
