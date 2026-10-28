@@ -216,8 +216,14 @@ function addTopEntities(Cesium, v, tops) {
 
 function setEntityPos(Cesium, entity, lon, lat) {
   if (!Number.isFinite(lon) || !Number.isFinite(lat) || !entity) return false;
-  const cart = Cesium.Cartesian3.fromDegrees(lon, lat);
-  if (!Cesium.defined(cart)) return false;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return false;
+  let cart;
+  try {
+    cart = Cesium.Cartesian3.fromDegrees(lon, lat, 0);
+  } catch {
+    return false;
+  }
+  if (!Cesium.defined(cart) || !Number.isFinite(cart.x + cart.y + cart.z)) return false;
   entity.position = new Cesium.ConstantPositionProperty(cart);
   return true;
 }
@@ -291,9 +297,22 @@ function pickCartesian(Cesium, v, windowPosition) {
     const scene = v.scene;
     const picked = scene.pick(windowPosition);
     let cartesian = null;
-    if (Cesium.defined(picked) && picked.id?.position) {
-      const pos = picked.id.position.getValue?.(v.clock.currentTime);
-      if (Cesium.defined(pos)) cartesian = pos;
+    const pickedId = picked?.id;
+    // Ignore internal hover/select rings — their position can be stale/hidden.
+    if (
+      Cesium.defined(picked) &&
+      pickedId?.position &&
+      pickedId.id !== "hover-ring" &&
+      pickedId.id !== "select-ring"
+    ) {
+      const pos = pickedId.position.getValue?.(v.clock.currentTime);
+      if (
+        Cesium.defined(pos) &&
+        Number.isFinite(pos.x + pos.y + pos.z) &&
+        !(pos.x === 0 && pos.y === 0 && pos.z === 0)
+      ) {
+        cartesian = pos;
+      }
     }
     if (!Cesium.defined(cartesian)) {
       const ray = v.camera.getPickRay(windowPosition);
@@ -357,12 +376,18 @@ function showSelection(Cesium, { lon, lat, title, detail, kind, top }) {
   if (!selectEntity || !viewer) return;
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
   const h = viewer.camera.positionCartographic?.height || 1e6;
-  const r = ringSizeForHeight(h);
+  const r = Math.max(500, ringSizeForHeight(h));
   if (!setEntityPos(Cesium, selectEntity, lon, lat)) return;
-  selectEntity.ellipse.semiMajorAxis = new Cesium.ConstantProperty(r);
-  selectEntity.ellipse.semiMinorAxis = new Cesium.ConstantProperty(r);
-  selectEntity.label.text = title || "";
-  selectEntity.show = true;
+  try {
+    selectEntity.ellipse.semiMajorAxis = new Cesium.ConstantProperty(r);
+    selectEntity.ellipse.semiMinorAxis = new Cesium.ConstantProperty(r);
+    if (selectEntity.label) selectEntity.label.text = title || "";
+    selectEntity.show = true;
+  } catch (err) {
+    console.warn("select ring update failed", err);
+    selectEntity.show = false;
+    return;
+  }
   const payload = {
     kind: kind || "place",
     title,
@@ -442,8 +467,9 @@ function wireInteraction(Cesium, v) {
       const h = v.camera.positionCartographic?.height || 1e6;
       const r = ringSizeForHeight(h) * 0.85;
       if (!setEntityPos(Cesium, hoverEntity, lon, lat)) return;
-      hoverEntity.ellipse.semiMajorAxis = new Cesium.ConstantProperty(r);
-      hoverEntity.ellipse.semiMinorAxis = new Cesium.ConstantProperty(r);
+      const rr = Math.max(500, r);
+      hoverEntity.ellipse.semiMajorAxis = new Cesium.ConstantProperty(rr);
+      hoverEntity.ellipse.semiMinorAxis = new Cesium.ConstantProperty(rr);
       hoverEntity.show = true;
       const kind =
         picked?.id?.properties?.kind?.getValue?.(v.clock.currentTime) ??

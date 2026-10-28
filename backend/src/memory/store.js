@@ -113,7 +113,7 @@ function seedIfEmpty(db) {
   ];
 
   const insertTop = db.prepare(
-    `INSERT INTO daily_tops (day_key, rank, business_key, display_name, score, payload_json)
+    `INSERT OR IGNORE INTO daily_tops (day_key, rank, business_key, display_name, score, payload_json)
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
   businesses.forEach((b, i) => {
@@ -153,7 +153,7 @@ function seedIfEmpty(db) {
   };
 
   const upsertSrc = db.prepare(
-    `INSERT INTO pipeline_source_stats
+    `INSERT OR IGNORE INTO pipeline_source_stats
       (day_key, source_key, daily_search_volume, verification_status, attached_agents)
      VALUES (?, ?, ?, ?, ?)`,
   );
@@ -170,12 +170,18 @@ function seedIfEmpty(db) {
     upsertSrc.run(day, s.key, vol, status, JSON.stringify(agentsBySource[s.key] || ["browser-use"]));
   }
 
-  db.prepare(
-    `INSERT INTO pipeline_errors (day_key, source_key, severity, cause_code, cause_text, impact)
-     VALUES (?, 'forums_telegram', 'suspicious', 'tos_block', 'Access throttled on import group scrape', 'quarantine'),
-            (?, 'whois', 'failed', 'timeout', 'RDAP upstream timeout', 'retry_scheduled')`,
-  ).run(day, day);
+  const errCount = db
+    .prepare(`SELECT COUNT(*) AS c FROM pipeline_errors WHERE day_key = ?`)
+    .get(day).c;
+  if (errCount === 0) {
+    db.prepare(
+      `INSERT INTO pipeline_errors (day_key, source_key, severity, cause_code, cause_text, impact)
+       VALUES (?, 'forums_telegram', 'suspicious', 'tos_block', 'Access throttled on import group scrape', 'quarantine'),
+              (?, 'whois', 'failed', 'timeout', 'RDAP upstream timeout', 'retry_scheduled')`,
+    ).run(day, day);
+  }
 
+  // Coverage + concepts are global (not day-scoped) — only seed once.
   const areas = [
     ["eu", "Europa", "geo", 72],
     ["na", "Nord America", "geo", 65],
@@ -185,32 +191,35 @@ function seedIfEmpty(db) {
     ["logistics", "Settore logistica", "sector", 55],
   ];
   const cov = db.prepare(
-    `INSERT INTO coverage_areas (area_key, label, kind, coverage_degree) VALUES (?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO coverage_areas (area_key, label, kind, coverage_degree) VALUES (?, ?, ?, ?)`,
   );
   for (const a of areas) cov.run(...a);
 
-  const concepts = [
-    "revenue-proxy",
-    "supply-bottleneck",
-    "insolvency-signal",
-    "hiring-surge",
-    "offshore-holding",
-    "verified-filing",
-  ];
-  const insC = db.prepare(
-    `INSERT INTO concepts (slug, label, mention_count, reliability_ema) VALUES (?, ?, ?, ?)`,
-  );
-  const ids = [];
-  for (const c of concepts) {
-    const r = insC.run(c, c.replace(/-/g, " "), 3 + Math.floor(Math.random() * 10), 0.55 + Math.random() * 0.4);
-    ids.push(Number(r.lastInsertRowid));
-  }
-  const link = db.prepare(
-    `INSERT INTO concept_links (from_concept_id, to_concept_id, weight, evidence_count)
-     VALUES (?, ?, ?, ?)`,
-  );
-  for (let i = 0; i < ids.length - 1; i++) {
-    link.run(ids[i], ids[i + 1], 1 + i, 1 + i);
+  const conceptCount = db.prepare(`SELECT COUNT(*) AS c FROM concepts`).get().c;
+  if (conceptCount === 0) {
+    const concepts = [
+      "revenue-proxy",
+      "supply-bottleneck",
+      "insolvency-signal",
+      "hiring-surge",
+      "offshore-holding",
+      "verified-filing",
+    ];
+    const insC = db.prepare(
+      `INSERT INTO concepts (slug, label, mention_count, reliability_ema) VALUES (?, ?, ?, ?)`,
+    );
+    const ids = [];
+    for (const c of concepts) {
+      const r = insC.run(c, c.replace(/-/g, " "), 3 + Math.floor(Math.random() * 10), 0.55 + Math.random() * 0.4);
+      ids.push(Number(r.lastInsertRowid));
+    }
+    const link = db.prepare(
+      `INSERT OR IGNORE INTO concept_links (from_concept_id, to_concept_id, weight, evidence_count)
+       VALUES (?, ?, ?, ?)`,
+    );
+    for (let i = 0; i < ids.length - 1; i++) {
+      link.run(ids[i], ids[i + 1], 1 + i, 1 + i);
+    }
   }
 }
 
@@ -220,6 +229,8 @@ export function getSourcesCatalog() {
 
 export function getDashboardSnapshot() {
   const db = getDb();
+  // Day rollover while the process stays up: reseed today's demo data if empty.
+  seedIfEmpty(db);
   const day = dayKey();
   const tops = db
     .prepare(

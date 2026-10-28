@@ -9,13 +9,15 @@ let dbInstance = null;
 
 export function defaultDbPath() {
   const fromEnv = process.env.MEMORY_DB_PATH?.trim();
-  if (fromEnv) return fromEnv;
-  return path.resolve(__dirname, "../../../data/memory.sqlite");
+  // Always resolve to an absolute path so cwd changes cannot fork a second DB.
+  if (fromEnv) return path.resolve(fromEnv);
+  return path.resolve(__dirname, "../../data/memory.sqlite");
 }
 
 export function openMemoryDb(dbPath = defaultDbPath()) {
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const db = new DatabaseSync(dbPath);
+  const resolved = path.resolve(dbPath);
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  const db = new DatabaseSync(resolved);
   db.exec("PRAGMA foreign_keys = ON;");
   const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
