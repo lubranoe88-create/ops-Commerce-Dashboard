@@ -174,10 +174,12 @@ function seedIfEmpty(db) {
     .prepare(`SELECT COUNT(*) AS c FROM pipeline_errors WHERE day_key = ?`)
     .get(day).c;
   if (errCount === 0) {
+    // Seed as resolved samples so the ops registry has content without
+    // forcing the health badge into degraded/bad on every new day.
     db.prepare(
-      `INSERT INTO pipeline_errors (day_key, source_key, severity, cause_code, cause_text, impact)
-       VALUES (?, 'forums_telegram', 'suspicious', 'tos_block', 'Access throttled on import group scrape', 'quarantine'),
-              (?, 'whois', 'failed', 'timeout', 'RDAP upstream timeout', 'retry_scheduled')`,
+      `INSERT INTO pipeline_errors (day_key, source_key, severity, cause_code, cause_text, impact, status)
+       VALUES (?, 'forums_telegram', 'suspicious', 'tos_block', 'Access throttled on import group scrape', 'quarantine', 'resolved'),
+              (?, 'whois', 'failed', 'timeout', 'RDAP upstream timeout', 'retry_scheduled', 'resolved')`,
     ).run(day, day);
   }
 
