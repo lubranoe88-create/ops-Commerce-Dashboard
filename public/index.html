@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;650&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=b8822a8" />
+  <link rel="stylesheet" href="/css/app.css?v=holo-touch-1" />
 </head>
 <body>
   <div id="app">
@@ -24,6 +24,45 @@
       <button id="globalMic" class="icon-btn mic" title="Voice command (all modules)">MIC</button>
       <button id="logoutBtn" class="pill-btn" title="Logout">Logout</button>
     </header>
+    <!-- Holographic voice plancia: labels anchored to light points; voice + touch -->
+    <div id="holoVoicePlancia" class="holo-voice-plancia" aria-label="Plancia vocale olografica">
+      <button type="button" class="holo-node" data-holo-action="map" style="--hx:18%;--hy:42%;">
+        <span class="holo-dot" aria-hidden="true"></span>
+        <span class="holo-label">MAPPA</span>
+      </button>
+      <button type="button" class="holo-node" data-holo-action="pipeline" style="--hx:32%;--hy:28%;">
+        <span class="holo-dot" aria-hidden="true"></span>
+        <span class="holo-label">PIPELINE</span>
+      </button>
+      <button type="button" class="holo-node" data-holo-action="memory" style="--hx:68%;--hy:30%;">
+        <span class="holo-dot" aria-hidden="true"></span>
+        <span class="holo-label">MEMORY</span>
+      </button>
+      <button type="button" class="holo-node" data-holo-action="chat" style="--hx:82%;--hy:48%;">
+        <span class="holo-dot" aria-hidden="true"></span>
+        <span class="holo-label">CHAT</span>
+      </button>
+      <button type="button" class="holo-node holo-node--amber" data-holo-action="mic" style="--hx:50%;--hy:52%;">
+        <span class="holo-dot" aria-hidden="true"></span>
+        <span class="holo-label">MIC</span>
+      </button>
+      <button type="button" class="holo-node" data-holo-action="orbit" style="--hx:44%;--hy:72%;">
+        <span class="holo-dot" aria-hidden="true"></span>
+        <span class="holo-label">ORBIT</span>
+      </button>
+      <button type="button" class="holo-node" data-holo-action="nord" style="--hx:56%;--hy:72%;">
+        <span class="holo-dot" aria-hidden="true"></span>
+        <span class="holo-label">NORD</span>
+      </button>
+      <button type="button" class="holo-node" data-holo-action="zoom-citta" style="--hx:22%;--hy:68%;">
+        <span class="holo-dot" aria-hidden="true"></span>
+        <span class="holo-label">ZOOM CITTÀ</span>
+      </button>
+      <button type="button" class="holo-node" data-holo-action="analizza" style="--hx:78%;--hy:68%;">
+        <span class="holo-dot" aria-hidden="true"></span>
+        <span class="holo-label">ANALIZZA</span>
+      </button>
+    </div>
     <div id="statsStrip" class="stats-strip" aria-live="polite">
       <span id="statDay" class="stat mono">DAY —</span>
       <span id="statTops" class="stat">Tops —</span>
@@ -111,6 +150,6 @@
     }
   }
   </script>
-  <script type="module" src="/js/app.js?v=b8822a8"></script>
+  <script type="module" src="/js/app.js?v=holo-touch-1"></script>
 </body>
 </html>

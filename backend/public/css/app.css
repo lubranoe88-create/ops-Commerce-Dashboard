@@ -36,7 +36,7 @@ a { color: var(--cyan); }
 
 #app {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto auto auto 1fr auto;
   height: 100%;
 }
 .stats-strip {
@@ -624,7 +624,101 @@ body[data-module="chat"] #chatPanel {
   justify-content: space-between;
 }
 
+/* Holographic voice plancia — labels anchored to light points (touch + voice) */
+.holo-voice-plancia {
+  position: relative;
+  height: 96px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(46, 196, 230, 0.18);
+  background:
+    radial-gradient(ellipse at 50% 60%, rgba(46, 196, 230, 0.07), transparent 55%),
+    linear-gradient(180deg, #06090e 0%, #080c12 100%);
+  overflow: hidden;
+  pointer-events: none;
+}
+.holo-voice-plancia::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(46, 196, 230, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(46, 196, 230, 0.04) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+  opacity: 0.55;
+}
+.holo-node {
+  position: absolute;
+  left: var(--hx);
+  top: var(--hy);
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.holo-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow:
+    0 0 6px rgba(46, 196, 230, 0.95),
+    0 0 16px rgba(46, 196, 230, 0.45);
+  animation: holo-pulse 2.8s ease-in-out infinite;
+}
+.holo-node--amber .holo-dot {
+  background: var(--amber);
+  box-shadow:
+    0 0 6px rgba(232, 184, 74, 0.95),
+    0 0 16px rgba(232, 184, 74, 0.4);
+}
+.holo-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(216, 222, 232, 0.72);
+  white-space: nowrap;
+  text-shadow: 0 0 8px rgba(46, 196, 230, 0.25);
+  border-bottom: 1px solid transparent;
+  padding-bottom: 1px;
+}
+.holo-node:hover .holo-label,
+.holo-node:focus-visible .holo-label {
+  color: var(--cyan);
+  border-bottom-color: rgba(46, 196, 230, 0.55);
+}
+.holo-node.is-active .holo-dot {
+  transform: scale(1.35);
+  box-shadow:
+    0 0 8px rgba(46, 196, 230, 1),
+    0 0 22px rgba(46, 196, 230, 0.65);
+}
+.holo-node.is-active .holo-label {
+  color: var(--cyan);
+  font-weight: 500;
+}
+.holo-node:focus-visible {
+  outline: none;
+}
+@keyframes holo-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+
 @media (max-width: 900px) {
   .stage { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
   .viewport { border-right: 0; border-bottom: 1px solid var(--stroke); }
+  .holo-voice-plancia { height: 110px; }
+  .holo-label { font-size: 8px; letter-spacing: 0.1em; }
 }

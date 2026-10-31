@@ -9,7 +9,7 @@ import {
   mountMapGlobe,
   resetNorth,
   searchPlace,
-} from "./mapGlobe.js?v=b8822a8";
+} from "./mapGlobe.js?v=holo-touch-1";
 
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
@@ -1244,40 +1244,131 @@ async function submitCorrection(id, verdict) {
   await refresh();
 }
 
-function handleVoiceLod(text) {
-  const lower = String(text || "").toLowerCase();
-  const t0 = state.snapshot?.tops?.[0];
+function syncHoloActive(actionOrModule) {
+  const mod = MODULES.includes(actionOrModule) ? actionOrModule : state.module;
+  document.querySelectorAll("#holoVoicePlancia .holo-node").forEach((node) => {
+    const a = node.getAttribute("data-holo-action");
+    node.classList.toggle("is-active", a === mod || a === actionOrModule);
+  });
+}
+
+/** Dual control: same actions for voice keywords and holographic touch targets. */
+function runHoloAction(action, { fromVoice = false } = {}) {
+  const t0 = state.focusedTopId
+    ? findTop(state.focusedTopId)
+    : state.snapshot?.tops?.[0];
   const lon = Number.isFinite(t0?.lon) ? t0.lon : 12.5;
   const lat = Number.isFinite(t0?.lat) ? t0.lat : 42;
+  const src = fromVoice ? "voce" : "tocco";
+
+  switch (action) {
+    case "map":
+      syncHoloActive("map");
+      return showModule("map").then(() => showToast(`MAPPA · ${src}`));
+    case "pipeline":
+      syncHoloActive("pipeline");
+      return showModule("pipeline").then(() => showToast(`PIPELINE · ${src}`));
+    case "memory":
+      syncHoloActive("memory");
+      return showModule("memory").then(() => showToast(`MEMORY · ${src}`));
+    case "chat":
+      syncHoloActive("chat");
+      return showModule("chat").then(() => showToast(`CHAT · ${src}`));
+    case "mic":
+      $("globalMic")?.click();
+      showToast(`MIC · ${src}`);
+      return Promise.resolve();
+    case "orbit":
+      return showModule("map").then(() => {
+        flyToTop(lon, lat, 12_000_000);
+        syncHoloActive("orbit");
+        showToast(`ORBIT · ${src}`);
+      });
+    case "nord":
+      return showModule("map").then(() => {
+        resetNorth();
+        syncHoloActive("nord");
+        showToast(`NORD · ${src}`);
+      });
+    case "zoom-citta":
+      return showModule("map").then(() => {
+        flyToTop(lon, lat, CITY_FLY_HEIGHT);
+        syncHoloActive("zoom-citta");
+        showToast(`ZOOM CITTÀ · ${src}`);
+      });
+    case "analizza": {
+      const title =
+        state.lastMapPick?.top?.title ||
+        state.lastMapPick?.title ||
+        t0?.title ||
+        "questa azienda";
+      syncHoloActive("analizza");
+      return openChatAnalyze(title).then(() => showToast(`ANALIZZA · ${src}`));
+    }
+    default:
+      return Promise.resolve();
+  }
+}
+
+function handleVoiceCommand(text) {
+  const lower = String(text || "").toLowerCase();
   if (/(zoom\s*)?citt[aà]|city/.test(lower)) {
-    showModule("map").then(() => {
-      flyToTop(lon, lat, CITY_FLY_HEIGHT);
-      showToast("LOD · città");
-    });
+    runHoloAction("zoom-citta", { fromVoice: true });
     return true;
   }
   if (/orbit|orbita/.test(lower)) {
-    showModule("map").then(() => {
-      flyToTop(lon, lat, 12_000_000);
-      showToast("LOD · orbit");
-    });
+    runHoloAction("orbit", { fromVoice: true });
     return true;
   }
   if (/nord|north|reset\s*nord/.test(lower)) {
-    showModule("map").then(() => {
-      resetNorth();
-      showToast("Nord");
-    });
+    runHoloAction("nord", { fromVoice: true });
     return true;
   }
+  if (/\bmap+a?\b|globo|mappa/.test(lower)) {
+    runHoloAction("map", { fromVoice: true });
+    return true;
+  }
+  if (/pipeline/.test(lower)) {
+    runHoloAction("pipeline", { fromVoice: true });
+    return true;
+  }
+  if (/memory|memoria/.test(lower)) {
+    runHoloAction("memory", { fromVoice: true });
+    return true;
+  }
+  if (/analizza|analyze/.test(lower)) {
+    runHoloAction("analizza", { fromVoice: true });
+    return true;
+  }
+  if (/\bchat\b|assistente/.test(lower)) {
+    runHoloAction("chat", { fromVoice: true });
+    return true;
+  }
+  // Legacy LOD: paese
   if (/paese|country/.test(lower)) {
+    const t0 = state.snapshot?.tops?.[0];
+    const lon = Number.isFinite(t0?.lon) ? t0.lon : 12.5;
+    const lat = Number.isFinite(t0?.lat) ? t0.lat : 42;
     showModule("map").then(() => {
       flyToTop(lon, lat, 1_500_000);
-      showToast("LOD · paese");
+      showToast("LOD · paese · voce");
     });
     return true;
   }
   return false;
+}
+
+function wireHoloPlancia() {
+  const host = $("holoVoicePlancia");
+  if (!host || host.dataset.wired) return;
+  host.dataset.wired = "1";
+  host.addEventListener("click", (e) => {
+    const node = e.target.closest(".holo-node[data-holo-action]");
+    if (!node) return;
+    e.preventDefault();
+    e.stopPropagation();
+    runHoloAction(node.getAttribute("data-holo-action"), { fromVoice: false });
+  });
 }
 
 function sideForModule(mod, snap) {
@@ -1596,6 +1687,7 @@ async function showModule(mod, opts = {}) {
   document.querySelectorAll("#moduleNav button").forEach((b) => {
     b.classList.toggle("active", b.dataset.module === mod);
   });
+  syncHoloActive(mod);
 
   moduleSwitchLocked = true;
   const run = (async () => {
@@ -1961,17 +2053,11 @@ function wireUi() {
       12_000_000,
     );
   });
+  wireHoloPlancia();
   setupMic($("globalMic"), (text) => {
-    if (handleVoiceLod(text)) return;
-    const lower = text.toLowerCase();
-    if (lower.includes("map")) showModule("map");
-    else if (lower.includes("pipeline")) showModule("pipeline");
-    else if (lower.includes("memory")) showModule("memory");
-    else if (lower.includes("chat")) {
-      showModule("chat").then(() => sendChat(text));
-    } else {
-      showModule("chat").then(() => sendChat(text));
-    }
+    if (handleVoiceCommand(text)) return;
+    // Fallback: free-form → chat
+    runHoloAction("chat", { fromVoice: true }).then(() => sendChat(text));
   });
   setupMic($("chatMic"), (text) => {
     $("chatInput").value = text;
@@ -1983,6 +2069,7 @@ async function boot() {
   wireUi();
   const initial = moduleFromHash() || "map";
   state.module = initial;
+  syncHoloActive(initial);
   try {
     await refresh();
   } catch (e) {
