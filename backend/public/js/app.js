@@ -7,11 +7,13 @@ import {
   emphasizeTopIds,
   filterTopEntities,
   flyToTop,
+  getViewer,
   mountMapGlobe,
   resetNorth,
   searchPlace,
   setOrbitEnabled,
-} from "./mapGlobe.js?v=holo-pack-4";
+  updateMapGlobeTops,
+} from "./mapGlobe.js?v=holo-pack-5";
 
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
@@ -72,6 +74,7 @@ const state = {
   compareIds: [],
   mapChipFilters: { region: null, source: null, minScore: null },
   coverageFocusIdx: 0,
+  coverageScrubActive: false,
   lastMapPick: null,
   pickHandler: null,
   memoryLinks: [],
@@ -111,10 +114,33 @@ function setHealth(health) {
     el.textContent = `HEALTH ${String(health.status || "—").toUpperCase()}`;
   }
   const cov = $("statCoverage");
-  if (cov) cov.textContent = `COVERAGE ${Math.round((health.coverageAvg ?? 0) * 100)}%`;
+  const covPct = Math.round((health.coverageAvg ?? 0) * 100);
+  if (cov) {
+    cov.textContent = "COVERAGE";
+    cov.title = `Coverage media ${covPct}%`;
+    cov.dataset.value = String(covPct);
+  }
+  setSignalBars(health);
   if ($("footerRight")) {
     $("footerRight").textContent = `errs ${health.openErrors ?? 0} · thr ${((health.verificationThreshold ?? 0.72) * 100) | 0}%`;
   }
+}
+
+/** Header signal strength: lit bars track health score (0–100). */
+function setSignalBars(health) {
+  const host = $("signalBars");
+  if (!host) return;
+  const bars = host.querySelectorAll("i");
+  const score = Number.isFinite(health?.score)
+    ? health.score
+    : health?.status === "ok"
+      ? 90
+      : health?.status === "degraded"
+        ? 55
+        : 20;
+  const lit = Math.max(1, Math.round((Math.min(100, Math.max(0, score)) / 100) * bars.length));
+  bars.forEach((b, i) => b.classList.toggle("on", i < lit));
+  host.setAttribute("aria-label", `Segnale ${score}/100 · menu`);
 }
 
 function tickUtcClock() {
@@ -939,10 +965,18 @@ function updateStatsStrip(snap) {
   const health = snap?.health || {};
   const errors = (snap?.errors || []).filter((e) => e.status === "open");
   const cov = Math.round((health.coverageAvg ?? 0) * 100);
-  if ($("statDay")) $("statDay").textContent = `DAY ${snap?.day_key || "—"}`;
+  if ($("statDay")) {
+    $("statDay").textContent = "DAY";
+    $("statDay").title = `Giorno dati ${snap?.day_key || "—"}`;
+    $("statDay").dataset.value = snap?.day_key || "";
+  }
   if ($("statTops")) $("statTops").innerHTML = `Tops <strong>${(snap?.tops || []).length}</strong>`;
   if ($("statErrors")) $("statErrors").innerHTML = `Errors <strong>${errors.length}</strong>`;
-  if ($("statCoverage")) $("statCoverage").textContent = `COVERAGE ${cov}%`;
+  if ($("statCoverage")) {
+    $("statCoverage").textContent = "COVERAGE";
+    $("statCoverage").title = `Coverage media ${cov}%`;
+    $("statCoverage").dataset.value = String(cov);
+  }
   if ($("statUpdated")) {
     const ts = state.lastUpdated ? state.lastUpdated.toLocaleTimeString() : "—";
     $("statUpdated").textContent = `Updated ${ts}`;
@@ -1099,7 +1133,7 @@ function clearCompare() {
 
 function applyMapFilters() {
   const chips = state.mapChipFilters;
-  const cov = (state.snapshot?.coverage || [])[state.coverageFocusIdx];
+  const cov = state.coverageScrubActive ? (state.snapshot?.coverage || [])[state.coverageFocusIdx] : null;
   const covToken = (cov?.domain || "").toLowerCase();
   filterTopEntities((top) => {
     if (chips.region && (top.region || "") !== chips.region) return false;
@@ -1178,7 +1212,10 @@ function setupCoverageScrub(coverage) {
     }
     applyMapFilters();
   };
-  range.oninput = paint;
+  range.oninput = () => {
+    state.coverageScrubActive = true;
+    paint();
+  };
   paint();
 }
 
@@ -1461,6 +1498,7 @@ function runHoloAction(action, { fromVoice = false } = {}) {
     case "refresh":
       return refresh().then(() => showToast(`AGGIORNA · ${src}`));
     case "filtro-score":
+      setToolsOpen(true);
       state.mapChipFilters.minScore = state.mapChipFilters.minScore === 0.75 ? null : 0.75;
       renderMapFilterChips(state.snapshot?.tops || []);
       applyMapFilters();
@@ -1468,11 +1506,13 @@ function runHoloAction(action, { fromVoice = false } = {}) {
       return Promise.resolve();
     case "filtro-reset":
       state.mapChipFilters = { region: null, source: null, minScore: null };
+      state.coverageScrubActive = false;
       renderMapFilterChips(state.snapshot?.tops || []);
       applyMapFilters();
       showToast(`FILTRI OFF · ${src}`);
       return Promise.resolve();
     case "coverage-next": {
+      setToolsOpen(true);
       const range = $("coverageScrubRange");
       const wrap = $("coverageScrub");
       if (wrap) wrap.hidden = false;
@@ -1491,6 +1531,11 @@ function runHoloAction(action, { fromVoice = false } = {}) {
     case "fly":
       if (t0) flyToTopCard(t0);
       return Promise.resolve();
+    case "strumenti": {
+      const on = setToolsOpen();
+      showToast(`STRUMENTI ${on ? "ON" : "OFF"} · ${src}`);
+      return Promise.resolve();
+    }
     case "tema-cyan":
       applyAccentTheme("cyan");
       showToast(`TEMA CYAN · ${src}`);
@@ -1528,6 +1573,7 @@ function handleVoiceCommand(text) {
     [/analizza|analyze/, "analizza"],
     [/\bchat\b|assistente/, "chat"],
     [/\bmic\b|microfono|ascolta/, "mic"],
+    [/strumenti|controlli|tools/, "strumenti"],
     [/tema\s*(cyan|ciano)/, "tema-cyan"],
     [/tema\s*(ambra|amber)/, "tema-amber"],
     [/tema\s*(mint|verde)/, "tema-mint"],
@@ -1539,6 +1585,70 @@ function handleVoiceCommand(text) {
     }
   }
   return false;
+}
+
+function setToolsOpen(open) {
+  const on = open == null ? !document.body.classList.contains("tools-open") : Boolean(open);
+  document.body.classList.toggle("tools-open", on);
+  $("toolsToggle")?.classList.toggle("active", on);
+  return on;
+}
+
+function setTopMenuOpen(open) {
+  const wrap = document.querySelector(".top-right");
+  const btn = $("signalBars");
+  if (!wrap) return;
+  const on = open == null ? !wrap.classList.contains("menu-open") : Boolean(open);
+  wrap.classList.toggle("menu-open", on);
+  btn?.setAttribute("aria-expanded", on ? "true" : "false");
+}
+
+function wireTopMenu() {
+  const btn = $("signalBars");
+  if (!btn || btn.dataset.wired) return;
+  btn.dataset.wired = "1";
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setTopMenuOpen();
+  });
+  $("topMenu")?.addEventListener(
+    "click",
+    (e) => {
+      if (e.target.closest("button")) setTopMenuOpen(false);
+    },
+    true,
+  );
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".top-right")) setTopMenuOpen(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") setTopMenuOpen(false);
+  });
+  $("toolsToggle")?.addEventListener("click", () => {
+    const on = setToolsOpen();
+    showToast(on ? "Strumenti mappa attivi" : "Strumenti mappa nascosti");
+  });
+}
+
+/** Light-point labels stay hidden like the reference photo; reveal them briefly so touch users can learn them. */
+function flashHoloLabels(ms = 6000) {
+  document.body.classList.add("holo-labels-on");
+  clearTimeout(flashHoloLabels._t);
+  flashHoloLabels._t = setTimeout(() => document.body.classList.remove("holo-labels-on"), ms);
+}
+
+const TOP_MARKS = [
+  '<svg viewBox="0 0 16 16"><path class="fill" d="M8 .8l1.5 5.2 5.2-1.6-3.6 4 3.6 4-5.2-1.6L8 15.2l-1.5-5.2-5.2 1.6 3.6-4-3.6-4 5.2 1.6z"/></svg>',
+  '<svg viewBox="0 0 16 16"><path d="M8 1.5v13M1.5 8h13M3.4 3.4l9.2 9.2M12.6 3.4l-9.2 9.2"/></svg>',
+  '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.6"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15M3 3l1.7 1.7M11.3 11.3L13 13M13 3l-1.7 1.7M4.7 11.3L3 13"/></svg>',
+  '<svg viewBox="0 0 16 16"><path class="fill" d="M8 1l1.9 4.6 4.9.4-3.7 3.2 1.1 4.8L8 11.5 3.8 14l1.1-4.8L1.2 6l4.9-.4z"/></svg>',
+  '<svg viewBox="0 0 16 16"><circle cx="8" cy="6.5" r="4.6"/><path d="M4.6 13.8h6.8"/></svg>',
+];
+
+function topMarkFor(id) {
+  let h = 0;
+  for (const ch of String(id || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return TOP_MARKS[h % TOP_MARKS.length];
 }
 
 function wireHoloPlancia() {
@@ -1562,45 +1672,22 @@ function sideForModule(mod, snap) {
   if (tools) tools.innerHTML = "";
   if (mod === "map") {
     title.textContent = "Daily tops · correct";
-    if (tools) {
-      const exp = document.createElement("button");
-      exp.className = "pill-btn";
-      exp.textContent = "CSV";
-      exp.title = "Export tops CSV";
-      exp.onclick = () => exportTopsCsv(snap.tops);
-      tools.appendChild(exp);
-    }
-    const filter = document.createElement("input");
-    filter.className = "side-filter";
-    filter.type = "search";
-    filter.placeholder = "Filtra tops…";
-    filter.value = state.sideFilter || "";
-    filter.addEventListener("input", () => {
-      state.sideFilter = filter.value;
-      const q = filter.value.trim().toLowerCase();
-      body.querySelectorAll(".card[data-top-id]").forEach((card) => {
-        const hay = card.getAttribute("data-filter") || "";
-        card.hidden = q ? !hay.includes(q) : false;
-      });
-    });
-    body.appendChild(filter);
-
     const notes = readCompanyNotes();
     const tops = orderedTops(snap);
     tops.forEach((t) => {
       const el = document.createElement("div");
-      el.className = "card";
+      el.className = "card top-row-card";
       el.draggable = true;
       el.dataset.topId = t.id;
       el.dataset.filter = `${t.title || ""} ${t.region || ""} ${t.source || ""}`.toLowerCase();
       if (state.focusedTopId === t.id) el.classList.add("is-focused");
       el.innerHTML = `
         <div class="row top-holo-row">
-          <span class="top-mark" aria-hidden="true"></span>
-          <strong class="top-fly">${escapeHtml(t.title)}</strong>
-          <span class="mono top-pct">${Math.round((t.score || 0) * 100)}%</span>
+          <span class="top-mark" aria-hidden="true">${topMarkFor(t.id)}</span>
+          <strong class="top-fly" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</strong>
+          <span class="top-pct">${Math.round((t.score || 0) * 100)}%</span>
         </div>
-        <div class="top-holo-detail muted">${escapeHtml(t.region || "")} · ${escapeHtml(t.source || "")}</div>
+        <div class="top-holo-detail">${escapeHtml(t.region || "")} · ${escapeHtml(t.source || "")}</div>
         <div class="top-holo-tools">
           <input type="text" placeholder="Nota correzione" data-note="${t.id}" />
           <textarea class="note-local" rows="1" placeholder="Nota locale" data-local-note="${t.id}"></textarea>
@@ -1613,10 +1700,14 @@ function sideForModule(mod, snap) {
         </div>`;
       el.querySelector(".top-fly")?.addEventListener("click", (e) => {
         e.stopPropagation();
+        el.classList.add("is-open");
         flyToTopCard(t);
       });
       el.addEventListener("click", (e) => {
         if (e.target.closest("button, input, textarea")) return;
+        const wasOpen = el.classList.contains("is-open");
+        body.querySelectorAll(".card.is-open").forEach((c) => c.classList.remove("is-open"));
+        el.classList.toggle("is-open", !wasOpen);
         setFocusedTop(t.id);
       });
       el.addEventListener("dragstart", (e) => {
@@ -1684,13 +1775,34 @@ function sideForModule(mod, snap) {
     setupCoverageScrub(snap.coverage);
     updateCompareStrip();
 
-    // Zoom affordances for 5-level LOD globe
+    // Secondary tools stay folded so the panel reads like the reference photo
+    const extras = document.createElement("details");
+    extras.className = "side-extras";
+    if (state.sideExtrasOpen) extras.open = true;
+    extras.addEventListener("toggle", () => {
+      state.sideExtrasOpen = extras.open;
+    });
+    extras.innerHTML = `<summary>Strumenti · zoom · csv</summary>`;
+    const filter = document.createElement("input");
+    filter.className = "side-filter";
+    filter.type = "search";
+    filter.placeholder = "Filtra tops…";
+    filter.value = state.sideFilter || "";
+    const applySideFilter = () => {
+      state.sideFilter = filter.value;
+      const q = filter.value.trim().toLowerCase();
+      body.querySelectorAll(".card[data-top-id]").forEach((card) => {
+        const hay = card.getAttribute("data-filter") || "";
+        card.hidden = q ? !hay.includes(q) : false;
+      });
+    };
+    filter.addEventListener("input", applySideFilter);
+    extras.appendChild(filter);
     const zoomHelp = document.createElement("div");
     zoomHelp.className = "card";
-    zoomHelp.innerHTML = `<strong>5D zoom</strong>
-      <div class="muted">Scroll: orbita → continente → paese · click titolo/Fly = città. Hotkey C/I sul top in focus. MIC: «zoom città», «orbit», «nord».</div>
+    zoomHelp.innerHTML = `<div class="muted">Globo a zoom fisso: usa i salti qui, «zoom città», «orbit», «nord» o Fly sul top.</div>
       <div class="actions" id="lodJumps"></div>`;
-    body.appendChild(zoomHelp);
+    extras.appendChild(zoomHelp);
     const jumps = [
       ["Continente", 12_000_000],
       ["Paese", 1_500_000],
@@ -1711,6 +1823,14 @@ function sideForModule(mod, snap) {
       };
       box.appendChild(b);
     });
+    const exp = document.createElement("button");
+    exp.className = "pill-btn";
+    exp.textContent = "CSV";
+    exp.title = "Export tops CSV";
+    exp.onclick = () => exportTopsCsv(snap.tops);
+    box.appendChild(exp);
+    body.appendChild(extras);
+    if (filter.value) applySideFilter();
   } else if (mod === "pipeline") {
     title.textContent = "Pipeline · errors";
     const hint = document.createElement("div");
@@ -1869,6 +1989,11 @@ async function showModule(mod, opts = {}) {
   if (moduleSwitchLocked && !force) {
     return moduleSwitchPromise;
   }
+  // Globe already live: map actions (orbit / nord / zoom) must not remount it.
+  if (!force && mod === "map" && state.module === "map" && state.mapEngine === "cesium" && getViewer()) {
+    syncHoloActive(mod);
+    return Promise.resolve();
+  }
 
   const epoch = ++moduleEpoch;
   state.module = mod;
@@ -1924,12 +2049,9 @@ async function showModule(mod, opts = {}) {
               if (sel.top?.id) setFocusedTop(sel.top.id);
             },
           });
+          if (!stillCurrent(epoch, mod)) return;
           applyMapFilters();
           emphasizeTopIds(state.compareIds.filter(Boolean));
-          if (!stillCurrent(epoch, mod)) {
-            destroyMapGlobe();
-            return;
-          }
           state.mapEngine = "cesium";
         } catch (err) {
           if (!stillCurrent(epoch, mod)) return;
@@ -1981,16 +2103,39 @@ async function showModule(mod, opts = {}) {
   return run;
 }
 
-async function refresh({ silent = false } = {}) {
-  await refreshSecretsStatus();
-  const snap = await api("/api/dashboard/snapshot");
-  state.snapshot = snap;
-  state.lastUpdated = new Date();
-  updateStatsStrip(snap);
-  await showModule(state.module, { force: true });
-  if (!silent) {
-    /* toast handled by callers when needed */
-  }
+let refreshInFlight = null;
+
+/**
+ * Pull a fresh snapshot. The live globe is updated in place (pins, arcs, side panel)
+ * instead of being torn down, so auto-refresh never blanks or re-zooms the map.
+ * Pass { remount: true } to force a full module rebuild.
+ */
+function refresh({ silent = false, remount = false } = {}) {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    await refreshSecretsStatus();
+    const snap = await api("/api/dashboard/snapshot");
+    state.snapshot = snap;
+    state.lastUpdated = new Date();
+    updateStatsStrip(snap);
+    if (snap.health) setHealth(snap.health);
+    const mapLive = state.module === "map" && state.mapEngine === "cesium" && getViewer() && !moduleSwitchLocked;
+    if (!remount && mapLive) {
+      await updateMapGlobeTops(snap.tops);
+      applyMapFilters();
+      emphasizeTopIds(state.compareIds.filter(Boolean));
+      sideForModule("map", snap);
+    } else {
+      await showModule(state.module, { force: true });
+    }
+    document.body.dataset.refreshedAt = String(state.lastUpdated.getTime());
+    if (!silent) {
+      /* toast handled by callers when needed */
+    }
+  })().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
 }
 
 function readStoredChatModel() {
@@ -2129,6 +2274,7 @@ function setupMic(button, onText) {
   rec.onend = () => {
     state.micLive = false;
     button.classList.remove("live");
+    document.body.classList.remove("mic-live");
   };
   button.addEventListener("click", () => {
     if (state.micLive) {
@@ -2137,7 +2283,14 @@ function setupMic(button, onText) {
     }
     state.micLive = true;
     button.classList.add("live");
-    rec.start();
+    document.body.classList.add("mic-live");
+    try {
+      rec.start();
+    } catch {
+      state.micLive = false;
+      button.classList.remove("live");
+      document.body.classList.remove("mic-live");
+    }
   });
 }
 
@@ -2157,9 +2310,18 @@ function wireUi() {
     if (moduleSwitchLocked) return; // first click still owns the transition
     showModule(fromHash);
   });
-  $("sendChat")?.addEventListener("click", () => sendChat($("chatInput")?.value || ""));
+  const submitAnalizza = async () => {
+    const text = $("chatInput")?.value || "";
+    if (!text.trim()) {
+      $("chatInput")?.focus();
+      return;
+    }
+    if (state.module !== "chat") await showModule("chat");
+    await sendChat(text);
+  };
+  $("sendChat")?.addEventListener("click", submitAnalizza);
   $("chatInput")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") sendChat($("chatInput").value);
+    if (e.key === "Enter") submitAnalizza();
   });
   $("refreshBtn")?.addEventListener("click", async () => {
     try {
@@ -2246,6 +2408,7 @@ function wireUi() {
     );
   });
   wireHoloPlancia();
+  wireTopMenu();
   wireGestureShortcuts();
   wireModuleZoom();
   setupMic($("globalMic"), (text) => {
@@ -2267,8 +2430,9 @@ function wireUi() {
       refresh({ silent: true }).catch(() => {});
     }
   });
-  window.addEventListener("pageshow", () => {
-    refresh({ silent: true }).catch(() => {});
+  // Initial load is handled by boot(); pageshow only matters for back/forward-cache restores.
+  window.addEventListener("pageshow", (e) => {
+    if (e.persisted) refresh({ silent: true }).catch(() => {});
   });
 }
 
@@ -2382,6 +2546,7 @@ async function boot() {
   state.module = MODULES.includes(initial) ? initial : "map";
   if (last?.focusedTopId) state.focusedTopId = last.focusedTopId;
   syncHoloActive(state.module);
+  flashHoloLabels(7000);
 
   try {
     // Always refresh latest data on open

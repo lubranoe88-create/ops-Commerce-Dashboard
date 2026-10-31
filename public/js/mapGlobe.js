@@ -1,12 +1,21 @@
 /**
- * Interactive tactical globe (Cesium): 5-level LOD, dark-ops styling,
- * drag/zoom, pick + hover, Nominatim search, compass/reset-north.
- * Public tiles only — no Palantir assets. No API key required for base features.
+ * Interactive tactical globe (Cesium): 5-level LOD, night-holo styling,
+ * drag, pick + hover, Nominatim search, compass/reset-north.
+ * Orbit views use NASA GIBS VIIRS Black Marble (public domain, keyless, CORS);
+ * satellite + reference overlays fade in from city LOD down.
  */
 
 const CESIUM_VER = "1.125.0";
 const CESIUM_BASE = `https://cdn.jsdelivr.net/npm/cesium@${CESIUM_VER}/Build/Cesium`;
 const NOMINATIM = "https://nominatim.openstreetmap.org";
+const BLACK_MARBLE_URL =
+  "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png";
+/** Home framing matching the reference photo: EMEA night hemisphere, crown under the header. */
+export const HOME_VIEW = { lon: 30, lat: 24, height: 12_600_000 };
+const LOCK_MIN_ZOOM = 11_000_000;
+const LOCK_MAX_ZOOM = 16_000_000;
+let mountSeq = 0;
+let resizeWired = false;
 
 let cesiumPromise = null;
 let viewer = null;
@@ -105,6 +114,22 @@ function buildImagery(Cesium, v) {
     }),
   );
   applyDarkOpsImagery(sat);
+  sat._opsRole = "sat";
+
+  const night = v.imageryLayers.addImageryProvider(
+    new Cesium.UrlTemplateImageryProvider({
+      url: BLACK_MARBLE_URL,
+      maximumLevel: 8,
+      credit: "NASA Earth Observatory · VIIRS Black Marble",
+    }),
+  );
+  night._opsRole = "night";
+  // Shift Black Marble's violet land toward navy and its city lights toward warm gold
+  night.brightness = 0.95;
+  night.contrast = 1.3;
+  night.gamma = 1.1;
+  night.saturation = 0.85;
+  night.hue = 0.4;
 
   const ref = v.imageryLayers.addImageryProvider(
     new Cesium.UrlTemplateImageryProvider({
@@ -113,7 +138,8 @@ function buildImagery(Cesium, v) {
       credit: "Esri Boundaries",
     }),
   );
-  ref.alpha = 0.7;
+  ref.alpha = 0;
+  ref._opsRole = "ref";
 
   const roads = v.imageryLayers.addImageryProvider(
     new Cesium.UrlTemplateImageryProvider({
@@ -125,17 +151,8 @@ function buildImagery(Cesium, v) {
   roads.alpha = 0;
   roads._opsRole = "roads";
 
-  const osm = v.imageryLayers.addImageryProvider(
-    new Cesium.UrlTemplateImageryProvider({
-      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-      maximumLevel: 19,
-      credit: "© OpenStreetMap",
-    }),
-  );
-  osm.alpha = 0;
-  osm._opsRole = "osm";
-
-  return { sat, ref, roads, osm };
+  // No tile.openstreetmap.org layer: its usage policy blocks app traffic (403 "Access blocked" tiles).
+  return { sat, night, ref, roads };
 }
 
 function setOverlayByLod(v, lod) {
@@ -143,6 +160,14 @@ function setOverlayByLod(v, lod) {
   for (let i = 0; i < layers.length; i++) {
     const layer = layers.get(i);
     const role = layer._opsRole;
+    if (role === "night") {
+      layer.alpha = lod.level <= 2 ? 1 : lod.level === 3 ? 0.35 : 0;
+      layer.show = layer.alpha > 0;
+    }
+    if (role === "ref") {
+      layer.alpha = lod.level <= 2 ? 0 : 0.7;
+      layer.show = layer.alpha > 0;
+    }
     if (role === "roads") {
       if (lod.level >= 5) layer.alpha = 0.85;
       else if (lod.level === 4) layer.alpha = 0.7;
@@ -157,6 +182,45 @@ function setOverlayByLod(v, lod) {
   }
 }
 
+const PIN_GOLD = "#ffb347";
+const ARC_GOLD = "#ffc46b";
+const ARC_MAX_KM = 7_500;
+
+/** Raised great-circle arc (sin profile) so trade links read as gold arches like the photo. */
+function arcPositions(Cesium, lon1, lat1, lon2, lat2, segments = 72) {
+  const geo = new Cesium.EllipsoidGeodesic(
+    Cesium.Cartographic.fromDegrees(lon1, lat1),
+    Cesium.Cartographic.fromDegrees(lon2, lat2),
+  );
+  const peak = Math.min(2_400_000, Math.max(220_000, geo.surfaceDistance * 0.16));
+  const out = [];
+  for (let i = 0; i <= segments; i++) {
+    const f = i / segments;
+    const c = geo.interpolateUsingFraction(f);
+    out.push(Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, Math.sin(Math.PI * f) * peak));
+  }
+  return out;
+}
+
+function orbitRingPositions(Cesium, inclinationDeg, lon0, height, steps = 180) {
+  const inc = Cesium.Math.toRadians(inclinationDeg);
+  const out = [];
+  for (let k = 0; k <= steps; k++) {
+    const a = (k / steps) * Math.PI * 2;
+    const lat = Math.asin(Math.sin(inc) * Math.sin(a));
+    const lon = Cesium.Math.toRadians(lon0) + Math.atan2(Math.cos(inc) * Math.sin(a), Math.cos(a));
+    out.push(Cesium.Cartesian3.fromRadians(lon, lat, height));
+  }
+  return out;
+}
+
+function topLonLat(t, i) {
+  return {
+    lat: Number.isFinite(t?.lat) ? t.lat : 20 - i * 8,
+    lon: Number.isFinite(t?.lon) ? t.lon : -40 + i * 28,
+  };
+}
+
 function addTopEntities(Cesium, v, tops) {
   // Keep hover/select helpers; clear data entities
   const keep = new Set([hoverEntity, selectEntity].filter(Boolean));
@@ -166,18 +230,12 @@ function addTopEntities(Cesium, v, tops) {
   }
   doomed.forEach((e) => v.entities.remove(e));
 
+  const gold = Cesium.Color.fromCssColorString(PIN_GOLD);
+  const arcGold = Cesium.Color.fromCssColorString(ARC_GOLD);
+
   topsCache = (tops || []).slice(0, 12);
   topsCache.forEach((t, i) => {
-    const lat = Number.isFinite(t.lat) ? t.lat : 20 - i * 8;
-    const lon = Number.isFinite(t.lon) ? t.lon : -40 + i * 28;
-    const verified = Boolean(t.verified);
-    const color = verified
-      ? Cesium.Color.fromCssColorString("#3dff9a")
-      : Cesium.Color.fromCssColorString("#ffc14a");
-
-    const gold = Cesium.Color.fromCssColorString("#ffa500");
-    const beam = Cesium.Color.fromCssColorString("#00a3ff");
-    // Pin + vertical holographic beam (reference photo look)
+    const { lat, lon } = topLonLat(t, i);
     v.entities.add({
       id: `top-${t.id || i}`,
       name: t.title || t.id,
@@ -192,57 +250,66 @@ function addTopEntities(Cesium, v, tops) {
       },
       position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
       point: {
-        pixelSize: 10 + (t.score || 0.5) * 8,
-        color: gold.withAlpha(0.95),
-        outlineColor: beam,
-        outlineWidth: 2,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        scaleByDistance: new Cesium.NearFarScalar(1.5e3, 1.55, 8.0e6, 0.55),
+        pixelSize: 7,
+        color: gold.withAlpha(0.98),
+        outlineColor: gold.withAlpha(0.32),
+        outlineWidth: 5,
+        disableDepthTestDistance: 1.2e7,
+        scaleByDistance: new Cesium.NearFarScalar(1.5e3, 1.6, 2.0e7, 0.9),
       },
       label: {
         text: "",
         show: false,
       },
       description: `${t.region || ""} · score ${Math.round((t.score || 0) * 100)}%`,
+    });
+  });
+
+  // Gold trade arcs: strongest top as hub → best-ranked partners within one hemisphere hop
+  const ranked = topsCache
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => (b.t.score || 0) - (a.t.score || 0));
+  const hub = ranked[0];
+  if (hub) {
+    const h = topLonLat(hub.t, hub.i);
+    const hubCarto = Cesium.Cartographic.fromDegrees(h.lon, h.lat);
+    const partners = ranked.slice(1).filter(({ t, i }) => {
+      const p = topLonLat(t, i);
+      const g = new Cesium.EllipsoidGeodesic(hubCarto, Cesium.Cartographic.fromDegrees(p.lon, p.lat));
+      return g.surfaceDistance / 1000 <= ARC_MAX_KM;
+    });
+    partners.slice(0, 2).forEach(({ t, i }, k) => {
+      const p = topLonLat(t, i);
+      v.entities.add({
+        id: `arc-${k}`,
+        polyline: {
+          positions: arcPositions(Cesium, h.lon, h.lat, p.lon, p.lat),
+          width: k === 0 ? 2.2 : 1.6,
+          material: new Cesium.PolylineGlowMaterialProperty({
+            glowPower: 0.16,
+            taperPower: 1,
+            color: arcGold.withAlpha(k === 0 ? 0.92 : 0.6),
+          }),
+          arcType: Cesium.ArcType.NONE,
+        },
+      });
+    });
+  }
+
+  // Faint orbital hairlines around the globe (photo: thin rings crossing the limb)
+  [
+    [62, -25, 1_900_000, 0.16],
+    [-38, 55, 2_600_000, 0.06],
+  ].forEach(([inc, lon0, height, alpha], k) => {
+    v.entities.add({
+      id: `orbit-ring-${k}`,
       polyline: {
-        positions: [
-          Cesium.Cartesian3.fromDegrees(lon, lat, 0),
-          Cesium.Cartesian3.fromDegrees(lon, lat, 420000 + (t.score || 0.5) * 380000),
-        ],
-        width: 1.25,
-        material: new Cesium.PolylineGlowMaterialProperty({
-          glowPower: 0.35,
-          color: beam.withAlpha(0.85),
-        }),
+        positions: orbitRingPositions(Cesium, inc, lon0, height),
+        width: 1,
+        material: Cesium.Color.fromCssColorString("#cfe6ff").withAlpha(alpha),
         arcType: Cesium.ArcType.NONE,
       },
     });
-
-    // Gold trade arcs between high-score tops (photo-style)
-    if (i < topsCache.length - 1 && (t.score || 0) > 0.65) {
-      const n = topsCache[i + 1];
-      const lat2 = Number.isFinite(n.lat) ? n.lat : lat;
-      const lon2 = Number.isFinite(n.lon) ? n.lon : lon + 20;
-      v.entities.add({
-        id: `arc-${i}`,
-        polyline: {
-          positions: Cesium.Cartesian3.fromDegreesArrayHeights([
-            lon,
-            lat,
-            80000,
-            lon2,
-            lat2,
-            80000,
-          ]),
-          width: 2.2,
-          material: new Cesium.PolylineGlowMaterialProperty({
-            glowPower: 0.28,
-            color: gold.withAlpha(0.9),
-          }),
-          arcType: Cesium.ArcType.GEODESIC,
-        },
-      });
-    }
   });
 }
 
@@ -489,9 +556,7 @@ export function filterTopEntities(matchFn) {
     const ok = typeof matchFn === "function" ? Boolean(matchFn(top)) : true;
     e.show = ok;
     if (e.point && Cesium) {
-      e.point.color = ok
-        ? Cesium.Color.WHITE
-        : Cesium.Color.WHITE.withAlpha(0.15);
+      e.point.color = Cesium.Color.fromCssColorString(PIN_GOLD).withAlpha(ok ? 0.98 : 0.15);
     }
   }
 }
@@ -514,11 +579,11 @@ export function emphasizeTopIds(ids = []) {
         ? props.topId.getValue(viewer.clock.currentTime)
         : props.topId;
     const hot = set.has(topId);
-    e.point.pixelSize = hot ? 28 : 14;
-    e.point.outlineWidth = hot ? 6 : 4;
+    e.point.pixelSize = hot ? 11 : 7;
+    e.point.outlineWidth = hot ? 7 : 5;
     e.point.outlineColor = hot
-      ? Cesium.Color.fromCssColorString("#3dd6ff")
-      : e.point.outlineColor;
+      ? Cesium.Color.fromCssColorString("#3dd6ff").withAlpha(0.6)
+      : Cesium.Color.fromCssColorString(PIN_GOLD).withAlpha(0.32);
   }
 }
 
@@ -744,17 +809,28 @@ export function applyFourKResolution(v) {
   return { width: outW, height: outH, scale, dpr, coarse: isCoarse };
 }
 
+/** Refresh pins/arcs on the live viewer without remounting (keeps camera + tiles). */
+export async function updateMapGlobeTops(tops) {
+  if (!viewer || viewer.isDestroyed?.() || !window.Cesium) return false;
+  addTopEntities(window.Cesium, viewer, tops);
+  ensureHoverSelect(window.Cesium, viewer);
+  return true;
+}
+
 export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
+  const seq = ++mountSeq;
   onLodCallback = onLod || null;
   onSelectCallback = onSelect || null;
   const Cesium = await ensureCesium();
+  // A newer mount or a destroy happened while Cesium was loading: this one is stale.
+  if (seq !== mountSeq) return null;
 
   if (viewer && !viewer.isDestroyed?.() && viewer.container === container) {
     addTopEntities(Cesium, viewer, tops);
     return viewer;
   }
 
-  destroyMapGlobe();
+  teardownViewer();
   onLodCallback = onLod || null;
   onSelectCallback = onSelect || null;
 
@@ -813,10 +889,29 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   viewer.scene.requestRenderMode = false;
   viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#00050a");
   viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#00050a");
-  viewer.scene.globe.enableLighting = true;
-  viewer.scene.globe.atmosphereLightIntensity = 18.0;
-  viewer.scene.globe.atmosphereBrightnessShift = -0.05;
-  viewer.scene.globe.atmosphereHueShift = -0.04;
+  // Uniform night hemisphere like the reference: Black Marble carries the light, no sun shading.
+  viewer.scene.globe.enableLighting = false;
+  // Soft blue rim on the limb (photo) without washing the night side
+  viewer.scene.globe.showGroundAtmosphere = true;
+  if (viewer.scene.atmosphere) {
+    viewer.scene.atmosphere.lightIntensity = 4.5;
+    viewer.scene.atmosphere.brightnessShift = -0.2;
+    viewer.scene.atmosphere.saturationShift = -0.15;
+    viewer.scene.atmosphere.hueShift = 0.0;
+  }
+  if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
+  if (viewer.scene.sun) viewer.scene.sun.show = false;
+  if (viewer.scene.moon) viewer.scene.moon.show = false;
+  if (viewer.scene.skyAtmosphere) {
+    viewer.scene.skyAtmosphere.show = true;
+    viewer.scene.skyAtmosphere.brightnessShift = -0.12;
+    viewer.scene.skyAtmosphere.saturationShift = 0.25;
+    viewer.scene.skyAtmosphere.hueShift = 0.02;
+  }
+  viewer.scene.globe.atmosphereLightIntensity = 3.0;
+  viewer.scene.globe.atmosphereBrightnessShift = -0.32;
+  viewer.scene.globe.atmosphereSaturationShift = -0.1;
+  viewer.scene.globe.atmosphereHueShift = 0.0;
   viewer.scene.fog.enabled = true;
   viewer.scene.fog.density = 3.2e-5;
   // Night-side city-light feel
@@ -845,8 +940,8 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   // Fixed globe zoom: user wheel/pinch cannot change altitude (voice/programmatic fly still works).
   ctrl.enableZoom = false;
   ctrl.zoomEventTypes = [];
-  ctrl.minimumZoomDistance = 12_000_000;
-  ctrl.maximumZoomDistance = 16_000_000;
+  ctrl.minimumZoomDistance = LOCK_MIN_ZOOM;
+  ctrl.maximumZoomDistance = LOCK_MAX_ZOOM;
   ctrl.enableCollisionDetection = true;
   ctrl.inertiaSpin = 0.92;
   ctrl.inertiaTranslate = 0.9;
@@ -867,7 +962,7 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
 
   // Default home framing matches reference photo (EMEA night orbit)
   viewer.camera.setView({
-    destination: Cesium.Cartesian3.fromDegrees(12.5, 22.0, 14_200_000),
+    destination: Cesium.Cartesian3.fromDegrees(HOME_VIEW.lon, HOME_VIEW.lat, HOME_VIEW.height),
     orientation: {
       heading: 0,
       pitch: Cesium.Math.toRadians(-90),
@@ -887,9 +982,9 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
 
   startLodWatcher(Cesium, viewer);
   startOrbitDrift(Cesium, viewer);
-  const initial = lodFromHeight(14_000_000);
+  const initial = lodFromHeight(HOME_VIEW.height);
   setOverlayByLod(viewer, initial);
-  onLodCallback?.(initial, 14_000_000);
+  onLodCallback?.(initial, HOME_VIEW.height);
 
   if (viewer.homeButton?.viewModel?.command) {
     viewer.homeButton.viewModel.command.beforeExecute.addEventListener((e) => {
@@ -904,15 +999,23 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
     });
   }
 
-  window.addEventListener("resize", () => {
-    if (viewer && !viewer.isDestroyed?.()) applyFourKResolution(viewer);
-  });
+  if (!resizeWired) {
+    resizeWired = true;
+    window.addEventListener("resize", () => {
+      if (viewer && !viewer.isDestroyed?.()) applyFourKResolution(viewer);
+    });
+  }
 
   viewer.canvas.style.cursor = "grab";
   return viewer;
 }
 
 export function destroyMapGlobe() {
+  mountSeq += 1;
+  teardownViewer();
+}
+
+function teardownViewer() {
   stopLodWatcher();
   stopOrbitDrift();
   clearTimeout(idleTimer);
@@ -964,7 +1067,7 @@ export function unlockProgrammaticZoom(ms = 2200) {
     const c = viewer.scene.screenSpaceCameraController;
     c.enableZoom = false;
     c.zoomEventTypes = [];
-    c.minimumZoomDistance = 12_000_000;
-    c.maximumZoomDistance = 16_000_000;
+    c.minimumZoomDistance = LOCK_MIN_ZOOM;
+    c.maximumZoomDistance = LOCK_MAX_ZOOM;
   }, ms);
 }

@@ -6,31 +6,41 @@
   <title>OPS · COMMERCE INTEL</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=holo-pack-4" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/app.css?v=holo-pack-5" />
 </head>
 <body>
   <div id="app" class="holo-home">
     <header class="topbar topbar--holo">
       <div class="brand-block">
-        <div class="brand">OPS · COMMERCE INTEL</div>
+        <div class="brand"><span class="brand-ops">OPS</span><span class="brand-dot" aria-hidden="true">·</span><span class="brand-name">COMMERCE INTEL</span></div>
         <div class="brand-tag">GLOBAL OPERATIONS · INTELLIGENCE · ADVANTAGE</div>
       </div>
       <div class="top-status" aria-live="polite">
         <span id="healthBadge" class="health warn">HEALTH —</span>
-        <span id="statDay" class="stat-pill mono">DAY —</span>
-        <span id="statCoverage" class="stat-pill">COVERAGE —</span>
+        <span class="status-sep" aria-hidden="true">·</span>
+        <span id="statDay" class="stat-pill" title="Giorno dati">DAY</span>
+        <span class="status-sep" aria-hidden="true">·</span>
+        <span id="statCoverage" class="stat-pill" title="Coverage media">COVERAGE</span>
       </div>
       <div class="top-right">
-        <span id="utcClock" class="mono utc-clock">--:--:-- UTC</span>
-        <nav class="nav nav--ghost" id="moduleNav" aria-label="Moduli">
-          <button data-module="map" class="active" title="Map">Map</button>
-          <button data-module="pipeline" title="Pipeline">Pipe</button>
-          <button data-module="memory" title="Memory">Mem</button>
-          <button data-module="chat" title="Chat">Chat</button>
-        </nav>
-        <button id="refreshBtn" class="ghost-btn" title="Refresh">↻</button>
-        <button id="logoutBtn" class="ghost-btn" title="Logout">⎋</button>
+        <span id="utcClock" class="utc-clock">--:--:-- UTC</span>
+        <button type="button" id="signalBars" class="signal-bars" aria-haspopup="true" aria-expanded="false" aria-controls="topMenu" title="Segnale · menu">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </button>
+        <div id="topMenu" class="top-menu" role="menu">
+          <nav class="nav nav--ghost" id="moduleNav" aria-label="Moduli">
+            <button data-module="map" class="active" title="Map">Map</button>
+            <button data-module="pipeline" title="Pipeline">Pipe</button>
+            <button data-module="memory" title="Memory">Mem</button>
+            <button data-module="chat" title="Chat">Chat</button>
+          </nav>
+          <div class="top-menu-row">
+            <button type="button" id="toolsToggle" class="ghost-btn" title="Filtri, coverage, ricerca">Strumenti</button>
+            <button id="refreshBtn" class="ghost-btn" title="Refresh">↻</button>
+            <button id="logoutBtn" class="ghost-btn" title="Logout">⎋</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -49,43 +59,52 @@
           <div class="legend" id="moduleLegend"></div>
           <div class="legend mono" id="coverageMini"></div>
         </div>
-        <!-- Holo nodes INSIDE viewport: only the dots capture events (no full-screen blocker) -->
+        <!-- Holo light points (reference photo): dot + hairline beam; label on hover/focus/voice -->
         <div id="holoVoicePlancia" class="holo-voice-plancia holo-voice-plancia--overlay" aria-label="Plancia vocale olografica">
-          <button type="button" class="holo-node" data-holo-action="map" style="--hx:14%;--hy:22%;">
+          <button type="button" class="holo-node" data-holo-action="map" aria-label="MAPPA" style="--hx:25%;--hy:20.5%;--hb:12vh;">
             <span class="holo-dot" aria-hidden="true"></span>
+            <span class="holo-beam" aria-hidden="true"></span>
             <span class="holo-label">MAPPA</span>
           </button>
-          <button type="button" class="holo-node" data-holo-action="pipeline" style="--hx:26%;--hy:14%;">
+          <button type="button" class="holo-node" data-holo-action="zoom-citta" aria-label="ZOOM CITTÀ" style="--hx:18%;--hy:37%;--hb:7vh;">
             <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-label">PIPELINE</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="memory" style="--hx:74%;--hy:14%;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-label">MEMORY</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="chat" style="--hx:86%;--hy:22%;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-label">CHAT</span>
-          </button>
-          <button type="button" class="holo-node holo-node--amber" data-holo-action="mic" style="--hx:50%;--hy:18%;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-label">MIC</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="orbit" style="--hx:40%;--hy:88%;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-label">ORBIT</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="nord" style="--hx:52%;--hy:88%;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-label">NORD</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="zoom-citta" style="--hx:18%;--hy:88%;">
-            <span class="holo-dot" aria-hidden="true"></span>
+            <span class="holo-beam" aria-hidden="true"></span>
             <span class="holo-label">ZOOM CITTÀ</span>
           </button>
-          <button type="button" class="holo-node" data-holo-action="analizza" style="--hx:78%;--hy:88%;">
+          <button type="button" class="holo-node" data-holo-action="pipeline" aria-label="PIPELINE" style="--hx:32.4%;--hy:18%;--hb:9vh;">
             <span class="holo-dot" aria-hidden="true"></span>
+            <span class="holo-beam" aria-hidden="true"></span>
+            <span class="holo-label">PIPELINE</span>
+          </button>
+          <button type="button" class="holo-node" data-holo-action="orbit" aria-label="ORBIT" style="--hx:36.2%;--hy:13.5%;--hb:6vh;">
+            <span class="holo-dot" aria-hidden="true"></span>
+            <span class="holo-beam" aria-hidden="true"></span>
+            <span class="holo-label">ORBIT</span>
+          </button>
+          <button type="button" class="holo-node" data-holo-action="mic" aria-label="MIC" style="--hx:44.7%;--hy:11%;--hb:14vh;">
+            <span class="holo-dot" aria-hidden="true"></span>
+            <span class="holo-beam" aria-hidden="true"></span>
+            <span class="holo-label">MIC</span>
+          </button>
+          <button type="button" class="holo-node" data-holo-action="nord" aria-label="NORD" style="--hx:55.5%;--hy:9.5%;--hb:5vh;">
+            <span class="holo-dot" aria-hidden="true"></span>
+            <span class="holo-beam" aria-hidden="true"></span>
+            <span class="holo-label">NORD</span>
+          </button>
+          <button type="button" class="holo-node" data-holo-action="memory" aria-label="MEMORY" style="--hx:62.5%;--hy:12%;--hb:10vh;">
+            <span class="holo-dot" aria-hidden="true"></span>
+            <span class="holo-beam" aria-hidden="true"></span>
+            <span class="holo-label">MEMORY</span>
+          </button>
+          <button type="button" class="holo-node" data-holo-action="analizza" aria-label="ANALIZZA" style="--hx:66.2%;--hy:16%;--hb:22vh;">
+            <span class="holo-dot" aria-hidden="true"></span>
+            <span class="holo-beam" aria-hidden="true"></span>
             <span class="holo-label">ANALIZZA</span>
+          </button>
+          <button type="button" class="holo-node" data-holo-action="chat" aria-label="CHAT" style="--hx:74%;--hy:22.5%;--hb:7vh;">
+            <span class="holo-dot" aria-hidden="true"></span>
+            <span class="holo-beam" aria-hidden="true"></span>
+            <span class="holo-label">CHAT</span>
           </button>
         </div>
         <div id="mapChrome" class="map-chrome" hidden>
@@ -145,15 +164,18 @@
       </aside>
     </main>
 
-    <!-- Bottom capsule matching reference photo -->
+    <!-- Bottom hexagonal capsule matching reference photo -->
     <div class="analizza-bar" id="analizzaBar">
-      <input id="chatInput" type="text" placeholder="Analizza…" autocomplete="off" />
+      <input id="chatInput" type="text" placeholder="Analizza…" autocomplete="off" aria-label="Analizza" />
       <div class="analizza-actions">
         <button type="button" id="globalMic" class="analizza-mic" title="Voce">
-          <span class="mic-glyph" aria-hidden="true"></span>
+          <svg class="mic-glyph" viewBox="0 0 16 22" aria-hidden="true"><rect x="4.5" y="1" width="7" height="12" rx="3.5"/><path d="M1.5 10.5a6.5 6.5 0 0 0 13 0M8 17v4"/></svg>
           <span>MIC</span>
         </button>
-        <button type="button" id="sendChat" class="analizza-send" title="Invia">◎</button>
+        <button type="button" id="sendChat" class="analizza-send" title="Invia" aria-label="Invia">
+          <svg viewBox="0 0 32 32" aria-hidden="true"><circle class="sonar-outer" cx="16" cy="16" r="14.5"/><circle class="sonar-inner" cx="16" cy="16" r="8"/><circle class="sonar-core" cx="16" cy="16" r="2"/></svg>
+          <span class="sonar-ping" aria-hidden="true"></span>
+        </button>
       </div>
     </div>
 
@@ -172,6 +194,6 @@
     }
   }
   </script>
-  <script type="module" src="/js/app.js?v=holo-pack-4"></script>
+  <script type="module" src="/js/app.js?v=holo-pack-5"></script>
 </body>
 </html>
