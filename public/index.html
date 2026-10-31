@@ -15,14 +15,23 @@
       <div class="brand">OPS · COMMERCE INTEL</div>
       <div id="healthBadge" class="health warn">HEALTH —</div>
       <nav class="nav" id="moduleNav">
-        <button data-module="map" class="active">Map</button>
-        <button data-module="pipeline">Pipeline</button>
-        <button data-module="memory">Memory</button>
-        <button data-module="chat">Chat</button>
+        <button data-module="map" class="active" title="Shortcut 1">Map</button>
+        <button data-module="pipeline" title="Shortcut 2">Pipeline</button>
+        <button data-module="memory" title="Shortcut 3">Memory</button>
+        <button data-module="chat" title="Shortcut 4">Chat</button>
       </nav>
+      <button id="refreshBtn" class="pill-btn" title="Refresh snapshot">Refresh</button>
       <button id="globalMic" class="icon-btn mic" title="Voice command (all modules)">MIC</button>
       <button id="logoutBtn" class="pill-btn" title="Logout">Logout</button>
     </header>
+    <div id="statsStrip" class="stats-strip" aria-live="polite">
+      <span id="statDay" class="stat mono">DAY —</span>
+      <span id="statTops" class="stat">Tops —</span>
+      <span id="statErrors" class="stat">Errors —</span>
+      <span id="statCoverage" class="stat">Coverage —</span>
+      <span id="statSecrets" class="stat">API —</span>
+      <span id="statUpdated" class="stat muted mono">Updated —</span>
+    </div>
 
     <main class="stage">
       <section class="viewport" id="viewport">
@@ -50,7 +59,10 @@
           <div class="chat-model-bar">
             <label class="chat-model-label" for="chatModelSelect">Model</label>
             <select id="chatModelSelect" class="chat-model-select" title="Chat model"></select>
+            <span id="chatModelHint" class="chat-model-hint muted mono"></span>
+            <button type="button" id="exportChatBtn" class="pill-btn" title="Export thread">Export</button>
           </div>
+          <div id="chatPromptChips" class="prompt-chips" aria-label="Suggested prompts"></div>
           <div class="messages" id="messageList"></div>
           <div class="composer">
             <button id="chatMic" class="icon-btn mic" title="Dictate">MIC</button>
@@ -61,15 +73,19 @@
       </section>
 
       <aside class="side" id="sidePanel">
-        <h2 id="sideTitle">Ops</h2>
+        <div class="side-head">
+          <h2 id="sideTitle">Ops</h2>
+          <div id="sideTools" class="side-tools"></div>
+        </div>
         <div id="sideBody" class="list"></div>
       </aside>
     </main>
 
     <footer class="footer">
-      <span id="footerLeft">Verification threshold raised · mechanical first</span>
+      <span id="footerLeft">Verification threshold raised · mechanical first · keys 1–4 switch modules</span>
       <span id="footerRight" class="mono"></span>
     </footer>
+    <div id="toastHost" class="toast-host" aria-live="polite"></div>
   </div>
 
   <script type="importmap">

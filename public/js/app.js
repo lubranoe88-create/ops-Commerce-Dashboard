@@ -9,6 +9,31 @@ import {
 } from "./mapGlobe.js";
 
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
+const COMPANY_NOTES_KEY = "ops_company_notes";
+const MODULES = ["map", "pipeline", "memory", "chat"];
+const CHAT_SUGGESTIONS = [
+  "Riassumi i top di oggi",
+  "Quali errori pipeline sono aperti?",
+  "Dove è debole la coverage?",
+  "Confronta i primi 3 business",
+  "Cosa verificare prima del ranking?",
+];
+const MODEL_COST_HINTS = {
+  "deepseek/deepseek-v4.1-flash": "~$0.05–0.50 /1M",
+  "deepseek/deepseek-v4.1-flash-1017": "~$0.15/$0.60",
+  "perplexity/sonar": "~$1/$1 + web",
+  "z-ai/glm-5.3-flash": "~$0.02/$0.15",
+  "anthropic/claude-sonnet-5.5": "~$2/$10",
+  "openai/gpt-6.1-sol": "~$2/$10",
+  "anthropic/claude-opus-5.5": "~$4/$20",
+  "meta-llama/llama-3.1-70b-instruct": "value tier",
+  "mistralai/mixtral-8x7b-instruct": "value tier",
+  "google/gemini-2.0-flash-001": "value tier",
+  "meta-llama/llama-3.2-3b-instruct": "lite",
+  "anthropic/claude-3.5-sonnet": "premium",
+  "openai/gpt-4o": "premium",
+  "google/gemini-2.5-pro": "premium",
+};
 
 const state = {
   module: "map",
@@ -16,6 +41,9 @@ const state = {
   threadId: null,
   chatModel: null,
   chatModelCatalog: null,
+  sideFilter: "",
+  lastUpdated: null,
+  secrets: null,
   recognition: null,
   micLive: false,
   renderer: null,
@@ -780,38 +808,189 @@ function buildMemory(root, concepts, links) {
   state.autoRotate = true;
 }
 
+function showToast(message, kind = "ok") {
+  const host = $("toastHost");
+  if (!host) return;
+  const el = document.createElement("div");
+  el.className = `toast ${kind}`;
+  el.textContent = message;
+  host.appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+function readCompanyNotes() {
+  try {
+    return JSON.parse(localStorage.getItem(COMPANY_NOTES_KEY) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCompanyNote(id, text) {
+  const all = readCompanyNotes();
+  if (text?.trim()) all[id] = text.trim();
+  else delete all[id];
+  try {
+    localStorage.setItem(COMPANY_NOTES_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
+}
+
+function downloadText(filename, text, type = "text/plain") {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportTopsCsv(tops) {
+  const rows = [["rank", "id", "title", "score", "region", "source", "lat", "lon"]];
+  (tops || []).forEach((t, i) => {
+    rows.push([
+      t.rank ?? i + 1,
+      t.id || t.business_key || "",
+      `"${String(t.title || "").replace(/"/g, '""')}"`,
+      t.score ?? "",
+      `"${String(t.region || "").replace(/"/g, '""')}"`,
+      `"${String(t.source || "").replace(/"/g, '""')}"`,
+      t.lat ?? "",
+      t.lon ?? "",
+    ]);
+  });
+  downloadText(`tops-${state.snapshot?.day_key || "export"}.csv`, rows.map((r) => r.join(",")).join("\n"), "text/csv");
+  showToast("Export CSV tops completato");
+}
+
+function updateStatsStrip(snap) {
+  const health = snap?.health || {};
+  const errors = (snap?.errors || []).filter((e) => e.status === "open");
+  const cov = Math.round((health.coverageAvg ?? 0) * 100);
+  if ($("statDay")) $("statDay").innerHTML = `DAY <strong>${escapeHtml(snap?.day_key || "—")}</strong>`;
+  if ($("statTops")) $("statTops").innerHTML = `Tops <strong>${(snap?.tops || []).length}</strong>`;
+  if ($("statErrors")) $("statErrors").innerHTML = `Errors <strong>${errors.length}</strong>`;
+  if ($("statCoverage")) $("statCoverage").innerHTML = `Coverage <strong>${cov}%</strong>`;
+  if ($("statUpdated")) {
+    const ts = state.lastUpdated ? state.lastUpdated.toLocaleTimeString() : "—";
+    $("statUpdated").textContent = `Updated ${ts}`;
+  }
+  const sec = state.secrets || {};
+  if ($("statSecrets")) {
+    const or = sec.openrouter ? "OR ✓" : "OR ✗";
+    const pw = sec.site_password ? "PWD ✓" : "PWD ✗";
+    $("statSecrets").innerHTML = `API <strong>${or}</strong> · ${pw}`;
+  }
+  if ($("footerRight")) {
+    $("footerRight").textContent = `score ${health.score ?? "—"} · ${health.status || "—"}`;
+  }
+}
+
+async function refreshSecretsStatus() {
+  try {
+    const h = await fetch("/health", { credentials: "same-origin" }).then((r) => r.json());
+    state.secrets = h.secrets_configured || null;
+  } catch {
+    state.secrets = null;
+  }
+}
+
+function renderChatSuggestions() {
+  const host = $("chatPromptChips");
+  if (!host) return;
+  host.innerHTML = "";
+  CHAT_SUGGESTIONS.forEach((prompt) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = prompt;
+    b.onclick = () => {
+      $("chatInput").value = prompt;
+      sendChat(prompt);
+    };
+    host.appendChild(b);
+  });
+}
+
+function updateModelHint() {
+  const hint = $("chatModelHint");
+  if (!hint) return;
+  const id = getSelectedChatModel();
+  hint.textContent = MODEL_COST_HINTS[id] || "";
+}
+
 function sideForModule(mod, snap) {
   const body = $("sideBody");
   const title = $("sideTitle");
+  const tools = $("sideTools");
   body.innerHTML = "";
+  if (tools) tools.innerHTML = "";
   if (mod === "map") {
     title.textContent = "Daily tops · correct";
+    if (tools) {
+      const exp = document.createElement("button");
+      exp.className = "pill-btn";
+      exp.textContent = "CSV";
+      exp.title = "Export tops CSV";
+      exp.onclick = () => exportTopsCsv(snap.tops);
+      tools.appendChild(exp);
+    }
+    const filter = document.createElement("input");
+    filter.className = "side-filter";
+    filter.type = "search";
+    filter.placeholder = "Filtra tops…";
+    filter.value = state.sideFilter || "";
+    filter.addEventListener("input", () => {
+      state.sideFilter = filter.value;
+      const q = filter.value.trim().toLowerCase();
+      body.querySelectorAll(".card[data-top-id]").forEach((card) => {
+        const hay = card.getAttribute("data-filter") || "";
+        card.hidden = q ? !hay.includes(q) : false;
+      });
+    });
+    body.appendChild(filter);
+
+    const notes = readCompanyNotes();
     (snap.tops || []).forEach((t) => {
       const el = document.createElement("div");
       el.className = "card";
+      el.dataset.topId = t.id;
+      el.dataset.filter = `${t.title || ""} ${t.region || ""} ${t.source || ""}`.toLowerCase();
       el.innerHTML = `
         <div class="row"><strong>${escapeHtml(t.title)}</strong><span class="mono">${Math.round((t.score || 0) * 100)}%</span></div>
         <div class="muted">${escapeHtml(t.region || "")} · ${escapeHtml(t.source || "")}</div>
         <input type="text" placeholder="Correction note (optional)" data-note="${t.id}" />
+        <textarea class="note-local" rows="2" placeholder="Nota locale (solo browser)" data-local-note="${t.id}"></textarea>
         <div class="actions">
           <button class="pill-btn" data-correct="1" data-id="${t.id}">Correct</button>
           <button class="pill-btn" data-correct="0" data-id="${t.id}">Incorrect</button>
         </div>`;
+      const local = el.querySelector(`[data-local-note="${t.id}"]`);
+      if (local) {
+        local.value = notes[t.id] || "";
+        local.addEventListener("change", () => {
+          writeCompanyNote(t.id, local.value);
+          showToast("Nota locale salvata");
+        });
+      }
       body.appendChild(el);
     });
     body.querySelectorAll("[data-correct]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const id = btn.getAttribute("data-id");
         const note = body.querySelector(`input[data-note="${id}"]`)?.value || "";
+        const verdict = btn.getAttribute("data-correct") === "1" ? "correct" : "incorrect";
         await api("/api/corrections", {
           method: "POST",
           body: JSON.stringify({
             targetType: "top",
             targetId: id,
-            verdict: btn.getAttribute("data-correct") === "1" ? "correct" : "incorrect",
+            verdict,
             note,
           }),
         });
+        showToast(verdict === "correct" ? "Segnato correct" : "Segnato incorrect", verdict === "correct" ? "ok" : "warn");
         await refresh();
       });
     });
@@ -836,7 +1015,6 @@ function sideForModule(mod, snap) {
       b.textContent = label;
       b.onclick = () => {
         if (!window.Cesium) return;
-        const v = window.Cesium;
         // fly relative to first top or Europe
         const t0 = (state.snapshot?.tops || [])[0];
         const lon = Number.isFinite(t0?.lon) ? t0.lon : 12.5;
@@ -922,8 +1100,10 @@ async function showModule(mod) {
   const snap = state.snapshot || {};
   const mapChrome = $("mapChrome");
   const hud = document.querySelector(".overlay-hud");
+  const pickCard = $("mapPickCard");
   if (mapChrome) mapChrome.hidden = mod !== "map";
   if (hud) hud.hidden = mod === "chat";
+  if (pickCard && mod !== "map") pickCard.hidden = true;
 
   // Always tear down the previous module host so canvases cannot stack / steal clicks.
   clearViewportHost();
@@ -992,8 +1172,11 @@ async function showModule(mod) {
 }
 
 async function refresh() {
+  await refreshSecretsStatus();
   const snap = await api("/api/dashboard/snapshot");
   state.snapshot = snap;
+  state.lastUpdated = new Date();
+  updateStatsStrip(snap);
   await showModule(state.module);
 }
 
