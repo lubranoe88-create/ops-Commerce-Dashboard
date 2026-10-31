@@ -40,6 +40,14 @@ export const CHAT_MODEL_GROUPS = [
     label: "Top-tier",
     models: [
       {
+        id: "x-ai/grok-4.20",
+        label: "Grok 4.20 (power escalate)",
+      },
+      {
+        id: "x-ai/grok-4.6",
+        label: "Grok 4.6",
+      },
+      {
         id: "anthropic/claude-3.5-sonnet",
         label: "Claude 3.5 Sonnet",
       },
@@ -59,10 +67,10 @@ const ALLOWED = new Set(
   CHAT_MODEL_GROUPS.flatMap((g) => g.models.map((m) => m.id)),
 );
 
-/** Ensure env default is always selectable even if not listed above. */
-if (config.openRouterModel) {
-  ALLOWED.add(config.openRouterModel);
-}
+/** Ensure env defaults are always selectable even if not listed above. */
+if (config.openRouterModel) ALLOWED.add(config.openRouterModel);
+if (config.aiRouterModel) ALLOWED.add(config.aiRouterModel);
+if (config.aiGrokModel) ALLOWED.add(config.aiGrokModel);
 
 export function isAllowedChatModel(modelId) {
   return typeof modelId === "string" && ALLOWED.has(modelId.trim());

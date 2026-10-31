@@ -732,6 +732,93 @@ body[data-module="chat"] #chatPanel {
 .top-status .health.warn { color: var(--amber); }
 .top-status .health.bad { color: var(--red); }
 .stat-pill { color: var(--photo-dim); }
+
+/* Lightweight AI busy signal — visible only while the agent is working */
+.ai-busy-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin: 0 0 0 2px;
+  color: var(--photo-health);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.ai-busy-mark.is-on {
+  opacity: 0.92;
+  animation: ai-busy-pulse 1.35s ease-in-out infinite;
+}
+.ai-busy-mark[hidden] { display: none !important; }
+.ai-busy-check {
+  width: 11px;
+  height: 11px;
+  display: block;
+}
+@keyframes ai-busy-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.92); }
+  45% { opacity: 1; transform: scale(1); }
+  70% { opacity: 0.75; }
+}
+body[data-ai-busy="1"] .analizza-send { opacity: 0.72; }
+
+.ai-briefing {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 10, 0.55);
+  backdrop-filter: blur(2px);
+}
+.ai-briefing[hidden] { display: none !important; }
+.ai-briefing-panel {
+  width: min(420px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 22px 18px;
+  background: rgba(6, 12, 18, 0.94);
+  border: 1px solid rgba(180, 200, 220, 0.18);
+  color: rgba(230, 236, 244, 0.92);
+  font-family: var(--font);
+}
+.ai-briefing-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ai-briefing-lead {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: rgba(196, 206, 220, 0.72);
+}
+.ai-briefing-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: rgba(196, 206, 220, 0.78);
+}
+.ai-briefing-field input {
+  height: 36px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(180, 200, 220, 0.22);
+  color: inherit;
+  font: inherit;
+}
+.ai-briefing-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
 .top-right {
   position: relative;
   justify-self: end;

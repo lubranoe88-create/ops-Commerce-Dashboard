@@ -17,11 +17,25 @@ import {
   setOrbitEnabled,
   setPulseTop,
   updateMapGlobeTops,
+  updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=holo-pack-14";
+} from "./mapGlobe.js?v=paid-ai-2";
+import {
+  fetchAiNews,
+  fetchAiStatus,
+  openBriefingModal,
+  runPaidAiTurn,
+  shouldPromptBriefing,
+  startProactivePolling,
+  syncClientMemoryToServer,
+  wireActionRunner,
+  wireBriefingForm,
+  wireBriefingHandler,
+  wireProactiveHandlers,
+} from "./aiAgentUi.js?v=paid-ai-2";
 
-const BUILD_ID = "inventory-6";
+const BUILD_ID = "paid-ai-2";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -95,6 +109,9 @@ const state = {
   lastUserInputAt: 0,
   refreshCount: 0,
   lowGpu: false,
+  aiStatus: null,
+  aiPaid: false,
+  news: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -1665,6 +1682,18 @@ function runHoloAction(action, { fromVoice = false } = {}) {
     case "fly":
       if (t0) flyToTopCard(t0);
       return Promise.resolve();
+    case "focus-top": {
+      const id = state.focusedTopId || t0?.id;
+      if (id) setFocusedTop(id);
+      if (t0) flyToTopCard(t0);
+      showToast(`FOCUS TOP · ${src}`);
+      return Promise.resolve();
+    }
+    case "inspect":
+      return showModule("pipeline").then(() => {
+        syncHoloActive("pipeline");
+        showToast(`INSPECT · ${src}`);
+      });
     case "strumenti": {
       const on = setToolsOpen();
       showToast(`STRUMENTI ${on ? "ON" : "OFF"} · ${src}`);
@@ -2195,6 +2224,7 @@ async function showModule(mod, opts = {}) {
           if (!stillCurrent(epoch, mod)) return;
           applyMapFilters();
           emphasizeTopIds([...state.compareIds, state.tourTopId].filter(Boolean));
+          if (state.news?.length) updateNewsPins(state.news);
           state.mapEngine = "cesium";
         } catch (err) {
           if (!stillCurrent(epoch, mod)) return;
@@ -2267,6 +2297,7 @@ function refresh({ silent = false, remount = false } = {}) {
     const mapLive = state.module === "map" && state.mapEngine === "cesium" && getViewer() && !moduleSwitchLocked;
     if (!remount && mapLive) {
       await updateMapGlobeTops(snap.tops);
+      if (state.news?.length) updateNewsPins(state.news);
       applyMapFilters();
       emphasizeTopIds([...state.compareIds, state.tourTopId].filter(Boolean));
       sideForModule("map", snap);
@@ -2391,6 +2422,27 @@ async function sendChat(text, { voice = false } = {}) {
   await ensureChatModelSelect();
   const model = getSelectedChatModel();
   try {
+    // Paid AI agent path: busy ✓ while working, actions[] applied, reply in chat
+    if (state.aiPaid) {
+      const result = await runPaidAiTurn({
+        message: text,
+        uiState: { module: state.module, focusedTopId: state.focusedTopId },
+      });
+      $("chatInput").value = "";
+      const reply = result.reply || "(nessuna risposta)";
+      postChatUpdate(`${text}`, "ok");
+      postChatUpdate(reply, result.blocked ? "warn" : "ok");
+      if (result.tier) {
+        const budget = result.budget;
+        const rem =
+          budget && Number.isFinite(budget.remainingEur)
+            ? ` · €${budget.remainingEur.toFixed(2)} left`
+            : "";
+        showToast(`AI ${result.tier}${rem}`);
+      }
+      if (voice) postChatUpdate("Risposta vocale ricevuta in chat", "ok");
+      return;
+    }
     await api(`/api/chat/threads/${state.threadId}/messages`, {
       method: "POST",
       body: JSON.stringify({ content: text, model }),
@@ -2398,7 +2450,6 @@ async function sendChat(text, { voice = false } = {}) {
     $("chatInput").value = "";
     await loadChat();
     if (voice) {
-      // Voice input → text reply in chat only (no TTS readback)
       postChatUpdate("Risposta vocale ricevuta in chat", "ok");
     }
   } catch (err) {
@@ -2732,6 +2783,62 @@ function setupMic(button, onText) {
   return control;
 }
 
+async function loadAiNewsPins() {
+  try {
+    const data = await fetchAiNews();
+    state.news = data.news || [];
+    if (state.module === "map" && getViewer()) updateNewsPins(state.news);
+  } catch (err) {
+    console.warn("[ai] news pins", err?.message || err);
+  }
+}
+
+async function initPaidAi() {
+  wireBriefingForm();
+  wireActionRunner((action, raw) => {
+    const type = typeof action === "string" ? action : action?.type || raw?.type;
+    return runHoloAction(type, { fromVoice: false });
+  });
+  wireBriefingHandler(async (result) => {
+    if (result?.news?.length) {
+      state.news = result.news;
+      if (getViewer()) updateNewsPins(state.news);
+    }
+    if (result?.briefing) {
+      postChatUpdate(result.briefing, "ok");
+      showToast("Briefing pronto");
+    }
+    if (Array.isArray(result?.suggestions) && result.suggestions.length) {
+      const tip = result.suggestions
+        .slice(0, 3)
+        .map((s) => `· ${s.area || "ops"}: ${s.issue || ""}`)
+        .join(" ");
+      if (tip) postChatUpdate(`Suggerimenti: ${tip}`, "ok");
+    }
+  });
+  wireProactiveHandlers({
+    onEvent: (ev, toast) => {
+      postChatUpdate(`[proactive:${ev.kind}] ${toast}`, "ok");
+      showToast(toast, "ok");
+    },
+    speak: (text) => speak(text, { force: true }),
+  });
+  try {
+    state.aiStatus = await fetchAiStatus();
+    state.aiPaid = Boolean(state.aiStatus?.paid);
+    document.body.dataset.aiPaid = state.aiPaid ? "1" : "0";
+    if (state.aiPaid) {
+      await loadAiNewsPins();
+      await syncClientMemoryToServer().catch(() => {});
+      startProactivePolling(45000);
+      if (shouldPromptBriefing(state.aiStatus)) openBriefingModal();
+    }
+  } catch (err) {
+    console.warn("[ai] status", err?.message || err);
+    state.aiPaid = false;
+  }
+}
+
 function wireUi() {
   $("moduleNav").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-module]");
@@ -3042,6 +3149,7 @@ async function boot() {
   try {
     // Always refresh latest data on open
     await refresh();
+    await initPaidAi();
     startAutoSystems();
     maybeVoiceOnboarding();
     saveLastView(state.module);

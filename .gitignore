@@ -6,3 +6,5 @@ node_modules/
 data/
 backend/data/
 *.sqlite
+
+backend/data/browser-use-audit/
