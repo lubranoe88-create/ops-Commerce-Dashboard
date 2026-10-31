@@ -18,8 +18,9 @@ const EOX_TERRAIN_URL =
   "https://tiles.maps.eox.at/wmts/1.0.0/terrain-light_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg";
 /** Home framing matching the reference photo: EMEA night hemisphere, crown under the header. */
 export const HOME_VIEW = { lon: 30, lat: 24, height: 12_600_000 };
-const LOCK_MIN_ZOOM = 11_000_000;
-const LOCK_MAX_ZOOM = 16_000_000;
+/** User zoom range — street to full-globe. (Old "fixed orbit" lock blocked all zoom.) */
+const USER_MIN_ZOOM = 400;
+const USER_MAX_ZOOM = 2.8e7;
 let mountSeq = 0;
 let resizeWired = false;
 
@@ -524,12 +525,83 @@ export function flyToTop(lon, lat, height = 25000) {
   if (!viewer || !window.Cesium) return;
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
   userInteracting = true;
-  unlockProgrammaticZoom(Math.max(2400, height < 1_000_000 ? 3200 : 2400));
+  enableUserZoom();
+  const h = clampHeight(height);
   viewer.camera.flyTo({
-    destination: window.Cesium.Cartesian3.fromDegrees(lon, lat, height),
-    duration: 2.0,
+    destination: window.Cesium.Cartesian3.fromDegrees(lon, lat, h),
+    duration: 1.6,
   });
   scheduleIdleResume();
+}
+
+function clampHeight(h) {
+  const n = Number(h);
+  if (!Number.isFinite(n)) return HOME_VIEW.height;
+  return Math.min(USER_MAX_ZOOM, Math.max(USER_MIN_ZOOM, n));
+}
+
+/** Keep wheel / pinch / keyboard zoom available at every altitude. */
+export function enableUserZoom() {
+  if (!viewer || viewer.isDestroyed?.() || !window.Cesium) return;
+  const Cesium = window.Cesium;
+  const ctrl = viewer.scene.screenSpaceCameraController;
+  ctrl.enableZoom = true;
+  ctrl.inertiaZoom = 0.8;
+  ctrl.minimumZoomDistance = USER_MIN_ZOOM;
+  ctrl.maximumZoomDistance = USER_MAX_ZOOM;
+  ctrl.zoomEventTypes = [
+    Cesium.CameraEventType.WHEEL,
+    Cesium.CameraEventType.PINCH,
+  ];
+  clearTimeout(enableUserZoom._lockTimer);
+}
+
+/**
+ * Keyboard / HUD zoom relative to current altitude.
+ * factor < 1 → closer (zoom in); factor > 1 → farther (zoom out).
+ * Works even if the controller momentarily had zoom disabled.
+ */
+export function zoomByFactor(factor = 0.65, { duration = 0.35 } = {}) {
+  if (!viewer || viewer.isDestroyed?.() || !window.Cesium) return null;
+  const Cesium = window.Cesium;
+  const carto = viewer.camera.positionCartographic;
+  if (!carto) return null;
+  userInteracting = true;
+  enableUserZoom();
+  const next = clampHeight(carto.height * Number(factor || 1));
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, next),
+    orientation: {
+      heading: viewer.camera.heading,
+      pitch: viewer.camera.pitch,
+      roll: viewer.camera.roll,
+    },
+    duration,
+  });
+  scheduleIdleResume();
+  return next;
+}
+
+/** Absolute altitude jump (meters above ellipsoid), keeping lon/lat. */
+export function zoomToHeight(heightM, { duration = 0.9 } = {}) {
+  if (!viewer || viewer.isDestroyed?.() || !window.Cesium) return null;
+  const Cesium = window.Cesium;
+  const carto = viewer.camera.positionCartographic;
+  if (!carto) return null;
+  userInteracting = true;
+  enableUserZoom();
+  const next = clampHeight(heightM);
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, next),
+    orientation: {
+      heading: viewer.camera.heading,
+      pitch: viewer.camera.pitch,
+      roll: viewer.camera.roll,
+    },
+    duration,
+  });
+  scheduleIdleResume();
+  return next;
 }
 
 /** Dim / hide top pins that fail `matchFn(top)`. Pass null to show all. */
@@ -1036,15 +1108,18 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   }
 
   const ctrl = viewer.scene.screenSpaceCameraController;
-  // Fixed globe zoom: user wheel/pinch cannot change altitude (voice/programmatic fly still works).
-  ctrl.enableZoom = false;
-  ctrl.zoomEventTypes = [];
-  ctrl.minimumZoomDistance = LOCK_MIN_ZOOM;
-  ctrl.maximumZoomDistance = LOCK_MAX_ZOOM;
+  // Interactive zoom on every map view (wheel, pinch, keyboard via zoomByFactor).
+  ctrl.enableZoom = true;
+  ctrl.minimumZoomDistance = USER_MIN_ZOOM;
+  ctrl.maximumZoomDistance = USER_MAX_ZOOM;
   ctrl.enableCollisionDetection = true;
   ctrl.inertiaSpin = 0.92;
   ctrl.inertiaTranslate = 0.9;
-  ctrl.inertiaZoom = 0;
+  ctrl.inertiaZoom = 0.8;
+  ctrl.zoomEventTypes = [
+    Cesium.CameraEventType.WHEEL,
+    Cesium.CameraEventType.PINCH,
+  ];
   ctrl.rotateEventTypes = [Cesium.CameraEventType.LEFT_DRAG];
   ctrl.tiltEventTypes = [
     Cesium.CameraEventType.RIGHT_DRAG,
@@ -1119,6 +1194,7 @@ function teardownViewer() {
   stopLodWatcher();
   stopOrbitDrift();
   clearTimeout(idleTimer);
+  clearTimeout(enableUserZoom._lockTimer);
   clearTimeout(unlockProgrammaticZoom._t);
   onLodCallback = null;
   onSelectCallback = null;
@@ -1196,24 +1272,9 @@ export function getGlobeState() {
 }
 
 /**
- * Allow a programmatic fly, then freeze user zoom around the altitude we arrived at.
- * Re-applying the orbit band (11–16e6 m) would yank a city fly back out to space.
+ * Back-compat alias: keep zoom enabled (no re-freeze). Previously this
+ * temporarily unlocked then locked altitude so wheel/keys appeared broken.
  */
-export function unlockProgrammaticZoom(ms = 2200) {
-  if (!viewer || viewer.isDestroyed?.()) return;
-  const ctrl = viewer.scene.screenSpaceCameraController;
-  ctrl.enableZoom = true;
-  ctrl.minimumZoomDistance = 120;
-  ctrl.maximumZoomDistance = 2.8e7;
-  clearTimeout(unlockProgrammaticZoom._t);
-  unlockProgrammaticZoom._t = setTimeout(() => {
-    if (!viewer || viewer.isDestroyed?.()) return;
-    const c = viewer.scene.screenSpaceCameraController;
-    const h = viewer.camera.positionCartographic?.height || HOME_VIEW.height;
-    const pad = Math.max(40_000, h * 0.06);
-    c.enableZoom = false;
-    c.zoomEventTypes = [];
-    c.minimumZoomDistance = Math.max(80, h - pad);
-    c.maximumZoomDistance = h + pad;
-  }, ms);
+export function unlockProgrammaticZoom(_ms = 2200) {
+  enableUserZoom();
 }

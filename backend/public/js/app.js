@@ -17,7 +17,9 @@ import {
   setOrbitEnabled,
   setPulseTop,
   updateMapGlobeTops,
-} from "./mapGlobe.js?v=holo-pack-11";
+  zoomByFactor,
+  zoomToHeight,
+} from "./mapGlobe.js?v=holo-pack-12";
 
 const BUILD_ID = "inventory-6";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
@@ -926,6 +928,13 @@ function showToast(message, kind = "ok") {
   setTimeout(() => el.remove(), 3200);
 }
 
+function formatAlt(meters) {
+  const h = Number(meters);
+  if (!Number.isFinite(h)) return "";
+  if (h >= 1000) return `${Math.round(h / 1000)} km`;
+  return `${Math.round(h)} m`;
+}
+
 function readCompanyNotes() {
   try {
     return JSON.parse(localStorage.getItem(COMPANY_NOTES_KEY) || "{}") || {};
@@ -1590,6 +1599,17 @@ function runHoloAction(action, { fromVoice = false } = {}) {
         syncHoloActive("zoom-citta");
         showToast(`ZOOM CITTÀ · ${src}`);
       });
+    case "zoom-in":
+      return showModule("map").then(() => {
+        const h = zoomByFactor(0.55);
+        syncHoloActive("zoom-citta");
+        showToast(`ZOOM IN · ${src}${h ? ` · ${formatAlt(h)}` : ""}`);
+      });
+    case "zoom-out":
+      return showModule("map").then(() => {
+        const h = zoomByFactor(1.85);
+        showToast(`ZOOM OUT · ${src}${h ? ` · ${formatAlt(h)}` : ""}`);
+      });
     case "zoom-paese":
       return showModule("map").then(() => {
         flyToTop(lon, lat, 1_500_000);
@@ -1683,6 +1703,8 @@ function handleVoiceCommand(text) {
     [/fly|vola|vai l[iì]/, "fly"],
     [/zoom\s*paese|zoom\s*country/, "zoom-paese"],
     [/zoom\s*continente/, "zoom-continente"],
+    [/zoom\s*out|allontana|riduci|piu\s*lontano/, "zoom-out"],
+    [/zoom\s*in|avvicina|ingrandisci|piu\s*vicino/, "zoom-in"],
     [/\bzoom\b|citta|city/, "zoom-citta"],
     [/orbit|orbita/, "orbit"],
     [/nord|north/, "nord"],
@@ -1919,7 +1941,7 @@ function sideForModule(mod, snap) {
     extras.appendChild(filter);
     const zoomHelp = document.createElement("div");
     zoomHelp.className = "card";
-    zoomHelp.innerHTML = `<div class="muted">Globo a zoom fisso: usa i salti qui, «zoom città», «orbit», «nord» o Fly sul top.</div>
+    zoomHelp.innerHTML = `<div class="muted">Zoom: tasti <span class="mono">+</span>/<span class="mono">−</span> (o <span class="mono">=</span>/<span class="mono">_</span>), rotella, pinch · voce «zoom» / «zoom in» · salti LOD · Orbit / Nord / Fly.</div>
       <div class="actions" id="lodJumps"></div>`;
     extras.appendChild(zoomHelp);
     const jumps = [
@@ -2460,12 +2482,13 @@ function createSpeechRecognizer() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return null;
   const rec = new SR();
-  // Safari: short continuous session; Chrome: single utterance is more reliable
+  // Single-utterance mode: more reliable for short plancia commands ("mappa", "zoom").
+  // Safari still needs continuous=true or it often ends with no-speech immediately.
   rec.continuous = Boolean(isAppleWebKit());
-  rec.interimResults = false;
+  rec.interimResults = Boolean(isAppleWebKit());
   rec.lang = "it-IT";
   try {
-    rec.maxAlternatives = 1;
+    rec.maxAlternatives = 3;
   } catch {
     /* older WebKit */
   }
@@ -2548,21 +2571,39 @@ function setupMic(button, onText) {
     instance.onresult = (ev) => {
       let text = "";
       try {
-        // Prefer the latest final result; fall back to last alternative.
+        // Prefer a final transcript; on Safari interim results keep the session alive.
         for (let i = ev.results.length - 1; i >= 0; i -= 1) {
           const res = ev.results[i];
-          if (res?.isFinal || i === ev.results.length - 1) {
-            text = res?.[0]?.transcript || "";
-            if (text) break;
+          const piece = res?.[0]?.transcript || "";
+          if (!piece) continue;
+          if (res.isFinal || !isAppleWebKit()) {
+            text = piece;
+            break;
           }
+          // Keep last interim so a sudden onend still has something to dispatch.
+          if (!text) text = piece;
         }
       } catch {
         text = "";
       }
+      const finalish = (() => {
+        try {
+          const last = ev.results?.[ev.results.length - 1];
+          return Boolean(last?.isFinal) || !isAppleWebKit();
+        } catch {
+          return true;
+        }
+      })();
+      if (!finalish && isAppleWebKit()) {
+        // Wait for final result on Safari continuous sessions.
+        instance._opsLastInterim = text;
+        return;
+      }
       hardStop();
-      if (text.trim()) {
-        postChatUpdate(`Ascoltato: ${text.trim()}`);
-        onText(text.trim());
+      const heard = (text || instance._opsLastInterim || "").trim();
+      if (heard) {
+        postChatUpdate(`Ascoltato: ${heard}`);
+        onText(heard);
       } else {
         postChatUpdate(micErrorMessage("no-speech"), "warn");
       }
@@ -2575,6 +2616,15 @@ function setupMic(button, onText) {
       if (msg) postChatUpdate(msg, "warn");
     };
     instance.onend = () => {
+      const pending = String(instance._opsLastInterim || "").trim();
+      if (pending && (state.micLive || starting)) {
+        // Safari sometimes ends the session after interim only — still dispatch the command.
+        const heard = pending;
+        hardStop();
+        postChatUpdate(`Ascoltato: ${heard}`);
+        onText(heard);
+        return;
+      }
       if (!state.micLive && !starting) return;
       releaseMicStream(micStream);
       micStream = null;
@@ -2738,10 +2788,52 @@ function wireUi() {
       if (moduleSwitchLocked) return;
       const mod = MODULES[Number(e.key) - 1];
       if (mod) showModule(mod);
-    } else if (e.key === "r" && (e.metaKey || e.ctrlKey)) {
+      return;
+    }
+    if (e.key === "r" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       refresh().then(() => showToast("Dashboard aggiornata"));
-    } else if ((e.key === "c" || e.key === "C") && state.module === "map" && state.focusedTopId) {
+      return;
+    }
+    // Map zoom keys — work on every map altitude (orbit → street), not voice-only.
+    const zoomInKey = e.key === "+" || e.key === "=" || e.code === "Equal" || e.key === "Add" || e.code === "NumpadAdd";
+    const zoomOutKey = e.key === "-" || e.key === "_" || e.key === "Subtract" || e.code === "Minus" || e.code === "NumpadSubtract";
+    if ((zoomInKey || zoomOutKey) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      const runZoom = () => {
+        if (getViewer()) {
+          const h = zoomByFactor(zoomInKey ? 0.55 : 1.85);
+          showToast(`${zoomInKey ? "ZOOM +" : "ZOOM −"}${h ? ` · ${formatAlt(h)}` : ""}`);
+          return;
+        }
+        // Three.js map / pipeline / memory: move camera along the look vector
+        if (state.camera && state.controls) {
+          const cam = state.camera;
+          const target = state.controls.target;
+          const dir = cam.position.clone().sub(target);
+          dir.multiplyScalar(zoomInKey ? 0.7 : 1.45);
+          cam.position.copy(target.clone().add(dir));
+          state.controls.update?.();
+          showToast(zoomInKey ? "ZOOM +" : "ZOOM −");
+          return;
+        }
+        showToast("Vista non pronta per lo zoom", "warn");
+      };
+      // Prefer staying on the current module if it already has a camera; else open map.
+      if (getViewer() || (state.camera && state.controls)) {
+        runZoom();
+      } else {
+        showModule("map").then(runZoom);
+      }
+      return;
+    }
+    if ((e.key === "0" || e.key === "Home") && state.module === "map" && getViewer()) {
+      e.preventDefault();
+      zoomToHeight(HOME_VIEW.height, { duration: 1.2 });
+      showToast("ZOOM · home orbit");
+      return;
+    }
+    if ((e.key === "c" || e.key === "C") && state.module === "map" && state.focusedTopId) {
       e.preventDefault();
       submitCorrection(state.focusedTopId, "correct");
     } else if ((e.key === "i" || e.key === "I") && state.module === "map" && state.focusedTopId) {
