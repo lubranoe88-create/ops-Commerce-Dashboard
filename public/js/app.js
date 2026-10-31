@@ -17,7 +17,7 @@ import {
   setOrbitEnabled,
   setPulseTop,
   updateMapGlobeTops,
-} from "./mapGlobe.js?v=holo-pack-10";
+} from "./mapGlobe.js?v=holo-pack-11";
 
 const BUILD_ID = "inventory-6";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
@@ -1564,7 +1564,11 @@ function runHoloAction(action, { fromVoice = false } = {}) {
         showToast(`CHAT · ${src}`);
       });
     case "mic":
-      $("globalMic")?.click();
+      // Call the shared mic controller directly — never synthesize a click.
+      // Safari drops user-activation on programmatic .click(), so getUserMedia
+      // / SpeechRecognition would fail when MIC is tapped from the left rail.
+      if (globalMicControl) globalMicControl.toggle();
+      else $("globalMic")?.click();
       showToast(`MIC · ${src}`);
       return Promise.resolve();
     case "orbit":
@@ -1664,7 +1668,12 @@ function runHoloAction(action, { fromVoice = false } = {}) {
 }
 
 function handleVoiceCommand(text) {
-  const lower = String(text || "").toLowerCase().trim();
+  const lower = String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .trim();
+  // More-specific zoom phrases first so bare "zoom" does not steal "zoom paese".
   const rules = [
     [/aggiorna|refresh|ricalcola/, "refresh"],
     [/filtro\s*(score|punti)|score\s*75|filtro alto/, "filtro-score"],
@@ -1672,12 +1681,12 @@ function handleVoiceCommand(text) {
     [/coverage|copertura|scrub/, "coverage-next"],
     [/confronta|compare/, "confronta"],
     [/fly|vola|vai l[iì]/, "fly"],
-    [/(zoom\s*)?citt[aà]|city/, "zoom-citta"],
-    [/zoom\s*paese|country/, "zoom-paese"],
-    [/zoom\s*continente|continente/, "zoom-continente"],
+    [/zoom\s*paese|zoom\s*country/, "zoom-paese"],
+    [/zoom\s*continente/, "zoom-continente"],
+    [/\bzoom\b|citta|city/, "zoom-citta"],
     [/orbit|orbita/, "orbit"],
     [/nord|north/, "nord"],
-    [/\bmappa\b|\bmap\b|globo/, "map"],
+    [/\bmappa\b|\bmap\b|globo|cartina/, "map"],
     [/pipeline/, "pipeline"],
     [/memory|memoria/, "memory"],
     [/analizza|analyze/, "analizza"],
@@ -2409,14 +2418,13 @@ function micErrorMessage(code) {
   }
 }
 
-async function ensureMicPermission() {
+/** Keep the MediaStream alive while SpeechRecognition runs (Safari goes silent if tracks are stopped too early). */
+async function acquireMicStream() {
   if (!window.isSecureContext) {
     return { ok: false, code: "secure-context" };
   }
-  // Safari / iOS: SpeechRecognition often stays silent until getUserMedia
-  // has granted mic access in the same user-gesture turn.
   if (!navigator.mediaDevices?.getUserMedia) {
-    return { ok: true };
+    return { ok: true, stream: null };
   }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -2427,6 +2435,15 @@ async function ensureMicPermission() {
       },
       video: false,
     });
+    return { ok: true, stream };
+  } catch (err) {
+    return { ok: false, code: err?.name || "not-allowed" };
+  }
+}
+
+function releaseMicStream(stream) {
+  if (!stream) return;
+  try {
     stream.getTracks().forEach((t) => {
       try {
         t.stop();
@@ -2434,9 +2451,8 @@ async function ensureMicPermission() {
         /* ignore */
       }
     });
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, code: err?.name || "not-allowed" };
+  } catch {
+    /* ignore */
   }
 }
 
@@ -2444,7 +2460,7 @@ function createSpeechRecognizer() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return null;
   const rec = new SR();
-  // Safari is more reliable with a short continuous session + interim off
+  // Safari: short continuous session; Chrome: single utterance is more reliable
   rec.continuous = Boolean(isAppleWebKit());
   rec.interimResults = false;
   rec.lang = "it-IT";
@@ -2456,33 +2472,50 @@ function createSpeechRecognizer() {
   return rec;
 }
 
+/** Shared MIC controller so left-rail + Analizza bar use the same session (no synthetic clicks). */
+let globalMicControl = null;
+
 function setupMic(button, onText) {
+  if (!button) return null;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
     button.title = "Riconoscimento vocale non supportato in questo browser";
     button.setAttribute("aria-disabled", "true");
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (e) => {
+      e.preventDefault();
       postChatUpdate(
-        "Safari/iOS più vecchi non supportano il riconoscimento vocale. Aggiorna Safari oppure usa Chrome.",
+        "Questo browser non supporta il riconoscimento vocale. Aggiorna Safari oppure usa Chrome.",
         "warn",
       );
     });
-    return;
+    return null;
   }
-  if (button.dataset.micWired) return;
+  if (button.dataset.micWired) {
+    return globalMicControl;
+  }
   button.dataset.micWired = "1";
   button.title = "Tocca per parlare (it-IT)";
   button.setAttribute("aria-pressed", "false");
 
   let rec = null;
+  let micStream = null;
   let starting = false;
+  const uiButtons = new Set([button]);
+
+  const setLiveUi = (live) => {
+    state.micLive = live;
+    document.body.classList.toggle("mic-live", live);
+    for (const btn of uiButtons) {
+      btn.classList.toggle("live", live);
+      btn.setAttribute("aria-pressed", live ? "true" : "false");
+    }
+    const dockMic = document.querySelector('#holoVoicePlancia [data-holo-action="mic"]');
+    dockMic?.classList.toggle("is-active", live);
+  };
 
   const stopUi = () => {
-    state.micLive = false;
     starting = false;
-    button.classList.remove("live");
-    button.setAttribute("aria-pressed", "false");
-    document.body.classList.remove("mic-live");
+    setLiveUi(false);
   };
 
   const hardStop = () => {
@@ -2491,6 +2524,7 @@ function setupMic(button, onText) {
         rec.onresult = null;
         rec.onerror = null;
         rec.onend = null;
+        rec.onstart = null;
         rec.abort?.();
       } catch {
         try {
@@ -2501,15 +2535,27 @@ function setupMic(button, onText) {
       }
       rec = null;
     }
+    releaseMicStream(micStream);
+    micStream = null;
     stopUi();
   };
 
   const bindRec = (instance) => {
+    instance.onstart = () => {
+      starting = false;
+      setLiveUi(true);
+    };
     instance.onresult = (ev) => {
       let text = "";
       try {
-        const res = ev.results?.[ev.results.length - 1];
-        text = res?.[0]?.transcript || "";
+        // Prefer the latest final result; fall back to last alternative.
+        for (let i = ev.results.length - 1; i >= 0; i -= 1) {
+          const res = ev.results[i];
+          if (res?.isFinal || i === ev.results.length - 1) {
+            text = res?.[0]?.transcript || "";
+            if (text) break;
+          }
+        }
       } catch {
         text = "";
       }
@@ -2525,21 +2571,19 @@ function setupMic(button, onText) {
       const code = ev?.error || "mic";
       hardStop();
       if (code === "aborted") return;
-      // no-speech is common on Safari if the session ends quickly — soft tip
       const msg = micErrorMessage(code);
       if (msg) postChatUpdate(msg, "warn");
     };
     instance.onend = () => {
-      // Safari often fires onend right after a result or abort
       if (!state.micLive && !starting) return;
+      releaseMicStream(micStream);
+      micStream = null;
       stopUi();
       rec = null;
     };
   };
 
-  button.addEventListener("click", async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const startRecognition = async () => {
     silenceVoice();
     markUserInput?.();
 
@@ -2550,21 +2594,18 @@ function setupMic(button, onText) {
     }
 
     starting = true;
-    state.micLive = true;
-    button.classList.add("live");
-    button.setAttribute("aria-pressed", "true");
-    document.body.classList.add("mic-live");
+    setLiveUi(true);
     postChatUpdate("Microfono attivo — parla ora…");
 
-    const perm = await ensureMicPermission();
+    const perm = await acquireMicStream();
     if (!perm.ok) {
       hardStop();
       postChatUpdate(micErrorMessage(perm.code), "warn");
       return;
     }
+    micStream = perm.stream || null;
 
-    // Fresh instance each start — Safari can leave a stuck recognizer after errors
-    try {
+    const begin = () => {
       if (rec) {
         try {
           rec.abort?.();
@@ -2577,13 +2618,17 @@ function setupMic(button, onText) {
       if (!rec) {
         hardStop();
         postChatUpdate("Riconoscimento vocale non disponibile", "warn");
-        return;
+        return false;
       }
       bindRec(rec);
       rec.start();
       starting = false;
-    } catch (err) {
-      // InvalidStateError: already started — reset and retry once
+      return true;
+    };
+
+    try {
+      begin();
+    } catch {
       try {
         rec?.abort?.();
       } catch {
@@ -2592,14 +2637,8 @@ function setupMic(button, onText) {
       rec = null;
       await new Promise((r) => setTimeout(r, isAppleWebKit() ? 220 : 120));
       try {
-        rec = createSpeechRecognizer();
-        bindRec(rec);
-        state.micLive = true;
-        button.classList.add("live");
-        button.setAttribute("aria-pressed", "true");
-        document.body.classList.add("mic-live");
-        rec.start();
-        starting = false;
+        if (!begin()) return;
+        setLiveUi(true);
       } catch (err2) {
         hardStop();
         postChatUpdate(
@@ -2608,7 +2647,39 @@ function setupMic(button, onText) {
         );
       }
     }
+  };
+
+  const toggle = () => {
+    if (state.micLive || starting) {
+      hardStop();
+      postChatUpdate("Ascolto interrotto");
+      return;
+    }
+    startRecognition();
+  };
+
+  button.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggle();
   });
+
+  const control = {
+    toggle,
+    stop: hardStop,
+    attachButton(btn) {
+      if (!btn || uiButtons.has(btn)) return;
+      uiButtons.add(btn);
+      btn.dataset.micWired = "1";
+      btn.title = "Tocca per parlare (it-IT)";
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggle();
+      });
+    },
+  };
+  return control;
 }
 
 function wireUi() {
@@ -2728,11 +2799,12 @@ function wireUi() {
   wireTopMenu();
   wireGestureShortcuts();
   wireModuleZoom();
-  setupMic($("globalMic"), (text) => {
+  globalMicControl = setupMic($("globalMic"), (text) => {
     if (handleVoiceCommand(text)) return;
-    // Fallback: free-form → chat, then speak the assistant reply
+    // Fallback: free-form → chat (no TTS — updates stay in the panel)
     runHoloAction("chat", { fromVoice: true }).then(() => sendChat(text, { voice: true }));
   });
+  // chatMic keeps its own one-shot dictation into the composer (does not drive plancia commands)
   const chatMic = $("chatMic");
   if (chatMic) {
     setupMic(chatMic, (text) => {
