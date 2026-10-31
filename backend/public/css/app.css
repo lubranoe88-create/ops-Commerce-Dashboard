@@ -1366,3 +1366,219 @@ body[data-module="chat"] .analizza-bar { z-index: 50; }
   .coverage-scrub--holo, .compare-strip--holo { right: 3vw; }
   body[data-module="map"] .stage--holo #glCanvas { height: 120% !important; }
 }
+
+/* =====================================================================
+   CLEAR GLOBE LAYOUT (holo-pack-8)
+   Left dock = page toggles (never over globe). Center = globe only.
+   Right = side rail. Bottom = tools + Analizza. Survives all module switches.
+   ===================================================================== */
+#app.holo-home.clear-globe-layout {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  overflow: hidden;
+  background: #000306;
+}
+#app.clear-globe-layout .topbar--holo {
+  position: relative;
+  z-index: 50;
+  padding: 14px 18px 10px;
+  background: linear-gradient(180deg, rgba(0, 5, 10, 0.96), rgba(0, 5, 10, 0.55));
+}
+#app.clear-globe-layout .stage--clear {
+  position: relative;
+  inset: auto;
+  display: grid;
+  grid-template-columns: minmax(132px, 168px) minmax(0, 1fr) var(--side-w);
+  gap: 0;
+  min-height: 0;
+  height: 100%;
+  background: #000306;
+  overflow: hidden;
+}
+#app.clear-globe-layout .left-dock {
+  position: relative;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 12px 10px 16px;
+  overflow-y: auto;
+  background: rgba(2, 7, 12, 0.92);
+  border-right: 1px solid var(--photo-line);
+  pointer-events: auto;
+}
+#app.clear-globe-layout .dock-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 10px 8px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--photo-text);
+  cursor: pointer;
+  text-align: left;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+#app.clear-globe-layout .dock-btn:hover,
+#app.clear-globe-layout .dock-btn:focus-visible {
+  border-color: var(--photo-line);
+  background: rgba(122, 215, 255, 0.06);
+  outline: none;
+}
+#app.clear-globe-layout .dock-btn.is-active {
+  border-color: rgba(122, 215, 255, 0.45);
+  background: rgba(122, 215, 255, 0.1);
+}
+#app.clear-globe-layout .dock-btn .holo-dot {
+  position: static;
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  margin: 0;
+  border-radius: 50%;
+  background: #c9f1ff;
+  box-shadow: 0 0 6px rgba(122, 215, 255, 0.8);
+}
+#app.clear-globe-layout .dock-btn .holo-label {
+  position: static;
+  transform: none;
+  opacity: 1;
+  left: auto;
+  top: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(220, 236, 248, 0.9);
+  pointer-events: none;
+}
+#app.clear-globe-layout .dock-btn .holo-beam { display: none; }
+
+#app.clear-globe-layout .globe-pane {
+  position: relative;
+  inset: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
+  background: radial-gradient(ellipse 60% 70% at 50% 55%, #03101a 0%, #000306 70%);
+}
+#app.clear-globe-layout #glCanvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  height: auto !important;
+  top: 0 !important;
+  bottom: 0 !important;
+}
+#app.clear-globe-layout body[data-module="map"] .stage--holo #glCanvas,
+body[data-module="map"] #app.clear-globe-layout #glCanvas {
+  height: 100% !important;
+}
+#app.clear-globe-layout .side--holo {
+  position: relative;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  width: auto;
+  height: 100%;
+  max-height: none;
+  z-index: 30;
+  border-left: 1px solid var(--photo-line);
+  border-right: 0;
+  border-top: 0;
+  border-bottom: 0;
+  border-radius: 0;
+  background: rgba(1, 5, 9, 0.9);
+}
+#app.clear-globe-layout .bottom-dock {
+  position: relative;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 16px 14px;
+  background: rgba(0, 4, 8, 0.92);
+  border-top: 1px solid var(--photo-line-soft);
+}
+#app.clear-globe-layout .bottom-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  min-height: 0;
+}
+#app.clear-globe-layout .analizza-bar {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  width: min(920px, 100%);
+  margin: 0 auto;
+  height: clamp(42px, 6.5vh, 64px);
+}
+#app.clear-globe-layout .filter-chips--holo,
+#app.clear-globe-layout .coverage-scrub--holo,
+#app.clear-globe-layout .compare-strip--holo,
+#app.clear-globe-layout #mapChrome.map-chrome {
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  top: auto !important;
+  width: auto;
+  max-width: none;
+  z-index: 1;
+}
+#app.clear-globe-layout .overlay-hud--minimal {
+  top: 10px;
+  left: 10px;
+}
+#app.clear-globe-layout .imagery-credit {
+  left: 10px;
+  bottom: 8px;
+}
+#app.clear-globe-layout #chatPanel {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(1, 5, 9, 0.96);
+}
+#app.clear-globe-layout .toast-host {
+  top: 72px;
+  right: 16px;
+  bottom: auto;
+  left: auto;
+}
+#app.clear-globe-layout .footer--holo { display: none; }
+
+@media (max-width: 900px) {
+  #app.clear-globe-layout .stage--clear {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(40vh, 1fr) auto;
+  }
+  #app.clear-globe-layout .left-dock {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: 0;
+    border-bottom: 1px solid var(--photo-line);
+    max-height: none;
+    padding: 8px;
+  }
+  #app.clear-globe-layout .dock-btn {
+    width: auto;
+    flex: 1 1 auto;
+    padding: 8px 10px;
+  }
+  #app.clear-globe-layout .side--holo {
+    max-height: 28vh;
+    border-left: 0;
+    border-top: 1px solid var(--photo-line);
+  }
+}

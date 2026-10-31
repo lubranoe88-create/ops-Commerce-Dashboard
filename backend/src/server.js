@@ -39,6 +39,14 @@ app.use(
     contentSecurityPolicy: false,
   }),
 );
+// Explicit allow for Safari/iOS getUserMedia + SpeechRecognition (Helmet 8 may omit this)
+app.use((_req, res, next) => {
+  res.setHeader(
+    "Permissions-Policy",
+    "microphone=(self), camera=(), geolocation=()",
+  );
+  next();
+});
 app.use(
   cors({
     origin(origin, callback) {

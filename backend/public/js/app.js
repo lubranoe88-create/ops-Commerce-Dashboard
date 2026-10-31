@@ -17,7 +17,7 @@ import {
   setOrbitEnabled,
   setPulseTop,
   updateMapGlobeTops,
-} from "./mapGlobe.js?v=holo-pack-7";
+} from "./mapGlobe.js?v=holo-pack-9";
 
 const BUILD_ID = "inventory-6";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
@@ -1322,7 +1322,7 @@ async function submitCorrection(id, verdict) {
 
 function syncHoloActive(actionOrModule) {
   const mod = MODULES.includes(actionOrModule) ? actionOrModule : state.module;
-  document.querySelectorAll("#holoVoicePlancia .holo-node").forEach((node) => {
+  document.querySelectorAll("#holoVoicePlancia [data-holo-action]").forEach((node) => {
     const a = node.getAttribute("data-holo-action");
     node.classList.toggle("is-active", a === mod || a === actionOrModule);
   });
@@ -1534,7 +1534,7 @@ function runHoloAction(action, { fromVoice = false } = {}) {
   playHoloTick();
   if (fromVoice) {
     silenceVoice();
-    const label = document.querySelector(`.holo-node[data-holo-action="${action}"] .holo-label`);
+    const label = document.querySelector(`#holoVoicePlancia [data-holo-action="${action}"] .holo-label`);
     postChatUpdate(`${(label?.textContent || String(action)).trim()} · ${src}`);
   }
 
@@ -1765,13 +1765,9 @@ function wireHoloPlancia() {
   const host = $("holoVoicePlancia");
   if (!host || host.dataset.wired) return;
   host.dataset.wired = "1";
-  host.querySelectorAll(".holo-node").forEach((node) => {
-    const hx = parseFloat(node.style.getPropertyValue("--hx")) || 0;
-    if (hx > 58) node.classList.add("label-flip");
-  });
   host.addEventListener("click", (e) => {
-    const node = e.target.closest(".holo-node[data-holo-action]");
-    if (!node) return;
+    const node = e.target.closest("[data-holo-action]");
+    if (!node || !host.contains(node)) return;
     e.preventDefault();
     e.stopPropagation();
     runHoloAction(node.getAttribute("data-holo-action"), { fromVoice: false });
@@ -2379,76 +2375,238 @@ async function sendChat(text, { voice = false } = {}) {
   }
 }
 
+function isAppleWebKit() {
+  const ua = navigator.userAgent || "";
+  return /Safari/i.test(ua) && !/Chrome|Chromium|CriOS|Edg|EdgiOS|OPR|Firefox|FxiOS/i.test(ua);
+}
+
+function micErrorMessage(code) {
+  switch (String(code || "")) {
+    case "not-allowed":
+    case "service-not-allowed":
+      return "Permesso microfono negato. Su Safari: Impostazioni → Siti web → Microfono → Consenti per questo sito, poi ritocca MIC.";
+    case "audio-capture":
+      return "Microfono non disponibile o già in uso da un’altra app.";
+    case "network":
+      return "Riconoscimento vocale: errore di rete. Controlla la connessione.";
+    case "no-speech":
+      return "Nessuna voce rilevata. Ritocca MIC e parla vicino al microfono.";
+    case "aborted":
+      return "";
+    case "language-not-supported":
+      return "Lingua it-IT non supportata dal riconoscimento. Prova di nuovo.";
+    case "secure-context":
+      return "Il microfono richiede HTTPS (contesto sicuro).";
+    case "permission-denied":
+    case "NotAllowedError":
+      return "Accesso al microfono rifiutato. Consenti il permesso nella finestra Safari e ritocca MIC.";
+    case "NotFoundError":
+      return "Nessun microfono trovato su questo dispositivo.";
+    case "NotReadableError":
+      return "Microfono occupato. Chiudi altre app che lo usano e riprova.";
+    default:
+      return code ? `Microfono: ${code}` : "Microfono non disponibile.";
+  }
+}
+
+async function ensureMicPermission() {
+  if (!window.isSecureContext) {
+    return { ok: false, code: "secure-context" };
+  }
+  // Safari / iOS: SpeechRecognition often stays silent until getUserMedia
+  // has granted mic access in the same user-gesture turn.
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return { ok: true };
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
+    stream.getTracks().forEach((t) => {
+      try {
+        t.stop();
+      } catch {
+        /* ignore */
+      }
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, code: err?.name || "not-allowed" };
+  }
+}
+
+function createSpeechRecognizer() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  const rec = new SR();
+  // Safari is more reliable with a short continuous session + interim off
+  rec.continuous = Boolean(isAppleWebKit());
+  rec.interimResults = false;
+  rec.lang = "it-IT";
+  try {
+    rec.maxAlternatives = 1;
+  } catch {
+    /* older WebKit */
+  }
+  return rec;
+}
+
 function setupMic(button, onText) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
-    button.title = "Speech recognition not supported in this browser";
-    button.disabled = true;
+    button.title = "Riconoscimento vocale non supportato in questo browser";
+    button.setAttribute("aria-disabled", "true");
+    button.addEventListener("click", () => {
+      postChatUpdate(
+        "Safari/iOS più vecchi non supportano il riconoscimento vocale. Aggiorna Safari oppure usa Chrome.",
+        "warn",
+      );
+    });
     return;
   }
   if (button.dataset.micWired) return;
   button.dataset.micWired = "1";
-  const rec = new SR();
-  rec.continuous = false;
-  rec.interimResults = false;
-  rec.lang = "it-IT";
-  rec.maxAlternatives = 1;
+  button.title = "Tocca per parlare (it-IT)";
+  button.setAttribute("aria-pressed", "false");
+
+  let rec = null;
+  let starting = false;
+
   const stopUi = () => {
     state.micLive = false;
+    starting = false;
     button.classList.remove("live");
+    button.setAttribute("aria-pressed", "false");
     document.body.classList.remove("mic-live");
   };
-  rec.onresult = (ev) => {
-    const text = ev.results?.[0]?.[0]?.transcript || "";
-    stopUi();
-    if (text.trim()) {
-      postChatUpdate(`Ascoltato: ${text.trim()}`);
-      onText(text.trim());
-    }
-  };
-  rec.onerror = (ev) => {
-    stopUi();
-    const err = ev?.error || "mic";
-    if (err !== "aborted" && err !== "no-speech") {
-      postChatUpdate(`Microfono: ${err}`, "warn");
-    }
-  };
-  rec.onend = () => stopUi();
-  button.addEventListener("click", () => {
-    silenceVoice();
-    if (state.micLive) {
+
+  const hardStop = () => {
+    if (rec) {
       try {
-        rec.stop();
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        rec.abort?.();
       } catch {
-        /* ignore */
+        try {
+          rec.stop();
+        } catch {
+          /* ignore */
+        }
       }
+      rec = null;
+    }
+    stopUi();
+  };
+
+  const bindRec = (instance) => {
+    instance.onresult = (ev) => {
+      let text = "";
+      try {
+        const res = ev.results?.[ev.results.length - 1];
+        text = res?.[0]?.transcript || "";
+      } catch {
+        text = "";
+      }
+      hardStop();
+      if (text.trim()) {
+        postChatUpdate(`Ascoltato: ${text.trim()}`);
+        onText(text.trim());
+      } else {
+        postChatUpdate(micErrorMessage("no-speech"), "warn");
+      }
+    };
+    instance.onerror = (ev) => {
+      const code = ev?.error || "mic";
+      hardStop();
+      if (code === "aborted") return;
+      // no-speech is common on Safari if the session ends quickly — soft tip
+      const msg = micErrorMessage(code);
+      if (msg) postChatUpdate(msg, "warn");
+    };
+    instance.onend = () => {
+      // Safari often fires onend right after a result or abort
+      if (!state.micLive && !starting) return;
       stopUi();
+      rec = null;
+    };
+  };
+
+  button.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    silenceVoice();
+    markUserInput?.();
+
+    if (state.micLive || starting) {
+      hardStop();
+      postChatUpdate("Ascolto interrotto");
       return;
     }
+
+    starting = true;
     state.micLive = true;
     button.classList.add("live");
+    button.setAttribute("aria-pressed", "true");
     document.body.classList.add("mic-live");
+    postChatUpdate("Microfono attivo — parla ora…");
+
+    const perm = await ensureMicPermission();
+    if (!perm.ok) {
+      hardStop();
+      postChatUpdate(micErrorMessage(perm.code), "warn");
+      return;
+    }
+
+    // Fresh instance each start — Safari can leave a stuck recognizer after errors
     try {
+      if (rec) {
+        try {
+          rec.abort?.();
+        } catch {
+          /* ignore */
+        }
+        rec = null;
+      }
+      rec = createSpeechRecognizer();
+      if (!rec) {
+        hardStop();
+        postChatUpdate("Riconoscimento vocale non disponibile", "warn");
+        return;
+      }
+      bindRec(rec);
       rec.start();
+      starting = false;
     } catch (err) {
-      stopUi();
-      // Restart once if already started
+      // InvalidStateError: already started — reset and retry once
       try {
-        rec.stop();
+        rec?.abort?.();
       } catch {
         /* ignore */
       }
-      setTimeout(() => {
-        try {
-          state.micLive = true;
-          button.classList.add("live");
-          document.body.classList.add("mic-live");
-          rec.start();
-        } catch {
-          stopUi();
-          postChatUpdate("Microfono non disponibile in questo browser", "warn");
-        }
-      }, 120);
+      rec = null;
+      await new Promise((r) => setTimeout(r, isAppleWebKit() ? 220 : 120));
+      try {
+        rec = createSpeechRecognizer();
+        bindRec(rec);
+        state.micLive = true;
+        button.classList.add("live");
+        button.setAttribute("aria-pressed", "true");
+        document.body.classList.add("mic-live");
+        rec.start();
+        starting = false;
+      } catch (err2) {
+        hardStop();
+        postChatUpdate(
+          micErrorMessage(err2?.name) || "Impossibile avviare il microfono su questo browser",
+          "warn",
+        );
+      }
     }
   });
 }

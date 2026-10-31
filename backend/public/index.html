@@ -7,10 +7,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=holo-pack-7" />
+  <link rel="stylesheet" href="/css/app.css?v=holo-pack-9" />
 </head>
 <body>
-  <div id="app" class="holo-home">
+  <div id="app" class="holo-home clear-globe-layout">
     <header class="topbar topbar--holo">
       <div class="brand-block">
         <div class="brand"><span class="brand-ops">OPS</span><span class="brand-dot" aria-hidden="true">·</span><span class="brand-name">COMMERCE INTEL</span></div>
@@ -44,7 +44,6 @@
       </div>
     </header>
 
-    <!-- Hidden stats kept for JS updateStatsStrip compatibility -->
     <div id="statsStrip" class="stats-strip stats-strip--sr" aria-hidden="true">
       <span id="statTops" class="stat">Tops —</span>
       <span id="statErrors" class="stat">Errors —</span>
@@ -52,92 +51,55 @@
       <span id="statUpdated" class="stat muted mono">Updated —</span>
     </div>
 
-    <main class="stage stage--holo">
-      <section class="viewport" id="viewport">
-        <div id="glCanvas" class="gl-host" style="position:absolute;inset:0;"></div>
+    <main class="stage stage--clear" id="stage">
+      <!-- LEFT RAIL: all command buttons — never over the globe -->
+      <nav id="holoVoicePlancia" class="left-dock" aria-label="Comandi plancia">
+        <button type="button" class="dock-btn" data-holo-action="map" aria-label="MAPPA">
+          <span class="holo-dot" aria-hidden="true"></span>
+          <span class="holo-label">MAPPA</span>
+        </button>
+        <button type="button" class="dock-btn" data-holo-action="zoom-citta" aria-label="ZOOM CITTÀ">
+          <span class="holo-dot" aria-hidden="true"></span>
+          <span class="holo-label">ZOOM CITTÀ</span>
+        </button>
+        <button type="button" class="dock-btn" data-holo-action="pipeline" aria-label="PIPELINE">
+          <span class="holo-dot" aria-hidden="true"></span>
+          <span class="holo-label">PIPELINE</span>
+        </button>
+        <button type="button" class="dock-btn" data-holo-action="orbit" aria-label="ORBIT">
+          <span class="holo-dot" aria-hidden="true"></span>
+          <span class="holo-label">ORBIT</span>
+        </button>
+        <button type="button" class="dock-btn" data-holo-action="mic" aria-label="MIC">
+          <span class="holo-dot" aria-hidden="true"></span>
+          <span class="holo-label">MIC</span>
+        </button>
+        <button type="button" class="dock-btn" data-holo-action="nord" aria-label="NORD">
+          <span class="holo-dot" aria-hidden="true"></span>
+          <span class="holo-label">NORD</span>
+        </button>
+        <button type="button" class="dock-btn" data-holo-action="memory" aria-label="MEMORY">
+          <span class="holo-dot" aria-hidden="true"></span>
+          <span class="holo-label">MEMORY</span>
+        </button>
+        <button type="button" class="dock-btn" data-holo-action="analizza" aria-label="ANALIZZA">
+          <span class="holo-dot" aria-hidden="true"></span>
+          <span class="holo-label">ANALIZZA</span>
+        </button>
+        <button type="button" class="dock-btn" data-holo-action="chat" aria-label="CHAT">
+          <span class="holo-dot" aria-hidden="true"></span>
+          <span class="holo-label">CHAT</span>
+        </button>
+      </nav>
+
+      <!-- CENTER: globe / 3D host ONLY -->
+      <section class="viewport globe-pane" id="viewport">
+        <div id="glCanvas" class="gl-host"></div>
         <div class="overlay-hud overlay-hud--minimal">
           <div class="legend" id="moduleLegend"></div>
           <div class="legend mono" id="coverageMini"></div>
         </div>
         <p id="imageryCredit" class="imagery-credit">NASA VIIRS (public domain) · Sentinel-2 / EOX CC BY 4.0</p>
-        <!-- Holo light points (reference photo): dot + hairline beam; label on hover/focus/voice -->
-        <div id="holoVoicePlancia" class="holo-voice-plancia holo-voice-plancia--overlay" aria-label="Plancia vocale olografica">
-          <button type="button" class="holo-node" data-holo-action="map" aria-label="MAPPA" style="--hx:25%;--hy:20.5%;--hb:12vh;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-beam" aria-hidden="true"></span>
-            <span class="holo-label">MAPPA</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="zoom-citta" aria-label="ZOOM CITTÀ" style="--hx:18%;--hy:37%;--hb:7vh;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-beam" aria-hidden="true"></span>
-            <span class="holo-label">ZOOM CITTÀ</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="pipeline" aria-label="PIPELINE" style="--hx:32.4%;--hy:18%;--hb:9vh;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-beam" aria-hidden="true"></span>
-            <span class="holo-label">PIPELINE</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="orbit" aria-label="ORBIT" style="--hx:36.2%;--hy:13.5%;--hb:6vh;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-beam" aria-hidden="true"></span>
-            <span class="holo-label">ORBIT</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="mic" aria-label="MIC" style="--hx:44.7%;--hy:11%;--hb:14vh;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-beam" aria-hidden="true"></span>
-            <span class="holo-label">MIC</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="nord" aria-label="NORD" style="--hx:55.5%;--hy:9.5%;--hb:5vh;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-beam" aria-hidden="true"></span>
-            <span class="holo-label">NORD</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="memory" aria-label="MEMORY" style="--hx:62.5%;--hy:12%;--hb:10vh;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-beam" aria-hidden="true"></span>
-            <span class="holo-label">MEMORY</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="analizza" aria-label="ANALIZZA" style="--hx:66.2%;--hy:16%;--hb:22vh;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-beam" aria-hidden="true"></span>
-            <span class="holo-label">ANALIZZA</span>
-          </button>
-          <button type="button" class="holo-node" data-holo-action="chat" aria-label="CHAT" style="--hx:74%;--hy:22.5%;--hb:7vh;">
-            <span class="holo-dot" aria-hidden="true"></span>
-            <span class="holo-beam" aria-hidden="true"></span>
-            <span class="holo-label">CHAT</span>
-          </button>
-        </div>
-        <div id="mapChrome" class="map-chrome" hidden>
-          <form id="mapSearchForm" class="map-search" autocomplete="off">
-            <input id="mapSearchInput" type="search" placeholder="Search place…" enterkeyhint="search" />
-            <button type="submit" class="pill-btn primary">Go</button>
-          </form>
-          <div class="map-tools">
-            <button type="button" id="mapNorthBtn" class="pill-btn" title="Reset north">N</button>
-            <button type="button" id="mapOrbitBtn" class="pill-btn" title="Orbital overview">Orbit</button>
-          </div>
-          <div id="mapPickCard" class="map-pick-card" hidden>
-            <div class="map-pick-title" id="mapPickTitle">—</div>
-            <div class="map-pick-detail muted" id="mapPickDetail"></div>
-            <div class="map-pick-actions">
-              <button type="button" id="mapPickAnalyze" class="pill-btn primary" hidden>Analizza in chat</button>
-              <button type="button" id="mapPickCompare" class="pill-btn" hidden>Confronta</button>
-            </div>
-          </div>
-        </div>
-        <!-- Interactive #9/#10 under holo shell: always on map, not buried in collapsed chrome -->
-        <div id="mapFilterChips" class="filter-chips filter-chips--holo" aria-label="Filtri live tops"></div>
-        <div id="coverageScrub" class="coverage-scrub coverage-scrub--holo" hidden>
-          <label for="coverageScrubRange">Coverage</label>
-          <input id="coverageScrubRange" type="range" min="0" max="0" value="0" />
-          <span id="coverageScrubLabel" class="mono muted">—</span>
-        </div>
-        <div id="compareStrip" class="compare-strip compare-strip--holo" hidden>
-          <div class="compare-slot" id="compareA"><span class="muted">Pin A</span></div>
-          <div class="compare-slot" id="compareB"><span class="muted">Pin B</span></div>
-          <button type="button" id="compareClear" class="pill-btn">Clear</button>
-        </div>
         <div id="chatPanel" class="chat-wrap" hidden>
           <div class="threads" id="threadList"></div>
           <div class="chat-model-bar">
@@ -156,6 +118,7 @@
         </div>
       </section>
 
+      <!-- RIGHT RAIL: company list -->
       <aside class="side side--holo" id="sidePanel">
         <div class="side-head">
           <h2 id="sideTitle">Ops</h2>
@@ -165,18 +128,51 @@
       </aside>
     </main>
 
-    <!-- Bottom hexagonal capsule matching reference photo -->
-    <div class="analizza-bar" id="analizzaBar">
-      <input id="chatInput" type="text" placeholder="Analizza…" autocomplete="off" aria-label="Analizza" />
-      <div class="analizza-actions">
-        <button type="button" id="globalMic" class="analizza-mic" title="Voce">
-          <svg class="mic-glyph" viewBox="0 0 16 22" aria-hidden="true"><rect x="4.5" y="1" width="7" height="12" rx="3.5"/><path d="M1.5 10.5a6.5 6.5 0 0 0 13 0M8 17v4"/></svg>
-          <span>MIC</span>
-        </button>
-        <button type="button" id="sendChat" class="analizza-send" title="Invia" aria-label="Invia">
-          <svg viewBox="0 0 32 32" aria-hidden="true"><circle class="sonar-outer" cx="16" cy="16" r="14.5"/><circle class="sonar-inner" cx="16" cy="16" r="8"/><circle class="sonar-core" cx="16" cy="16" r="2"/></svg>
-          <span class="sonar-ping" aria-hidden="true"></span>
-        </button>
+    <!-- BOTTOM DOCK: map tools + Analizza — below the globe pane -->
+    <div class="bottom-dock" id="bottomDock">
+      <div class="bottom-tools" id="bottomTools">
+        <div id="mapChrome" class="map-chrome" hidden>
+          <form id="mapSearchForm" class="map-search" autocomplete="off">
+            <input id="mapSearchInput" type="search" placeholder="Search place…" enterkeyhint="search" />
+            <button type="submit" class="pill-btn primary">Go</button>
+          </form>
+          <div class="map-tools">
+            <button type="button" id="mapNorthBtn" class="pill-btn" title="Reset north">N</button>
+            <button type="button" id="mapOrbitBtn" class="pill-btn" title="Orbital overview">Orbit</button>
+          </div>
+          <div id="mapPickCard" class="map-pick-card" hidden>
+            <div class="map-pick-title" id="mapPickTitle">—</div>
+            <div class="map-pick-detail muted" id="mapPickDetail"></div>
+            <div class="map-pick-actions">
+              <button type="button" id="mapPickAnalyze" class="pill-btn primary" hidden>Analizza in chat</button>
+              <button type="button" id="mapPickCompare" class="pill-btn" hidden>Confronta</button>
+            </div>
+          </div>
+        </div>
+        <div id="mapFilterChips" class="filter-chips filter-chips--holo" aria-label="Filtri live tops"></div>
+        <div id="coverageScrub" class="coverage-scrub coverage-scrub--holo" hidden>
+          <label for="coverageScrubRange">Coverage</label>
+          <input id="coverageScrubRange" type="range" min="0" max="0" value="0" />
+          <span id="coverageScrubLabel" class="mono muted">—</span>
+        </div>
+        <div id="compareStrip" class="compare-strip compare-strip--holo" hidden>
+          <div class="compare-slot" id="compareA"><span class="muted">Pin A</span></div>
+          <div class="compare-slot" id="compareB"><span class="muted">Pin B</span></div>
+          <button type="button" id="compareClear" class="pill-btn">Clear</button>
+        </div>
+      </div>
+      <div class="analizza-bar" id="analizzaBar">
+        <input id="chatInput" type="text" placeholder="Analizza…" autocomplete="off" aria-label="Analizza" />
+        <div class="analizza-actions">
+          <button type="button" id="globalMic" class="analizza-mic" title="Voce">
+            <svg class="mic-glyph" viewBox="0 0 16 22" aria-hidden="true"><rect x="4.5" y="1" width="7" height="12" rx="3.5"/><path d="M1.5 10.5a6.5 6.5 0 0 0 13 0M8 17v4"/></svg>
+            <span>MIC</span>
+          </button>
+          <button type="button" id="sendChat" class="analizza-send" title="Invia" aria-label="Invia">
+            <svg viewBox="0 0 32 32" aria-hidden="true"><circle class="sonar-outer" cx="16" cy="16" r="14.5"/><circle class="sonar-inner" cx="16" cy="16" r="8"/><circle class="sonar-core" cx="16" cy="16" r="2"/></svg>
+            <span class="sonar-ping" aria-hidden="true"></span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -195,6 +191,6 @@
     }
   }
   </script>
-  <script type="module" src="/js/app.js?v=holo-pack-6"></script>
+  <script type="module" src="/js/app.js?v=holo-pack-9"></script>
 </body>
 </html>
