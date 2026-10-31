@@ -644,15 +644,16 @@ body[data-module="chat"] #chatPanel {
 }
 .holo-voice-plancia--overlay {
   position: absolute;
-  inset: 56px 0 72px 0;
+  inset: 0;
   z-index: 12;
   height: auto;
   border: 0;
   background: transparent;
-  pointer-events: none;
+  /* Critical: must NOT intercept globe drags (esp. iOS/WebKit) */
+  pointer-events: none !important;
 }
 .holo-voice-plancia--overlay .holo-node {
-  pointer-events: auto;
+  pointer-events: auto !important;
 }
 .holo-voice-plancia::before {
   content: "";
@@ -925,6 +926,28 @@ body[data-module="chat"] #chatPanel {
   font-size: 11px;
 }
 
+.filter-chips--holo {
+  left: 16px;
+  bottom: 96px;
+  z-index: 14;
+  max-width: min(420px, 55%);
+}
+.coverage-scrub--holo {
+  right: 16px;
+  bottom: 96px;
+  z-index: 14;
+  display: flex !important;
+}
+.coverage-scrub--holo[hidden] {
+  display: none !important;
+}
+.compare-strip--holo {
+  bottom: 86px;
+  z-index: 15;
+  left: 16px;
+  right: 300px;
+  max-width: 520px;
+}
 .analizza-bar {
   position: absolute;
   left: 50%;

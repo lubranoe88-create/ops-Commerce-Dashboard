@@ -9,7 +9,7 @@ import {
   mountMapGlobe,
   resetNorth,
   searchPlace,
-} from "./mapGlobe.js?v=holo-home-4k";
+} from "./mapGlobe.js?v=holo-fix-2";
 
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
@@ -1986,8 +1986,8 @@ function wireUi() {
     if (moduleSwitchLocked) return; // first click still owns the transition
     showModule(fromHash);
   });
-  $("sendChat").onclick = () => sendChat($("chatInput").value);
-  $("chatInput").addEventListener("keydown", (e) => {
+  $("sendChat")?.addEventListener("click", () => sendChat($("chatInput")?.value || ""));
+  $("chatInput")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendChat($("chatInput").value);
   });
   $("refreshBtn")?.addEventListener("click", async () => {

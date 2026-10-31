@@ -666,8 +666,8 @@ function stopOrbitDrift() {
 }
 
 /**
- * Scale Cesium's drawing buffer toward 4K (3840×2160) pixel density.
- * Caps at device limits / WebGL MAX_VIEWPORT_DIMS to avoid context loss.
+ * High-quality Cesium framebuffer. Prefers near-4K (3840×2160) on capable GPUs,
+ * but caps aggressively on mobile/tablet to avoid WebGL context loss (blank globe).
  */
 export function applyFourKResolution(v) {
   if (!v?.scene) return { width: 0, height: 0, scale: 1 };
@@ -677,34 +677,46 @@ export function applyFourKResolution(v) {
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const TARGET_W = 3840;
   const TARGET_H = 2160;
-  // Scale so CSS×scale×dpr approaches 4K on the longer axis
-  let scale = Math.max(TARGET_W / cssW, TARGET_H / cssH) / dpr;
-  scale = Math.min(Math.max(scale, 1), 3); // never below 1×, cap 3× for GPU safety
-  // Respect WebGL max viewport if available
+  const isCoarse =
+    (typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches) ||
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 1) ||
+    Math.min(cssW, cssH) < 700;
+  // Ideal scale toward 4K…
+  let scale = Math.max(TARGET_W / (cssW * dpr), TARGET_H / (cssH * dpr));
+  // …but never below 1×; on touch/mobile keep ≤1.5×; desktop ≤2.5× (stable “max quality”)
+  const hardCap = isCoarse ? 1.5 : 2.5;
+  scale = Math.min(Math.max(scale, 1), hardCap);
   try {
     const gl = v.scene.context?._gl || v.scene.context?._webgl2Context;
     const maxDim = gl?.getParameter?.(gl.MAX_VIEWPORT_DIMS)?.[0];
     if (maxDim) {
       const maxScale = maxDim / (Math.max(cssW, cssH) * dpr);
-      scale = Math.min(scale, Math.max(1, maxScale));
+      scale = Math.min(scale, Math.max(1, maxScale * 0.9));
     }
   } catch {
     /* ignore */
   }
-  v.resolutionScale = scale;
-  v.useBrowserRecommendedResolution = false;
   try {
+    v.useBrowserRecommendedResolution = false;
+    v.resolutionScale = scale;
     v.resize();
-  } catch {
-    /* ignore */
+  } catch (err) {
+    console.warn("[globe] resolutionScale failed, falling back to 1×", err);
+    try {
+      v.resolutionScale = 1;
+      v.resize();
+      scale = 1;
+    } catch {
+      /* ignore */
+    }
   }
   const outW = Math.round(cssW * dpr * scale);
   const outH = Math.round(cssH * dpr * scale);
   canvas.dataset.renderWidth = String(outW);
   canvas.dataset.renderHeight = String(outH);
   canvas.dataset.resolutionScale = String(scale.toFixed(3));
-  console.info(`[globe] render buffer ~${outW}×${outH} (scale=${scale.toFixed(2)}, dpr=${dpr})`);
-  return { width: outW, height: outH, scale, dpr };
+  console.info(`[globe] render buffer ~${outW}×${outH} (scale=${scale.toFixed(2)}, dpr=${dpr}, coarse=${isCoarse})`);
+  return { width: outW, height: outH, scale, dpr, coarse: isCoarse };
 }
 
 export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
@@ -783,13 +795,19 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   viewer.scene.fog.enabled = true;
   viewer.scene.fog.density = 4.0e-5;
   // Sharper imagery / terrain LOD (lower SSE = higher quality)
-  viewer.scene.globe.maximumScreenSpaceError = 1.0;
-  if (viewer.scene.globe.tileCacheSize != null) viewer.scene.globe.tileCacheSize = 2000;
+  viewer.scene.globe.maximumScreenSpaceError = 1.25;
+  if (viewer.scene.globe.tileCacheSize != null) viewer.scene.globe.tileCacheSize = 1000;
   if (viewer.scene.postProcessStages?.fxaa) {
     viewer.scene.postProcessStages.fxaa.enabled = true;
   }
   viewer.shadows = false;
-  viewer.scene.highDynamicRange = true;
+  // HDR breaks the globe on some mobile GPUs — enable only on fine pointers
+  try {
+    const fine = typeof matchMedia === "function" && matchMedia("(pointer: fine)").matches;
+    viewer.scene.highDynamicRange = Boolean(fine);
+  } catch {
+    viewer.scene.highDynamicRange = false;
+  }
 
   const ctrl = viewer.scene.screenSpaceCameraController;
   ctrl.minimumZoomDistance = 120;
