@@ -14,6 +14,10 @@ export const CHAT_MODEL_GROUPS = [
         label: "DeepSeek V4.1 Flash (default)",
       },
       {
+        id: "perplexity/sonar",
+        label: "Perplexity Sonar (web)",
+      },
+      {
         id: "meta-llama/llama-3.1-70b-instruct",
         label: "Llama 3.1 70B",
       },
