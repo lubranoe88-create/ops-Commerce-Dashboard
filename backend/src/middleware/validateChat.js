@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { isAllowedChatModel, resolveChatModel } from "../services/chatModels.js";
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -6,21 +7,21 @@ function isPlainObject(value) {
 
 /**
  * Validate POST /api/chat body.
- * Accepts { prompt, system? } — synthesis/ranking payloads only.
+ * Accepts { prompt, system?, model? } — synthesis/ranking payloads only.
  */
 export function validateChat(req, res, next) {
   if (!isPlainObject(req.body)) {
     return res.status(400).json({ error: "Body must be a JSON object" });
   }
 
-  const allowed = new Set(["prompt", "system"]);
+  const allowed = new Set(["prompt", "system", "model"]);
   for (const key of Object.keys(req.body)) {
     if (!allowed.has(key)) {
       return res.status(400).json({ error: `Unexpected field: ${key}` });
     }
   }
 
-  const { prompt, system } = req.body;
+  const { prompt, system, model } = req.body;
 
   if (typeof prompt !== "string" || !prompt.trim()) {
     return res.status(400).json({ error: "prompt is required (non-empty string)" });
@@ -42,9 +43,19 @@ export function validateChat(req, res, next) {
     }
   }
 
+  if (model !== undefined) {
+    if (typeof model !== "string" || !model.trim()) {
+      return res.status(400).json({ error: "model must be a non-empty string" });
+    }
+    if (!isAllowedChatModel(model)) {
+      return res.status(400).json({ error: "model is not allow-listed" });
+    }
+  }
+
   req.chat = {
     prompt: prompt.trim(),
     system: typeof system === "string" && system.trim() ? system.trim() : undefined,
+    model: resolveChatModel(model),
   };
   return next();
 }

@@ -8,10 +8,14 @@ import {
   searchPlace,
 } from "./mapGlobe.js";
 
+const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
+
 const state = {
   module: "map",
   snapshot: null,
   threadId: null,
+  chatModel: null,
+  chatModelCatalog: null,
   recognition: null,
   micLive: false,
   renderer: null,
@@ -975,7 +979,65 @@ async function refresh() {
   await showModule(state.module);
 }
 
+function readStoredChatModel() {
+  try {
+    return localStorage.getItem(CHAT_MODEL_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStoredChatModel(modelId) {
+  try {
+    localStorage.setItem(CHAT_MODEL_STORAGE_KEY, modelId);
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function getSelectedChatModel() {
+  const sel = $("chatModelSelect");
+  return (sel?.value || state.chatModel || "").trim();
+}
+
+async function ensureChatModelSelect() {
+  const sel = $("chatModelSelect");
+  if (!sel) return;
+  if (!state.chatModelCatalog) {
+    state.chatModelCatalog = await api("/api/chat/models");
+  }
+  const catalog = state.chatModelCatalog;
+  const preferred = readStoredChatModel() || catalog.default;
+  sel.innerHTML = "";
+  for (const group of catalog.groups || []) {
+    const og = document.createElement("optgroup");
+    og.label = group.label;
+    for (const m of group.models || []) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = m.label;
+      og.appendChild(opt);
+    }
+    sel.appendChild(og);
+  }
+  const allowed = new Set(
+    (catalog.groups || []).flatMap((g) => (g.models || []).map((m) => m.id)),
+  );
+  const pick = allowed.has(preferred) ? preferred : catalog.default;
+  sel.value = pick;
+  state.chatModel = pick;
+  writeStoredChatModel(pick);
+  if (!sel.dataset.wired) {
+    sel.dataset.wired = "1";
+    sel.addEventListener("change", () => {
+      state.chatModel = sel.value;
+      writeStoredChatModel(sel.value);
+    });
+  }
+}
+
 async function loadChat() {
+  await ensureChatModelSelect();
   const { threads } = await api("/api/chat/threads");
   const list = $("threadList");
   list.innerHTML = "";
@@ -1018,9 +1080,11 @@ async function sendChat(text) {
     const t = await api("/api/chat/threads", { method: "POST", body: JSON.stringify({ title: "Session" }) });
     state.threadId = t.id;
   }
+  await ensureChatModelSelect();
+  const model = getSelectedChatModel();
   await api(`/api/chat/threads/${state.threadId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content: text }),
+    body: JSON.stringify({ content: text, model }),
   });
   $("chatInput").value = "";
   await loadChat();

@@ -9,6 +9,7 @@ import {
   listChatThreads,
 } from "../memory/store.js";
 import { completeChat } from "../services/openrouter.js";
+import { isAllowedChatModel, resolveChatModel } from "../services/chatModels.js";
 import { config } from "../config.js";
 
 export const dashboardRouter = Router();
@@ -81,7 +82,14 @@ dashboardRouter.post("/chat/threads/:id/messages", async (req, res) => {
   const id = Number(req.params.id);
   const content = (req.body?.content || "").toString().trim();
   const speechInput = Boolean(req.body?.speech_input);
+  const requestedModel =
+    typeof req.body?.model === "string" ? req.body.model.trim() : "";
   if (!content) return res.status(400).json({ error: "content required" });
+
+  if (requestedModel && !isAllowedChatModel(requestedModel)) {
+    return res.status(400).json({ error: "model is not allow-listed" });
+  }
+  const model = resolveChatModel(requestedModel || undefined);
 
   appendChatMessage(id, { role: "user", content, speechInput });
 
@@ -122,6 +130,7 @@ dashboardRouter.post("/chat/threads/:id/messages", async (req, res) => {
   try {
     const result = await completeChat({
       system,
+      model,
       prompt: `Contesto dashboard:\n${contextBlock}\n\nDomanda utente:\n${content}`,
     });
     appendChatMessage(id, { role: "assistant", content: result.content });

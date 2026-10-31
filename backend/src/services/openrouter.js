@@ -1,17 +1,21 @@
 import { config } from "../config.js";
+import { resolveChatModel } from "./chatModels.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 /**
  * Call OpenRouter chat completions for synthesis/ranking only.
  * The API key stays server-side; never send it to the browser.
+ * `model` must already be allow-listed (see resolveChatModel).
  */
-export async function completeChat({ prompt, system }) {
+export async function completeChat({ prompt, system, model }) {
   const messages = [];
   if (system) {
     messages.push({ role: "system", content: system });
   }
   messages.push({ role: "user", content: prompt });
+
+  const modelId = resolveChatModel(model);
 
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
@@ -22,7 +26,7 @@ export async function completeChat({ prompt, system }) {
       "X-Title": config.openRouterAppTitle,
     },
     body: JSON.stringify({
-      model: config.openRouterModel,
+      model: modelId,
       messages,
       max_tokens: config.maxTokens,
       temperature: 0.2,
@@ -51,7 +55,7 @@ export async function completeChat({ prompt, system }) {
 
   return {
     content: content.trim(),
-    model: payload?.model || config.openRouterModel,
+    model: payload?.model || modelId,
     usage: payload?.usage ?? null,
   };
 }

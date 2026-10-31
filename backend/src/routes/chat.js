@@ -1,8 +1,13 @@
 import { Router } from "express";
 import { validateChat } from "../middleware/validateChat.js";
 import { completeChat } from "../services/openrouter.js";
+import { listChatModels } from "../services/chatModels.js";
 
 export const chatRouter = Router();
+
+chatRouter.get("/models", (_req, res) => {
+  res.json(listChatModels());
+});
 
 chatRouter.post("/", validateChat, async (req, res) => {
   try {
