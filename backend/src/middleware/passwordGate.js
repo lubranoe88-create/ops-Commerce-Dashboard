@@ -85,6 +85,14 @@ function loginPage({ error } = {}) {
 export function passwordGate(req, res, next) {
   // Public: login + platform health probes (no secrets leaked beyond placeholders status)
   if (req.path === "/login" || req.path === "/health") return next();
+  // Static UI assets must load even before/during auth cookie settle
+  if (
+    req.path.startsWith("/css/") ||
+    req.path.startsWith("/js/") ||
+    req.path === "/favicon.ico"
+  ) {
+    return next();
+  }
   if (isAuthenticated(req)) return next();
 
   if (wantsHtml(req)) {

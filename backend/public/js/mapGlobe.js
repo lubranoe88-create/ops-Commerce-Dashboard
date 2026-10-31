@@ -733,6 +733,7 @@ export function destroyMapGlobe() {
   hoverEntity = null;
   selectEntity = null;
   topsCache = [];
+  const container = viewer?.container || null;
   if (viewer && !viewer.isDestroyed?.()) {
     try {
       viewer._opsHandler?.destroy?.();
@@ -742,6 +743,15 @@ export function destroyMapGlobe() {
     }
   }
   viewer = null;
+  // Remove leftover Cesium DOM so it cannot overlay other modules / steal clicks
+  if (container) {
+    try {
+      container.innerHTML = "";
+      container.classList.remove("cesium-ops");
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export function getViewer() {

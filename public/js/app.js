@@ -902,6 +902,16 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function clearViewportHost() {
+  disposeScene();
+  destroyMapGlobe();
+  const gl = $("glCanvas");
+  if (gl) {
+    gl.innerHTML = "";
+    gl.classList.remove("cesium-ops", "is-suppressed");
+  }
+}
+
 async function showModule(mod) {
   state.module = mod;
   document.querySelectorAll("#moduleNav button").forEach((b) => {
@@ -911,21 +921,33 @@ async function showModule(mod) {
   const gl = $("glCanvas");
   const snap = state.snapshot || {};
   const mapChrome = $("mapChrome");
+  const hud = document.querySelector(".overlay-hud");
   if (mapChrome) mapChrome.hidden = mod !== "map";
+  if (hud) hud.hidden = mod === "chat";
+
+  // Always tear down the previous module host so canvases cannot stack / steal clicks.
+  clearViewportHost();
 
   if (mod === "chat") {
-    disposeScene();
-    destroyMapGlobe();
     gl.hidden = true;
+    gl.classList.add("is-suppressed");
+    gl.style.pointerEvents = "none";
     chatPanel.hidden = false;
+    chatPanel.setAttribute("aria-hidden", "false");
     $("moduleLegend").textContent = "Chat · saved history · voice";
     await loadChat();
+    // Ensure the composer can take focus after overlays are removed
+    requestAnimationFrame(() => {
+      $("chatInput")?.focus?.();
+    });
   } else {
     chatPanel.hidden = true;
+    chatPanel.setAttribute("aria-hidden", "true");
     gl.hidden = false;
+    gl.classList.remove("is-suppressed");
+    gl.style.pointerEvents = "";
     if (mod === "map") {
       // Progressive 5-level LOD satellite globe (Cesium). Falls back to Three.js Blue Marble.
-      disposeScene();
       $("moduleLegend").textContent = "Map · loading interactive globe…";
       try {
         await mountMapGlobe(gl, {
@@ -948,21 +970,17 @@ async function showModule(mod) {
       } catch (err) {
         console.warn("Cesium LOD globe failed, Three.js fallback", err);
         state.mapEngine = "three";
-        destroyMapGlobe();
-        gl.innerHTML = "";
+        clearViewportHost();
+        gl.hidden = false;
         $("moduleLegend").textContent = "Map · Three.js live fallback · drag / scroll";
         const root = initThree(gl, { autoRotate: true, minDistance: 2.6, maxDistance: 12 });
         await buildMap(root, snap.tops);
       }
     } else if (mod === "pipeline") {
-      destroyMapGlobe();
-      gl.innerHTML = "";
       $("moduleLegend").textContent = "Pipeline · 3D graph · zoomable";
       const root = initThree(gl, { autoRotate: false, minDistance: 3, maxDistance: 22 });
       buildPipeline(root, snap.pipeline?.nodes, snap.pipeline?.edges);
     } else if (mod === "memory") {
-      destroyMapGlobe();
-      gl.innerHTML = "";
       $("moduleLegend").textContent = "Memory · 5D rotatable graph · drag / scroll";
       const root = initThree(gl, { autoRotate: true, minDistance: 3, maxDistance: 18 });
       buildMemory(root, snap.memory?.concepts, snap.memory?.links);

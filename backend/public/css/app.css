@@ -14,6 +14,10 @@
 }
 
 * { box-sizing: border-box; }
+/* Ensure [hidden] always wins over display:grid / flex utility classes */
+[hidden] {
+  display: none !important;
+}
 html, body {
   margin: 0;
   height: 100%;
@@ -24,6 +28,9 @@ html, body {
 button, input, textarea, select {
   font: inherit;
   color: inherit;
+}
+input, textarea, select {
+  pointer-events: auto;
 }
 a { color: var(--cyan); }
 
@@ -108,12 +115,34 @@ a { color: var(--cyan); }
 #glCanvas {
   position: absolute;
   inset: 0;
+  z-index: 1;
   min-height: 320px;
+}
+#glCanvas.is-suppressed {
+  visibility: hidden;
+  pointer-events: none;
 }
 .viewport canvas {
   display: block;
   width: 100% !important;
   height: 100% !important;
+}
+/* Chat must sit above the absolute WebGL/Cesium host or inputs cannot receive focus */
+#chatPanel {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: var(--bg);
+  pointer-events: auto;
+}
+#chatPanel .composer,
+#chatPanel .composer input,
+#chatPanel .composer button,
+#chatPanel .chat-model-select,
+#chatPanel .threads {
+  pointer-events: auto;
+  position: relative;
+  z-index: 21;
 }
 
 /* Cesium dark-ops embed */
