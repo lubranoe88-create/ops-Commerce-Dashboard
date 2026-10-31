@@ -59,7 +59,7 @@ curl -b /tmp/dash.jar -s http://127.0.0.1:8787/health
 ### `GET /health` (auth required)
 
 ```json
-{ "ok": true, "model": "meta-llama/llama-3.2-3b-instruct", "purpose": "synthesis_ranking_only" }
+{ "ok": true, "model": "deepseek/deepseek-v4.1-flash", "purpose": "synthesis_ranking_only" }
 ```
 
 ### `POST /api/chat` (auth required) — judge calls only
