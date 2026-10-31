@@ -222,7 +222,7 @@ async function runApiChecks(cookie) {
   const html = await fetch(`${BASE}/`, { headers: { Cookie: cookie } }).then((r) => r.text());
   check("busy mark in HTML", html.includes('id="aiBusyMark"') && html.includes("ai-busy-check"));
   check("briefing modal in HTML", html.includes('id="aiBriefingModal"') && html.includes("aiQ1"));
-  check("aiAgentUi script import path", html.includes("paid-ai-2"));
+  check("aiAgentUi script import path", html.includes("paid-ai-3"));
 
   const css = await fetch(`${BASE}/css/app.css`, { headers: { Cookie: cookie } }).then((r) =>
     r.text(),
@@ -241,6 +241,22 @@ async function runApiChecks(cookie) {
   check("app wires paid AI", app.includes("initPaidAi") && app.includes("runPaidAiTurn"));
   check("app wires busy actions", app.includes("wireActionRunner") && app.includes("updateNewsPins"));
   check("mic shared controller", app.includes("globalMicControl") && app.includes("setupMic"));
+
+  const memSearch = await api(cookie, "/api/chat/memory/search?q=live&limit=5");
+  check("cross-thread memory search", memSearch.status === 200 && Array.isArray(memSearch.data.results));
+
+  const totp = await api(cookie, "/api/auth/2fa-status");
+  check("2fa status endpoint", totp.status === 200 && typeof totp.data.enabled === "boolean");
+
+  const htmlAttach = await fetch(`${BASE}/`, { headers: { Cookie: cookie } }).then((r) => r.text());
+  check("chat attach UI", htmlAttach.includes("chatAttachInput"));
+
+  const appMic = await fetch(`${BASE}/js/app.js`, { headers: { Cookie: cookie } }).then((r) => r.text());
+  check(
+    "mic starts SpeechRecognition sync",
+    appMic.includes("start() must run synchronously") || appMic.includes("CRITICAL: start()"),
+  );
+
   check("focus-top + inspect actions", app.includes('"focus-top"') || app.includes("case \"focus-top\""));
 }
 
@@ -282,7 +298,7 @@ async function runUiBusyAndMic(cookie) {
         if (m) m.hidden = true;
       });
       await page.evaluate(async () => {
-        const m = await import("/js/aiAgentUi.js?v=paid-ai-2");
+        const m = await import("/js/aiAgentUi.js?v=paid-ai-3");
         m.setAiBusy(true);
       });
       await new Promise((r) => setTimeout(r, 400));
@@ -292,7 +308,7 @@ async function runUiBusyAndMic(cookie) {
         body: document.body.dataset.aiBusy,
       }));
       await page.evaluate(async () => {
-        const m = await import("/js/aiAgentUi.js?v=paid-ai-2");
+        const m = await import("/js/aiAgentUi.js?v=paid-ai-3");
         m.setAiBusy(false);
       });
       await new Promise((r) => setTimeout(r, 300));

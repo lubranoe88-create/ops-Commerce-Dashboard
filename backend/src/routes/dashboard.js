@@ -7,6 +7,7 @@ import {
   getChatMessages,
   getDashboardSnapshot,
   listChatThreads,
+  searchCrossThreadMemory,
 } from "../memory/store.js";
 import { completeChat } from "../services/openrouter.js";
 import { isAllowedChatModel, resolveChatModel } from "../services/chatModels.js";
@@ -55,6 +56,17 @@ dashboardRouter.get("/chat/threads", (_req, res) => {
   res.json({ threads: listChatThreads() });
 });
 
+/** Cross-thread memory search (lista 20). */
+dashboardRouter.get("/chat/memory/search", (req, res) => {
+  const q = String(req.query?.q || "").slice(0, 200);
+  const limit = Math.min(40, Number(req.query?.limit) || 20);
+  const exclude = req.query?.excludeThreadId ? Number(req.query.excludeThreadId) : null;
+  res.json({
+    query: q,
+    results: searchCrossThreadMemory(q, { limit, excludeThreadId: exclude }),
+  });
+});
+
 dashboardRouter.post("/chat/threads", (req, res) => {
   const title = (req.body?.title || "Nuova chat").toString().slice(0, 120);
   res.json(createChatThread(title));
@@ -82,6 +94,9 @@ dashboardRouter.post("/chat/threads/:id/messages", async (req, res) => {
   const id = Number(req.params.id);
   const content = (req.body?.content || "").toString().trim();
   const speechInput = Boolean(req.body?.speech_input);
+  const skipAssistant = Boolean(req.body?.skipAssistant);
+  const roleIn = String(req.body?.role || "user").toLowerCase();
+  const role = roleIn === "assistant" || roleIn === "system" ? roleIn : "user";
   const requestedModel =
     typeof req.body?.model === "string" ? req.body.model.trim() : "";
   if (!content) return res.status(400).json({ error: "content required" });
@@ -91,7 +106,36 @@ dashboardRouter.post("/chat/threads/:id/messages", async (req, res) => {
   }
   const model = resolveChatModel(requestedModel || undefined);
 
-  appendChatMessage(id, { role: "user", content, speechInput });
+  const attachmentName = String(req.body?.attachment_name || req.body?.attachmentName || "").slice(0, 180);
+  const attachmentMime = String(req.body?.attachment_mime || req.body?.attachmentMime || "").slice(0, 120);
+  // Store extracted/plain text only (no binary blobs in SQLite) — lista 21
+  const attachmentText = String(req.body?.attachment_text || req.body?.attachmentText || "").slice(0, 50_000);
+
+  // Persist-only path (paid AI turn already produced the reply, or assistant echo)
+  if (skipAssistant || role !== "user") {
+    appendChatMessage(id, {
+      role,
+      content,
+      speechInput: role === "user" ? speechInput : false,
+      attachmentName,
+      attachmentMime,
+      attachmentText,
+    });
+    return res.json({
+      ok: true,
+      persisted: true,
+      messages: getChatMessages(id),
+    });
+  }
+
+  appendChatMessage(id, {
+    role: "user",
+    content,
+    speechInput,
+    attachmentName,
+    attachmentMime,
+    attachmentText,
+  });
 
   const snap = getDashboardSnapshot();
   const system = [

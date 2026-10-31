@@ -6,7 +6,7 @@ import { config } from "../config.js";
 import { completeChat } from "./openrouter.js";
 import { assertCanCall, recordCompletion, getBudgetStatus } from "./aiBudget.js";
 import { PANEL_CATALOG, SYSTEM_CARD, sanitizeActions } from "./panelCatalog.js";
-import { getDashboardSnapshot } from "../memory/store.js";
+import { getDashboardSnapshot, searchCrossThreadMemory } from "../memory/store.js";
 import {
   saveBriefingSession,
   insertSuggestions,
@@ -235,6 +235,7 @@ export async function runAiTurn({
 
   const snap = getDashboardSnapshot();
   const news = getCachedNews(8);
+  const crossMem = searchCrossThreadMemory(message, { limit: 8 });
   const mainSystem = [
     SYSTEM_CARD,
     "Rispondi in italiano, conciso. Analizza solo il contesto fornito.",
@@ -253,6 +254,12 @@ export async function runAiTurn({
     coverage: snap.coverage,
     consistency: (snap.consistency || []).slice(0, 6),
     memory_concepts: (snap.memory?.concepts || []).slice(0, 12),
+    cross_thread_memory: crossMem.map((m) => ({
+      thread: m.thread_title,
+      role: m.role,
+      content: String(m.content || "").slice(0, 280),
+      attachment: m.attachment_name || null,
+    })),
     news: news.map((n) => ({
       id: n.id,
       title: n.title,

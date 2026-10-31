@@ -25,7 +25,7 @@ import {
   setProactiveTtsOptIn,
   forceIdleNudgeForTest,
 } from "../services/proactive.js";
-import { browserUseStatus, runBrowserUse } from "../services/browserUse.js";
+import { browserUseStatus, runBrowserUse, resolveAllowOrigin } from "../services/browserUse.js";
 import { config } from "../config.js";
 
 export const aiRouter = Router();
@@ -239,6 +239,7 @@ aiRouter.post("/browser-use", requireAiPaid, async (req, res) => {
       selector: req.body?.selector || "",
       path: req.body?.path || "/",
       cookie,
+      allowOrigin: resolveAllowOrigin(req),
     });
     if (!result.ok) {
       const status =

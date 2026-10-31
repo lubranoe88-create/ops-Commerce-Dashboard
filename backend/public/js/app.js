@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=paid-ai-2";
+} from "./mapGlobe.js?v=paid-ai-3";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,9 +33,9 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=paid-ai-2";
+} from "./aiAgentUi.js?v=paid-ai-3";
 
-const BUILD_ID = "paid-ai-2";
+const BUILD_ID = "paid-ai-3";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -112,6 +112,7 @@ const state = {
   aiStatus: null,
   aiPaid: false,
   news: [],
+  pendingAttachment: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -2188,7 +2189,13 @@ async function showModule(mod, opts = {}) {
       if (mod === "chat") {
         $("moduleLegend").textContent = "Chat · saved history · voice";
         sideForModule(mod, snap);
-        await loadChat();
+        // Never block opening chat if thread API is slow/rate-limited
+        try {
+          await loadChat();
+        } catch (err) {
+          console.warn("[chat] loadChat", err?.message || err);
+          showToast(err?.message || "Chat history non disponibile", "warn");
+        }
         if (!stillCurrent(epoch, mod)) return;
         requestAnimationFrame(() => {
           if (!stillCurrent(epoch, mod)) return;
@@ -2407,7 +2414,11 @@ async function loadChat() {
   (messages || []).forEach((m) => {
     const d = document.createElement("div");
     d.className = `bubble ${m.role}`;
-    d.textContent = m.content;
+    const attach = m.attachment_name
+      ? `\n[allegato: ${m.attachment_name}]`
+      : "";
+    d.textContent = `${m.content || ""}${attach}`;
+    if (m.speech_input) d.dataset.speech = "1";
     msgs.appendChild(d);
   });
   msgs.scrollTop = msgs.scrollHeight;
@@ -2422,6 +2433,28 @@ async function sendChat(text, { voice = false } = {}) {
   await ensureChatModelSelect();
   const model = getSelectedChatModel();
   try {
+    // Always persist user utterance (incl. MIC) so speech_input + history survive paid path
+    const attach = state.pendingAttachment;
+    try {
+      await api(`/api/chat/threads/${state.threadId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({
+          content: text,
+          model,
+          speech_input: Boolean(voice),
+          skipAssistant: Boolean(state.aiPaid),
+          attachment_name: attach?.name || "",
+          attachment_mime: attach?.mime || "",
+          attachment_text: attach?.text || "",
+        }),
+      });
+      state.pendingAttachment = null;
+      const nameEl = $("chatAttachName");
+      if (nameEl) nameEl.textContent = "";
+    } catch (persistErr) {
+      console.warn("[chat] persist failed", persistErr?.message || persistErr);
+    }
+
     // Paid AI agent path: busy ✓ while working, actions[] applied, reply in chat
     if (state.aiPaid) {
       const result = await runPaidAiTurn({
@@ -2430,8 +2463,23 @@ async function sendChat(text, { voice = false } = {}) {
       });
       $("chatInput").value = "";
       const reply = result.reply || "(nessuna risposta)";
-      postChatUpdate(`${text}`, "ok");
-      postChatUpdate(reply, result.blocked ? "warn" : "ok");
+      // Store assistant reply on the same thread
+      try {
+        await api(`/api/chat/threads/${state.threadId}/messages`, {
+          method: "POST",
+          body: JSON.stringify({
+            content: reply,
+            role: "assistant",
+            model: result.model || model,
+            skipAssistant: true,
+          }),
+        });
+      } catch {
+        /* optional */
+      }
+      await loadChat().catch(() => {
+        postChatUpdate(reply, result.blocked ? "warn" : "ok");
+      });
       if (result.tier) {
         const budget = result.budget;
         const rem =
@@ -2443,10 +2491,6 @@ async function sendChat(text, { voice = false } = {}) {
       if (voice) postChatUpdate("Risposta vocale ricevuta in chat", "ok");
       return;
     }
-    await api(`/api/chat/threads/${state.threadId}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ content: text, model }),
-    });
     $("chatInput").value = "";
     await loadChat();
     if (voice) {
@@ -2684,7 +2728,12 @@ function setupMic(button, onText) {
     };
   };
 
-  const startRecognition = async () => {
+  /**
+   * Start SpeechRecognition in the same user-gesture turn as the click.
+   * Awaiting getUserMedia BEFORE rec.start() drops Safari/Chrome activation
+   * and makes MIC appear dead on the live HTTPS site.
+   */
+  const startRecognition = () => {
     silenceVoice();
     markUserInput?.();
 
@@ -2698,56 +2747,45 @@ function setupMic(button, onText) {
     setLiveUi(true);
     postChatUpdate("Microfono attivo — parla ora…");
 
-    const perm = await acquireMicStream();
-    if (!perm.ok) {
-      hardStop();
-      postChatUpdate(micErrorMessage(perm.code), "warn");
-      return;
-    }
-    micStream = perm.stream || null;
-
-    const begin = () => {
-      if (rec) {
-        try {
-          rec.abort?.();
-        } catch {
-          /* ignore */
-        }
-        rec = null;
-      }
-      rec = createSpeechRecognizer();
-      if (!rec) {
-        hardStop();
-        postChatUpdate("Riconoscimento vocale non disponibile", "warn");
-        return false;
-      }
-      bindRec(rec);
-      rec.start();
-      starting = false;
-      return true;
-    };
-
-    try {
-      begin();
-    } catch {
+    if (rec) {
       try {
-        rec?.abort?.();
+        rec.abort?.();
       } catch {
         /* ignore */
       }
       rec = null;
-      await new Promise((r) => setTimeout(r, isAppleWebKit() ? 220 : 120));
-      try {
-        if (!begin()) return;
-        setLiveUi(true);
-      } catch (err2) {
-        hardStop();
-        postChatUpdate(
-          micErrorMessage(err2?.name) || "Impossibile avviare il microfono su questo browser",
-          "warn",
-        );
-      }
     }
+    rec = createSpeechRecognizer();
+    if (!rec) {
+      hardStop();
+      postChatUpdate("Riconoscimento vocale non disponibile", "warn");
+      return;
+    }
+    bindRec(rec);
+
+    // CRITICAL: start() must run synchronously under the click gesture.
+    try {
+      rec.start();
+      starting = false;
+    } catch (errStart) {
+      hardStop();
+      postChatUpdate(
+        micErrorMessage(errStart?.name) || "Impossibile avviare il riconoscimento vocale",
+        "warn",
+      );
+      return;
+    }
+
+    // Warm the mic stream after start (does not need to own the gesture).
+    acquireMicStream().then((perm) => {
+      if (!perm.ok) {
+        // Recognition may still work via the browser speech service; surface warn only.
+        postChatUpdate(micErrorMessage(perm.code), "warn");
+        return;
+      }
+      if (state.micLive || starting) micStream = perm.stream || null;
+      else releaseMicStream(perm.stream);
+    });
   };
 
   const toggle = () => {
@@ -2867,6 +2905,28 @@ function wireUi() {
   $("sendChat")?.addEventListener("click", submitAnalizza);
   $("chatInput")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") submitAnalizza();
+  });
+  $("chatAttachInput")?.addEventListener("change", async (e) => {
+    const file = e.target?.files?.[0];
+    if (!file) return;
+    if (file.size > 400_000) {
+      showToast("Allegato troppo grande (max ~400KB testo)", "warn");
+      e.target.value = "";
+      return;
+    }
+    try {
+      const text = await file.text();
+      state.pendingAttachment = {
+        name: file.name.slice(0, 180),
+        mime: file.type || "text/plain",
+        text: text.slice(0, 50_000),
+      };
+      const nameEl = $("chatAttachName");
+      if (nameEl) nameEl.textContent = file.name;
+      showToast(`Allegato pronto: ${file.name}`);
+    } catch {
+      showToast("Impossibile leggere l'allegato", "bad");
+    }
   });
   $("refreshBtn")?.addEventListener("click", async () => {
     try {
@@ -3003,13 +3063,10 @@ function wireUi() {
     // Fallback: free-form → chat (no TTS — updates stay in the panel)
     runHoloAction("chat", { fromVoice: true }).then(() => sendChat(text, { voice: true }));
   });
-  // chatMic keeps its own one-shot dictation into the composer (does not drive plancia commands)
+  // Same controller for chat MIC — avoids a second SpeechRecognition fighting the first
   const chatMic = $("chatMic");
-  if (chatMic) {
-    setupMic(chatMic, (text) => {
-      $("chatInput").value = text;
-      sendChat(text);
-    });
+  if (chatMic && globalMicControl?.attachButton) {
+    globalMicControl.attachButton(chatMic);
   }
   tickUtcClock();
   setInterval(tickUtcClock, 1000);
