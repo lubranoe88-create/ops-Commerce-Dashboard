@@ -105,11 +105,24 @@ function runPython(payload, timeoutMs = 55000) {
   });
 }
 
+export function resolveAllowOrigin(req) {
+  const configured = config.browserUseAllowOrigin || "";
+  // Prefer explicit public URL; otherwise derive from the live request (Render).
+  if (configured && !/localhost|127\.0\.0\.1/i.test(configured)) return configured.replace(/\/$/, "");
+  const xfProto = String(req?.headers?.["x-forwarded-proto"] || "").split(",")[0].trim();
+  const xfHost = String(req?.headers?.["x-forwarded-host"] || "").split(",")[0].trim();
+  const host = xfHost || String(req?.headers?.host || "").trim();
+  const proto = xfProto || (req?.secure ? "https" : "http") || "https";
+  if (host) return `${proto}://${host}`.replace(/\/$/, "");
+  return (configured || "http://127.0.0.1:8787").replace(/\/$/, "");
+}
+
 export async function runBrowserUse({
   goal,
   selector,
   path: pagePath = "/",
   cookie = "",
+  allowOrigin = null,
 } = {}) {
   if (!isAiPaid()) {
     const err = new Error("browser-use requires paid AI tier");
@@ -146,12 +159,13 @@ export async function runBrowserUse({
     throw err;
   }
 
+  const origin = allowOrigin || config.browserUseAllowOrigin;
   const result = await runPython({
     goal,
     selector,
     path: pagePath,
     cookie,
-    allowOrigin: config.browserUseAllowOrigin,
+    allowOrigin: origin,
   });
   return {
     ...result,

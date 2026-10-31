@@ -819,6 +819,16 @@ body[data-ai-busy="1"] .analizza-send { opacity: 0.72; }
   gap: 10px;
   margin-top: 4px;
 }
+.chat-attach-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 8px;
+}
+.chat-attach-row label {
+  cursor: pointer;
+  margin: 0;
+}
 .top-right {
   position: relative;
   justify-self: end;

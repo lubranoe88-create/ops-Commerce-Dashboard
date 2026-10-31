@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { config } from "../config.js";
+import { isTotpEnabled, verifyTotp } from "../services/totp.js";
 
 export const AUTH_COOKIE = "dash_auth";
 
@@ -57,6 +58,10 @@ function loginPage({ error } = {}) {
   const errorHtml = error
     ? `<p style="color:#b00020;margin:0 0 12px;font-size:14px">${error}</p>`
     : "";
+  const totpBlock = isTotpEnabled()
+    ? `<label for="otp">Codice 2FA</label>
+    <input id="otp" name="otp" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6 cifre" />`
+    : "";
   return `<!DOCTYPE html>
 <html lang="it">
 <head>
@@ -67,7 +72,7 @@ function loginPage({ error } = {}) {
     body { font-family: system-ui, sans-serif; background: #0f1115; color: #e8eaed; min-height: 100vh; display: grid; place-items: center; margin: 0; }
     form { background: #1a1d24; padding: 28px; border-radius: 12px; width: min(360px, 92vw); border: 1px solid #2a2f3a; }
     label { display: block; font-size: 13px; margin-bottom: 8px; color: #aeb4bf; }
-    input[type=password] { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid #3a4150; background: #0f1115; color: #e8eaed; margin-bottom: 14px; }
+    input[type=password], input[type=text] { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid #3a4150; background: #0f1115; color: #e8eaed; margin-bottom: 14px; }
     button { width: 100%; padding: 10px 12px; border: 0; border-radius: 8px; background: #4c6fff; color: white; font-weight: 600; cursor: pointer; }
   </style>
 </head>
@@ -76,6 +81,7 @@ function loginPage({ error } = {}) {
     <label for="password">Password</label>
     ${errorHtml}
     <input id="password" name="password" type="password" required autofocus />
+    ${totpBlock}
     <button type="submit">Entra</button>
   </form>
 </body>
@@ -119,10 +125,16 @@ export function loginHandlers(app) {
       }
       return res.status(401).json({ error: "Invalid password" });
     }
+    if (isTotpEnabled() && !verifyTotp(req.body?.otp)) {
+      if (wantsHtml(req) || req.headers["content-type"]?.includes("form")) {
+        return res.status(401).type("html").send(loginPage({ error: "Codice 2FA non valido" }));
+      }
+      return res.status(401).json({ error: "Invalid 2FA code", code: "TOTP_REQUIRED" });
+    }
     setAuthCookie(res);
     const accept = req.headers.accept || "";
     if (accept.includes("application/json")) {
-      return res.json({ ok: true });
+      return res.json({ ok: true, totp: isTotpEnabled() });
     }
     return res.redirect("/");
   });
@@ -147,7 +159,14 @@ export function loginHandlers(app) {
     if (!timingSafeEqualString(password, config.sitePassword)) {
       return res.status(401).json({ error: "Invalid password" });
     }
+    if (isTotpEnabled() && !verifyTotp(req.body?.otp)) {
+      return res.status(401).json({ error: "Invalid 2FA code", code: "TOTP_REQUIRED" });
+    }
     setAuthCookie(res);
-    return res.json({ ok: true });
+    return res.json({ ok: true, totp: isTotpEnabled() });
+  });
+
+  app.get("/api/auth/2fa-status", (_req, res) => {
+    res.json({ enabled: isTotpEnabled() });
   });
 }

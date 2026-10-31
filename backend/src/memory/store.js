@@ -76,6 +76,9 @@ function ensureExtraSchema(db) {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       speech_input INTEGER NOT NULL DEFAULT 0,
+      attachment_name TEXT NOT NULL DEFAULT '',
+      attachment_mime TEXT NOT NULL DEFAULT '',
+      attachment_text TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS mechanical_rules (
@@ -458,20 +461,121 @@ export function createChatThread(title = "Nuova chat") {
 }
 
 export function getChatMessages(threadId) {
-  return getDb()
-    .prepare(
-      `SELECT id, role, content, speech_input, created_at FROM chat_messages
-       WHERE thread_id = ? ORDER BY id ASC`,
-    )
-    .all(threadId);
+  const db = getDb();
+  try {
+    return db
+      .prepare(
+        `SELECT id, role, content, speech_input, attachment_name, attachment_mime, attachment_text, created_at
+         FROM chat_messages WHERE thread_id = ? ORDER BY id ASC`,
+      )
+      .all(threadId);
+  } catch {
+    return db
+      .prepare(
+        `SELECT id, role, content, speech_input, created_at FROM chat_messages
+         WHERE thread_id = ? ORDER BY id ASC`,
+      )
+      .all(threadId);
+  }
 }
 
-export function appendChatMessage(threadId, { role, content, speechInput = false }) {
+export function appendChatMessage(
+  threadId,
+  {
+    role,
+    content,
+    speechInput = false,
+    attachmentName = "",
+    attachmentMime = "",
+    attachmentText = "",
+  },
+) {
   const db = getDb();
+  try {
+    db.exec(`ALTER TABLE chat_messages ADD COLUMN attachment_name TEXT NOT NULL DEFAULT ''`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.exec(`ALTER TABLE chat_messages ADD COLUMN attachment_mime TEXT NOT NULL DEFAULT ''`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.exec(`ALTER TABLE chat_messages ADD COLUMN attachment_text TEXT NOT NULL DEFAULT ''`);
+  } catch {
+    /* exists */
+  }
   db.prepare(
-    `INSERT INTO chat_messages (thread_id, role, content, speech_input) VALUES (?, ?, ?, ?)`,
-  ).run(threadId, role, content, speechInput ? 1 : 0);
+    `INSERT INTO chat_messages
+      (thread_id, role, content, speech_input, attachment_name, attachment_mime, attachment_text)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    threadId,
+    role,
+    content,
+    speechInput ? 1 : 0,
+    attachmentName || "",
+    attachmentMime || "",
+    attachmentText || "",
+  );
   db.prepare(`UPDATE chat_threads SET updated_at = datetime('now') WHERE id = ?`).run(threadId);
+}
+
+function ensureChatAttachmentColumns(db = getDb()) {
+  for (const col of [
+    "attachment_name TEXT NOT NULL DEFAULT ''",
+    "attachment_mime TEXT NOT NULL DEFAULT ''",
+    "attachment_text TEXT NOT NULL DEFAULT ''",
+  ]) {
+    try {
+      db.exec(`ALTER TABLE chat_messages ADD COLUMN ${col}`);
+    } catch {
+      /* exists */
+    }
+  }
+}
+
+/** Cross-thread memory: recent messages matching a query across all threads. */
+export function searchCrossThreadMemory(query, { limit = 20, excludeThreadId = null } = {}) {
+  const db = getDb();
+  ensureChatAttachmentColumns(db);
+  const q = String(query || "").trim();
+  if (!q) {
+    return db
+      .prepare(
+        `SELECT m.id, m.thread_id, t.title AS thread_title, m.role, m.content, m.speech_input,
+                m.attachment_name, m.created_at
+         FROM chat_messages m
+         JOIN chat_threads t ON t.id = m.thread_id
+         ORDER BY m.id DESC LIMIT ?`,
+      )
+      .all(limit);
+  }
+  const like = `%${q.replace(/[%_]/g, "")}%`;
+  if (excludeThreadId) {
+    return db
+      .prepare(
+        `SELECT m.id, m.thread_id, t.title AS thread_title, m.role, m.content, m.speech_input,
+                m.attachment_name, m.created_at
+         FROM chat_messages m
+         JOIN chat_threads t ON t.id = m.thread_id
+         WHERE m.thread_id != ?
+           AND (m.content LIKE ? OR m.attachment_text LIKE ? OR m.attachment_name LIKE ?)
+         ORDER BY m.id DESC LIMIT ?`,
+      )
+      .all(excludeThreadId, like, like, like, limit);
+  }
+  return db
+    .prepare(
+      `SELECT m.id, m.thread_id, t.title AS thread_title, m.role, m.content, m.speech_input,
+              m.attachment_name, m.created_at
+       FROM chat_messages m
+       JOIN chat_threads t ON t.id = m.thread_id
+       WHERE m.content LIKE ? OR m.attachment_text LIKE ? OR m.attachment_name LIKE ?
+       ORDER BY m.id DESC LIMIT ?`,
+    )
+    .all(like, like, like, limit);
 }
 
 export { reorganizeAfterConversation, SOURCES, dayKey };
