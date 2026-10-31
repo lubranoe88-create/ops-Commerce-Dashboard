@@ -128,6 +128,25 @@ export function loginHandlers(app) {
 
   app.post("/logout", (_req, res) => {
     clearAuthCookie(res);
+    const accept = _req.headers.accept || "";
+    if (accept.includes("application/json")) {
+      return res.json({ ok: true });
+    }
     return res.redirect("/login");
+  });
+
+  // Compat aliases used by the SPA
+  app.post("/api/auth/logout", (_req, res) => {
+    clearAuthCookie(res);
+    return res.json({ ok: true });
+  });
+  app.post("/api/auth/login", (req, res) => {
+    const password =
+      (typeof req.body?.password === "string" && req.body.password) || "";
+    if (!timingSafeEqualString(password, config.sitePassword)) {
+      return res.status(401).json({ error: "Invalid password" });
+    }
+    setAuthCookie(res);
+    return res.json({ ok: true });
   });
 }

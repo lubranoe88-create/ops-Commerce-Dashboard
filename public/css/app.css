@@ -144,8 +144,17 @@ a { color: var(--cyan); }
   padding: 10px 14px;
   border-bottom: 1px solid var(--stroke);
   background: #0a1018;
-  z-index: 30;
+  z-index: 50;
   position: relative;
+  pointer-events: auto;
+}
+.topbar .nav,
+.topbar .nav button,
+.topbar .pill-btn,
+.topbar .icon-btn {
+  pointer-events: auto;
+  position: relative;
+  z-index: 51;
 }
 .brand {
   font-weight: 650;
@@ -219,9 +228,20 @@ a { color: var(--cyan); }
   z-index: 1;
   min-height: 320px;
 }
-#glCanvas.is-suppressed {
-  visibility: hidden;
-  pointer-events: none;
+#glCanvas.is-suppressed,
+#glCanvas[hidden] {
+  visibility: hidden !important;
+  pointer-events: none !important;
+  display: none !important;
+}
+body[data-module="chat"] #glCanvas,
+body[data-module="chat"] #mapChrome,
+body[data-module="chat"] .overlay-hud {
+  display: none !important;
+  pointer-events: none !important;
+}
+body[data-module="chat"] #chatPanel {
+  display: grid !important;
 }
 .viewport canvas {
   display: block;

@@ -1080,6 +1080,8 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+let moduleEpoch = 0;
+
 function clearViewportHost() {
   disposeScene();
   destroyMapGlobe();
@@ -1087,11 +1089,31 @@ function clearViewportHost() {
   if (gl) {
     gl.innerHTML = "";
     gl.classList.remove("cesium-ops", "is-suppressed");
+    gl.style.pointerEvents = "none";
   }
 }
 
+function syncModuleHash(mod) {
+  const next = `#/${mod}`;
+  if (location.hash !== next) {
+    history.replaceState(null, "", next);
+  }
+}
+
+function moduleFromHash() {
+  const raw = (location.hash || "").replace(/^#\/?/, "").trim().toLowerCase();
+  return MODULES.includes(raw) ? raw : null;
+}
+
+function stillCurrent(epoch, mod) {
+  return epoch === moduleEpoch && state.module === mod;
+}
+
 async function showModule(mod) {
+  if (!MODULES.includes(mod)) mod = "map";
+  const epoch = ++moduleEpoch;
   state.module = mod;
+  syncModuleHash(mod);
   document.querySelectorAll("#moduleNav button").forEach((b) => {
     b.classList.toggle("active", b.dataset.module === mod);
   });
@@ -1107,6 +1129,7 @@ async function showModule(mod) {
 
   // Always tear down the previous module host so canvases cannot stack / steal clicks.
   clearViewportHost();
+  document.body.dataset.module = mod;
 
   if (mod === "chat") {
     gl.hidden = true;
@@ -1115,9 +1138,12 @@ async function showModule(mod) {
     chatPanel.hidden = false;
     chatPanel.setAttribute("aria-hidden", "false");
     $("moduleLegend").textContent = "Chat · saved history · voice";
+    sideForModule(mod, snap);
     await loadChat();
+    if (!stillCurrent(epoch, mod)) return;
     // Ensure the composer can take focus after overlays are removed
     requestAnimationFrame(() => {
+      if (!stillCurrent(epoch, mod)) return;
       $("chatInput")?.focus?.();
     });
   } else {
@@ -1139,6 +1165,7 @@ async function showModule(mod) {
             $("coverageMini").textContent = `${lod.detail} · drag rotate · scroll zoom · L${lod.level}/5`;
           },
           onSelect: (sel) => {
+            if (state.module !== "map") return;
             const card = $("mapPickCard");
             if (!card) return;
             card.hidden = false;
@@ -1146,26 +1173,45 @@ async function showModule(mod) {
             $("mapPickDetail").textContent = sel.detail || `${sel.lat?.toFixed?.(3)}, ${sel.lon?.toFixed?.(3)}`;
           },
         });
+        if (!stillCurrent(epoch, mod)) {
+          destroyMapGlobe();
+          return;
+        }
         state.mapEngine = "cesium";
       } catch (err) {
+        if (!stillCurrent(epoch, mod)) return;
         console.warn("Cesium LOD globe failed, Three.js fallback", err);
         state.mapEngine = "three";
         clearViewportHost();
         gl.hidden = false;
+        gl.style.pointerEvents = "";
         $("moduleLegend").textContent = "Map · Three.js live fallback · drag / scroll";
         const root = initThree(gl, { autoRotate: true, minDistance: 2.6, maxDistance: 12 });
         await buildMap(root, snap.tops);
+        if (!stillCurrent(epoch, mod)) {
+          disposeScene();
+          return;
+        }
       }
     } else if (mod === "pipeline") {
       $("moduleLegend").textContent = "Pipeline · 3D graph · zoomable";
       const root = initThree(gl, { autoRotate: false, minDistance: 3, maxDistance: 22 });
       buildPipeline(root, snap.pipeline?.nodes, snap.pipeline?.edges);
+      if (!stillCurrent(epoch, mod)) {
+        disposeScene();
+        return;
+      }
     } else if (mod === "memory") {
       $("moduleLegend").textContent = "Memory · 5D rotatable graph · drag / scroll";
       const root = initThree(gl, { autoRotate: true, minDistance: 3, maxDistance: 18 });
       buildMemory(root, snap.memory?.concepts, snap.memory?.links);
+      if (!stillCurrent(epoch, mod)) {
+        disposeScene();
+        return;
+      }
     }
   }
+  if (!stillCurrent(epoch, mod)) return;
   sideForModule(mod, snap);
   if (mod !== "map") renderCoverageMini(snap.coverage);
   if (snap.health) setHealth(snap.health);
@@ -1228,17 +1274,20 @@ async function ensureChatModelSelect() {
   sel.value = pick;
   state.chatModel = pick;
   writeStoredChatModel(pick);
+  updateModelHint();
   if (!sel.dataset.wired) {
     sel.dataset.wired = "1";
     sel.addEventListener("change", () => {
       state.chatModel = sel.value;
       writeStoredChatModel(sel.value);
+      updateModelHint();
     });
   }
 }
 
 async function loadChat() {
   await ensureChatModelSelect();
+  renderChatSuggestions();
   const { threads } = await api("/api/chat/threads");
   const list = $("threadList");
   list.innerHTML = "";
@@ -1248,6 +1297,7 @@ async function loadChat() {
   neu.onclick = async () => {
     const t = await api("/api/chat/threads", { method: "POST", body: JSON.stringify({ title: "Session" }) });
     state.threadId = t.id;
+    showToast("Nuova sessione chat");
     await loadChat();
   };
   list.appendChild(neu);
@@ -1283,12 +1333,16 @@ async function sendChat(text) {
   }
   await ensureChatModelSelect();
   const model = getSelectedChatModel();
-  await api(`/api/chat/threads/${state.threadId}/messages`, {
-    method: "POST",
-    body: JSON.stringify({ content: text, model }),
-  });
-  $("chatInput").value = "";
-  await loadChat();
+  try {
+    await api(`/api/chat/threads/${state.threadId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content: text, model }),
+    });
+    $("chatInput").value = "";
+    await loadChat();
+  } catch (err) {
+    showToast(err.message || "Chat fallita", "bad");
+  }
 }
 
 function setupMic(button, onText) {
@@ -1324,14 +1378,57 @@ function wireUi() {
   $("moduleNav").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-module]");
     if (!btn) return;
-    showModule(btn.dataset.module);
+    e.preventDefault();
+    e.stopPropagation();
+    const next = btn.dataset.module;
+    if (next === state.module && location.hash === `#/${next}`) {
+      // Force re-render if user re-clicks the active module
+      showModule(next);
+      return;
+    }
+    showModule(next);
+  });
+  window.addEventListener("hashchange", () => {
+    const fromHash = moduleFromHash();
+    if (fromHash && fromHash !== state.module) showModule(fromHash);
   });
   $("sendChat").onclick = () => sendChat($("chatInput").value);
   $("chatInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendChat($("chatInput").value);
   });
+  $("refreshBtn")?.addEventListener("click", async () => {
+    try {
+      await refresh();
+      showToast("Dashboard aggiornata");
+    } catch (err) {
+      showToast(err.message || "Refresh fallito", "bad");
+    }
+  });
+  $("exportChatBtn")?.addEventListener("click", async () => {
+    if (!state.threadId) {
+      showToast("Nessun thread da esportare", "warn");
+      return;
+    }
+    const { messages } = await api(`/api/chat/threads/${state.threadId}`);
+    const text = (messages || [])
+      .map((m) => `${(m.role || "msg").toUpperCase()}: ${m.content || ""}`)
+      .join("\n\n");
+    downloadText(`chat-thread-${state.threadId}.txt`, text || "(empty)");
+    showToast("Chat esportata");
+  });
+  window.addEventListener("keydown", (e) => {
+    const tag = (e.target?.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select" || e.target?.isContentEditable) return;
+    if (e.key >= "1" && e.key <= "4") {
+      const mod = MODULES[Number(e.key) - 1];
+      if (mod) showModule(mod);
+    } else if (e.key === "r" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      refresh().then(() => showToast("Dashboard aggiornata"));
+    }
+  });
   $("logoutBtn").onclick = async () => {
-    await api("/api/auth/logout", { method: "POST", body: "{}" }).catch(() => {});
+    await fetch("/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
     window.location.href = "/login";
   };
 
@@ -1383,6 +1480,8 @@ function wireUi() {
 
 async function boot() {
   wireUi();
+  const initial = moduleFromHash() || "map";
+  state.module = initial;
   try {
     await refresh();
   } catch (e) {
