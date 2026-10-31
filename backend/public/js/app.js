@@ -1,7 +1,10 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
+  CITY_LOD_HEIGHT,
   destroyMapGlobe,
+  emphasizeTopIds,
+  filterTopEntities,
   flyToTop,
   mountMapGlobe,
   resetNorth,
@@ -10,7 +13,9 @@ import {
 
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
+const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
 const MODULES = ["map", "pipeline", "memory", "chat"];
+const CITY_FLY_HEIGHT = CITY_LOD_HEIGHT;
 const CHAT_SUGGESTIONS = [
   "Riassumi i top di oggi",
   "Quali errori pipeline sono aperti?",
@@ -56,6 +61,14 @@ const state = {
   resizeObserver: null,
   pulse: [],
   mapEngine: "cesium", // progressive 5-level LOD satellite zoom
+  focusedTopId: null,
+  compareIds: [],
+  mapChipFilters: { region: null, source: null, minScore: null },
+  coverageFocusIdx: 0,
+  lastMapPick: null,
+  pickHandler: null,
+  memoryLinks: [],
+  memoryMeshes: new Map(),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -198,6 +211,21 @@ function initThree(container, { autoRotate = true, minDistance = 2.4, maxDistanc
   state.renderer = renderer;
   state.controls = controls;
   state.rootGroup = root;
+  state.pickHandler = null;
+
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  renderer.domElement.addEventListener("pointerdown", (ev) => {
+    if (!state.pickHandler || !state.scene || !state.camera) return;
+    if (ev.button !== 0) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, state.camera);
+    const hits = raycaster.intersectObjects(state.rootGroup.children, true);
+    const hit = hits.find((h) => h.object?.userData?.pickable);
+    if (hit) state.pickHandler(hit.object.userData, hit.object, ev);
+  });
 
   const syncSize = () => {
     if (!state.renderer) return;
@@ -663,6 +691,7 @@ function buildPipeline(root, nodes, edges) {
         new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.2, metalness: 0.3, roughness: 0.5 })
       );
       mesh.position.copy(positions[n.id]);
+      mesh.userData = { pickable: true, kind: "pipeline-node", node: n };
       root.add(mesh);
       const label = makeSprite(n.label || n.id);
       label.position.set(x, y + 0.45, z);
@@ -679,6 +708,9 @@ function buildPipeline(root, nodes, edges) {
   });
   state.camera.position.set(0, 4, 9);
   state.controls.target.set(0, 0, 0);
+  state.pickHandler = (data) => {
+    if (data?.kind === "pipeline-node") inspectPipelineNode(data.node);
+  };
 }
 
 function makeSprite(text, compact = false) {
@@ -711,6 +743,8 @@ function buildMemory(root, concepts, links) {
   // 5D encoding:
   // x = topic axis, y = reliability/importance, z = evidence cluster,
   // color hue = semantic dimension (0..4), size = importance, orbit ring = recency
+  state.memoryMeshes = new Map();
+  state.memoryLinks = links || [];
   const frame = new THREE.Group();
   root.add(frame);
 
@@ -772,8 +806,15 @@ function buildMemory(root, concepts, links) {
       }),
     );
     mesh.position.copy(pos[c.id]);
+    mesh.userData = {
+      pickable: true,
+      kind: "memory-concept",
+      concept: c,
+      linked: (links || []).filter((l) => l.from === c.id || l.to === c.id),
+    };
     frame.add(mesh);
-    state.pulse.push({ mesh, phase: i * 0.7 });
+    state.memoryMeshes.set(c.id, mesh);
+    state.pulse.push({ mesh, phase: i * 0.7, baseX: 1, baseY: 1 });
 
     // Recency halo (5th dim)
     const halo = new THREE.Mesh(
@@ -789,6 +830,7 @@ function buildMemory(root, concepts, links) {
     frame.add(label);
   });
 
+  state.memoryLinks = links || [];
   (links || []).forEach((l) => {
     const a = pos[l.from];
     const b = pos[l.to];
@@ -806,6 +848,9 @@ function buildMemory(root, concepts, links) {
   state.controls.minDistance = 3;
   state.controls.maxDistance = 16;
   state.autoRotate = true;
+  state.pickHandler = (data) => {
+    if (data?.kind === "memory-concept") orbitMemoryConcept(data.concept, data.linked);
+  };
 }
 
 function showToast(message, kind = "ok") {
@@ -920,6 +965,320 @@ function updateModelHint() {
   hint.textContent = MODEL_COST_HINTS[id] || "";
 }
 
+function topsOrderKey(dayKey) {
+  return `${TOPS_ORDER_KEY_PREFIX}${dayKey || "unknown"}`;
+}
+
+function readTopsOrder(dayKey) {
+  try {
+    return JSON.parse(localStorage.getItem(topsOrderKey(dayKey)) || "[]") || [];
+  } catch {
+    return [];
+  }
+}
+
+function writeTopsOrder(dayKey, ids) {
+  try {
+    localStorage.setItem(topsOrderKey(dayKey), JSON.stringify(ids));
+  } catch {
+    /* ignore */
+  }
+}
+
+function orderedTops(snap) {
+  const tops = [...(snap?.tops || [])];
+  const order = readTopsOrder(snap?.day_key);
+  if (!order.length) return tops;
+  const byId = new Map(tops.map((t) => [t.id, t]));
+  const sorted = [];
+  order.forEach((id) => {
+    if (byId.has(id)) {
+      sorted.push(byId.get(id));
+      byId.delete(id);
+    }
+  });
+  byId.forEach((t) => sorted.push(t));
+  return sorted;
+}
+
+function findTop(id) {
+  return (state.snapshot?.tops || []).find((t) => t.id === id) || null;
+}
+
+function setFocusedTop(id) {
+  state.focusedTopId = id || null;
+  document.querySelectorAll(".card[data-top-id]").forEach((card) => {
+    card.classList.toggle("is-focused", card.dataset.topId === id);
+  });
+}
+
+function flyToTopCard(t) {
+  if (!t) return;
+  const lon = Number.isFinite(t.lon) ? t.lon : 12.5;
+  const lat = Number.isFinite(t.lat) ? t.lat : 42;
+  setFocusedTop(t.id);
+  flyToTop(lon, lat, CITY_FLY_HEIGHT);
+  showToast(`Fly → ${t.title || t.id}`);
+}
+
+async function openChatAnalyze(title) {
+  const prompt = `analizza ${title || "questa azienda"}`;
+  await showModule("chat");
+  const input = $("chatInput");
+  if (input) {
+    input.value = prompt;
+    input.focus();
+  }
+  showToast("Chat pronta · analizza");
+}
+
+function updateCompareStrip() {
+  const strip = $("compareStrip");
+  if (!strip) return;
+  const [aId, bId] = state.compareIds;
+  const a = findTop(aId);
+  const b = findTop(bId);
+  strip.hidden = !(a || b);
+  const fill = (el, top, label) => {
+    if (!el) return;
+    if (!top) {
+      el.innerHTML = `<span class="muted">${label}</span>`;
+      return;
+    }
+    el.innerHTML = `<strong>${escapeHtml(top.title)}</strong>
+      <span class="mono">${Math.round((top.score || 0) * 100)}%</span>
+      <div class="muted">${escapeHtml(top.region || "")} · ${escapeHtml(top.source || "")}</div>`;
+  };
+  fill($("compareA"), a, "Pin A");
+  fill($("compareB"), b, "Pin B");
+  emphasizeTopIds(state.compareIds.filter(Boolean));
+}
+
+function pinCompare(top) {
+  if (!top?.id) return;
+  if (state.compareIds.includes(top.id)) {
+    showToast("Già in confronto", "warn");
+    return;
+  }
+  if (state.compareIds.length >= 2) state.compareIds = [state.compareIds[1]];
+  state.compareIds.push(top.id);
+  updateCompareStrip();
+  showToast(`Confronto · ${top.title || top.id}`);
+}
+
+function clearCompare() {
+  state.compareIds = [];
+  updateCompareStrip();
+  emphasizeTopIds([]);
+}
+
+function applyMapFilters() {
+  const chips = state.mapChipFilters;
+  const cov = (state.snapshot?.coverage || [])[state.coverageFocusIdx];
+  const covToken = (cov?.domain || "").toLowerCase();
+  filterTopEntities((top) => {
+    if (chips.region && (top.region || "") !== chips.region) return false;
+    if (chips.source && (top.source || "") !== chips.source) return false;
+    if (chips.minScore != null && (top.score || 0) < chips.minScore) return false;
+    if (covToken) {
+      const hay = `${top.source || ""} ${top.title || ""} ${top.region || ""}`.toLowerCase();
+      // Soft match: if domain appears in meta keep; else keep high-score tops as fallback
+      if (!hay.includes(covToken) && (top.score || 0) < 0.75) return false;
+    }
+    return true;
+  });
+}
+
+function renderMapFilterChips(tops) {
+  const host = $("mapFilterChips");
+  if (!host) return;
+  host.innerHTML = "";
+  const regions = [...new Set((tops || []).map((t) => t.region).filter(Boolean))].slice(0, 4);
+  const sources = [...new Set((tops || []).map((t) => t.source).filter(Boolean))].slice(0, 4);
+  const addChip = (label, active, onClick) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    if (active) b.classList.add("active");
+    b.onclick = onClick;
+    host.appendChild(b);
+  };
+  addChip("Tutti", !state.mapChipFilters.region && !state.mapChipFilters.source && state.mapChipFilters.minScore == null, () => {
+    state.mapChipFilters = { region: null, source: null, minScore: null };
+    renderMapFilterChips(tops);
+    applyMapFilters();
+  });
+  regions.forEach((r) => {
+    addChip(r, state.mapChipFilters.region === r, () => {
+      state.mapChipFilters.region = state.mapChipFilters.region === r ? null : r;
+      renderMapFilterChips(tops);
+      applyMapFilters();
+    });
+  });
+  sources.forEach((s) => {
+    addChip(s, state.mapChipFilters.source === s, () => {
+      state.mapChipFilters.source = state.mapChipFilters.source === s ? null : s;
+      renderMapFilterChips(tops);
+      applyMapFilters();
+    });
+  });
+  addChip("score≥75%", state.mapChipFilters.minScore === 0.75, () => {
+    state.mapChipFilters.minScore = state.mapChipFilters.minScore === 0.75 ? null : 0.75;
+    renderMapFilterChips(tops);
+    applyMapFilters();
+  });
+}
+
+function setupCoverageScrub(coverage) {
+  const wrap = $("coverageScrub");
+  const range = $("coverageScrubRange");
+  const label = $("coverageScrubLabel");
+  if (!wrap || !range) return;
+  const list = coverage || [];
+  if (!list.length) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  range.min = "0";
+  range.max = String(Math.max(0, list.length - 1));
+  range.value = String(Math.min(state.coverageFocusIdx, list.length - 1));
+  const paint = () => {
+    state.coverageFocusIdx = Number(range.value) || 0;
+    const c = list[state.coverageFocusIdx];
+    if (label) {
+      label.textContent = c
+        ? `${c.domain || c.id} · ${Math.round((c.pct || 0) * 100)}%`
+        : "—";
+    }
+    applyMapFilters();
+  };
+  range.oninput = paint;
+  paint();
+}
+
+function inspectPipelineNode(node) {
+  const body = $("sideBody");
+  if (!body || !node) return;
+  let panel = body.querySelector(".inspect-panel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.className = "card inspect-panel";
+    body.prepend(panel);
+  }
+  const errs = (state.snapshot?.errors || []).filter(
+    (e) =>
+      String(e.code || "").includes(node.id) ||
+      String(e.message || "").toLowerCase().includes(String(node.label || "").toLowerCase()) ||
+      e.nodeId === node.id,
+  );
+  panel.innerHTML = `<strong>Inspect · ${escapeHtml(node.label || node.id)}</strong>
+    <div class="muted">${escapeHtml(node.kind || "")} · health <span class="mono">${escapeHtml(node.health || "—")}</span></div>
+    <div class="muted">layer ${escapeHtml(String(node.layer ?? "—"))}</div>
+    ${
+      errs.length
+        ? `<div class="err">${errs.map((e) => escapeHtml(e.message || e.code || "")).join("<br/>")}</div>`
+        : `<div class="muted">Nessun errore collegato</div>`
+    }`;
+  showToast(`Nodo · ${node.label || node.id}`);
+}
+
+function orbitMemoryConcept(concept, linked) {
+  if (!concept || !state.controls) return;
+  const mesh = state.memoryMeshes.get(concept.id);
+  if (mesh) {
+    // Pull selected concept toward origin (orbit center)
+    mesh.position.lerp(new THREE.Vector3(0, 0.4, 0), 0.85);
+    state.controls.target.copy(mesh.position);
+    state.camera.position.set(mesh.position.x + 2.8, mesh.position.y + 1.6, mesh.position.z + 3.2);
+  }
+  const linkIds = new Set();
+  (linked || []).forEach((l) => {
+    if (l.from !== concept.id) linkIds.add(l.from);
+    if (l.to !== concept.id) linkIds.add(l.to);
+  });
+  state.pulse.forEach((p) => {
+    const id = p.mesh?.userData?.concept?.id;
+    if (id === concept.id || linkIds.has(id)) {
+      p.baseX = 1.55;
+      p.baseY = 1.55;
+    } else {
+      p.baseX = 0.85;
+      p.baseY = 0.85;
+    }
+  });
+  const body = $("sideBody");
+  if (body) {
+    let panel = body.querySelector(".inspect-panel");
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.className = "card inspect-panel";
+      body.prepend(panel);
+    }
+    const defs = [...linkIds]
+      .map((id) => state.snapshot?.memory?.concepts?.find((c) => c.id === id))
+      .filter(Boolean)
+      .map((c) => `· ${c.label || c.id} (dim ${c.dimension ?? "—"})`)
+      .join("<br/>");
+    panel.innerHTML = `<strong>Memory · ${escapeHtml(concept.label || concept.id)}</strong>
+      <div class="muted">importanza ${(concept.importance || 0).toFixed(2)} · recency ${(concept.recency || 0).toFixed(2)}</div>
+      <div class="muted">${defs || "Nessun link diretto"}</div>`;
+  }
+  showToast(`Orbita · ${concept.label || concept.id}`);
+}
+
+async function submitCorrection(id, verdict) {
+  const body = $("sideBody");
+  const note = body?.querySelector(`input[data-note="${id}"]`)?.value || "";
+  await api("/api/corrections", {
+    method: "POST",
+    body: JSON.stringify({
+      targetType: "top",
+      targetId: id,
+      verdict,
+      note,
+    }),
+  });
+  showToast(verdict === "correct" ? "Segnato correct" : "Segnato incorrect", verdict === "correct" ? "ok" : "warn");
+  await refresh();
+}
+
+function handleVoiceLod(text) {
+  const lower = String(text || "").toLowerCase();
+  const t0 = state.snapshot?.tops?.[0];
+  const lon = Number.isFinite(t0?.lon) ? t0.lon : 12.5;
+  const lat = Number.isFinite(t0?.lat) ? t0.lat : 42;
+  if (/(zoom\s*)?citt[aà]|city/.test(lower)) {
+    showModule("map").then(() => {
+      flyToTop(lon, lat, CITY_FLY_HEIGHT);
+      showToast("LOD · città");
+    });
+    return true;
+  }
+  if (/orbit|orbita/.test(lower)) {
+    showModule("map").then(() => {
+      flyToTop(lon, lat, 12_000_000);
+      showToast("LOD · orbit");
+    });
+    return true;
+  }
+  if (/nord|north|reset\s*nord/.test(lower)) {
+    showModule("map").then(() => {
+      resetNorth();
+      showToast("Nord");
+    });
+    return true;
+  }
+  if (/paese|country/.test(lower)) {
+    showModule("map").then(() => {
+      flyToTop(lon, lat, 1_500_000);
+      showToast("LOD · paese");
+    });
+    return true;
+  }
+  return false;
+}
+
 function sideForModule(mod, snap) {
   const body = $("sideBody");
   const title = $("sideTitle");
@@ -952,20 +1311,57 @@ function sideForModule(mod, snap) {
     body.appendChild(filter);
 
     const notes = readCompanyNotes();
-    (snap.tops || []).forEach((t) => {
+    const tops = orderedTops(snap);
+    let dragId = null;
+    tops.forEach((t) => {
       const el = document.createElement("div");
       el.className = "card";
+      el.draggable = true;
       el.dataset.topId = t.id;
       el.dataset.filter = `${t.title || ""} ${t.region || ""} ${t.source || ""}`.toLowerCase();
+      if (state.focusedTopId === t.id) el.classList.add("is-focused");
       el.innerHTML = `
-        <div class="row"><strong>${escapeHtml(t.title)}</strong><span class="mono">${Math.round((t.score || 0) * 100)}%</span></div>
+        <div class="row"><strong class="top-fly">${escapeHtml(t.title)}</strong><span class="mono">${Math.round((t.score || 0) * 100)}%</span></div>
         <div class="muted">${escapeHtml(t.region || "")} · ${escapeHtml(t.source || "")}</div>
         <input type="text" placeholder="Correction note (optional)" data-note="${t.id}" />
         <textarea class="note-local" rows="2" placeholder="Nota locale (solo browser)" data-local-note="${t.id}"></textarea>
         <div class="actions">
+          <button class="pill-btn" data-fly="${t.id}">Fly</button>
+          <button class="pill-btn" data-compare="${t.id}">Confronta</button>
           <button class="pill-btn" data-correct="1" data-id="${t.id}">Correct</button>
           <button class="pill-btn" data-correct="0" data-id="${t.id}">Incorrect</button>
         </div>`;
+      el.querySelector(".top-fly")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        flyToTopCard(t);
+      });
+      el.addEventListener("click", (e) => {
+        if (e.target.closest("button, input, textarea")) return;
+        setFocusedTop(t.id);
+      });
+      el.addEventListener("dragstart", () => {
+        dragId = t.id;
+        el.classList.add("dragging");
+      });
+      el.addEventListener("dragend", () => el.classList.remove("dragging"));
+      el.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        el.classList.add("drag-over");
+      });
+      el.addEventListener("dragleave", () => el.classList.remove("drag-over"));
+      el.addEventListener("drop", (e) => {
+        e.preventDefault();
+        el.classList.remove("drag-over");
+        if (!dragId || dragId === t.id) return;
+        const ids = tops.map((x) => x.id);
+        const from = ids.indexOf(dragId);
+        const to = ids.indexOf(t.id);
+        if (from < 0 || to < 0) return;
+        ids.splice(to, 0, ids.splice(from, 1)[0]);
+        writeTopsOrder(snap.day_key, ids);
+        showToast("Ordine tops salvato");
+        sideForModule("map", snap);
+      });
       const local = el.querySelector(`[data-local-note="${t.id}"]`);
       if (local) {
         local.value = notes[t.id] || "";
@@ -976,35 +1372,34 @@ function sideForModule(mod, snap) {
       }
       body.appendChild(el);
     });
+    body.querySelectorAll("[data-fly]").forEach((btn) => {
+      btn.addEventListener("click", () => flyToTopCard(findTop(btn.getAttribute("data-fly"))));
+    });
+    body.querySelectorAll("[data-compare]").forEach((btn) => {
+      btn.addEventListener("click", () => pinCompare(findTop(btn.getAttribute("data-compare"))));
+    });
     body.querySelectorAll("[data-correct]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const id = btn.getAttribute("data-id");
-        const note = body.querySelector(`input[data-note="${id}"]`)?.value || "";
         const verdict = btn.getAttribute("data-correct") === "1" ? "correct" : "incorrect";
-        await api("/api/corrections", {
-          method: "POST",
-          body: JSON.stringify({
-            targetType: "top",
-            targetId: id,
-            verdict,
-            note,
-          }),
-        });
-        showToast(verdict === "correct" ? "Segnato correct" : "Segnato incorrect", verdict === "correct" ? "ok" : "warn");
-        await refresh();
+        await submitCorrection(id, verdict);
       });
     });
+    renderMapFilterChips(tops);
+    setupCoverageScrub(snap.coverage);
+    updateCompareStrip();
+
     // Zoom affordances for 5-level LOD globe
     const zoomHelp = document.createElement("div");
     zoomHelp.className = "card";
     zoomHelp.innerHTML = `<strong>5D zoom</strong>
-      <div class="muted">Scroll: orbita → continente → paese → città → strade → dettaglio. Tile satellitari fino a Z19 + overlay vie.</div>
+      <div class="muted">Scroll: orbita → continente → paese · click titolo/Fly = città. Hotkey C/I sul top in focus. MIC: «zoom città», «orbit», «nord».</div>
       <div class="actions" id="lodJumps"></div>`;
     body.appendChild(zoomHelp);
     const jumps = [
       ["Continente", 12_000_000],
       ["Paese", 1_500_000],
-      ["Città", 80_000],
+      ["Città", CITY_FLY_HEIGHT],
       ["Strade", 8_000],
       ["Dettaglio", 600],
     ];
@@ -1014,22 +1409,25 @@ function sideForModule(mod, snap) {
       b.className = "pill-btn";
       b.textContent = label;
       b.onclick = () => {
-        if (!window.Cesium) return;
-        // fly relative to first top or Europe
-        const t0 = (state.snapshot?.tops || [])[0];
+        const t0 = state.focusedTopId ? findTop(state.focusedTopId) : (state.snapshot?.tops || [])[0];
         const lon = Number.isFinite(t0?.lon) ? t0.lon : 12.5;
         const lat = Number.isFinite(t0?.lat) ? t0.lat : 42;
-        import("./mapGlobe.js").then(({ flyToTop }) => flyToTop(lon, lat, h));
+        flyToTop(lon, lat, h);
       };
       box.appendChild(b);
     });
   } else if (mod === "pipeline") {
     title.textContent = "Pipeline · errors";
+    const hint = document.createElement("div");
+    hint.className = "card muted";
+    hint.textContent = "Clicca un nodo 3D per ispezionare stats/errori qui.";
+    body.appendChild(hint);
     (snap.pipeline?.nodes || []).forEach((n) => {
       const el = document.createElement("div");
       el.className = "card";
       el.innerHTML = `<div class="row"><strong>${escapeHtml(n.label || n.id)}</strong><span class="mono">${escapeHtml(n.health || "—")}</span></div>
         <div class="muted">${escapeHtml(n.kind || "")}</div>`;
+      el.addEventListener("click", () => inspectPipelineNode(n));
       body.appendChild(el);
     });
     const errs = snap.errors || [];
@@ -1046,11 +1444,19 @@ function sideForModule(mod, snap) {
     }
   } else if (mod === "memory") {
     title.textContent = "Memory 5D · concepts";
+    const hint = document.createElement("div");
+    hint.className = "card muted";
+    hint.textContent = "Clicca un concetto 3D per centrarlo e pulsare i collegati.";
+    body.appendChild(hint);
     (snap.memory?.concepts || []).forEach((c) => {
       const el = document.createElement("div");
       el.className = "card";
       el.innerHTML = `<div class="row"><strong>${escapeHtml(c.label || c.id)}</strong><span class="mono">i${(c.importance || 0).toFixed(2)}</span></div>
         <div class="muted">dim ${c.dimension ?? "—"} · recency ${(c.recency || 0).toFixed(2)}</div>`;
+      el.addEventListener("click", () => {
+        const linked = (snap.memory?.links || []).filter((l) => l.from === c.id || l.to === c.id);
+        orbitMemoryConcept(c, linked);
+      });
       body.appendChild(el);
     });
   } else if (mod === "chat") {
@@ -1081,6 +1487,8 @@ function escapeHtml(s) {
 }
 
 let moduleEpoch = 0;
+let moduleSwitchLocked = false;
+let moduleSwitchPromise = null;
 
 function clearViewportHost() {
   disposeScene();
@@ -1109,112 +1517,172 @@ function stillCurrent(epoch, mod) {
   return epoch === moduleEpoch && state.module === mod;
 }
 
-async function showModule(mod) {
+function setExclusivePanels(mod) {
+  const chatPanel = $("chatPanel");
+  const gl = $("glCanvas");
+  const mapChrome = $("mapChrome");
+  const hud = document.querySelector(".overlay-hud");
+  const pickCard = $("mapPickCard");
+  const isChat = mod === "chat";
+  const isMap = mod === "map";
+
+  document.body.dataset.module = mod;
+  if (mapChrome) mapChrome.hidden = !isMap;
+  if (hud) hud.hidden = isChat;
+  if (pickCard && !isMap) pickCard.hidden = true;
+  const compare = $("compareStrip");
+  if (compare && !isMap) compare.hidden = true;
+  else if (isMap) updateCompareStrip();
+  if (!isMap) {
+    state.pickHandler = null;
+    state.memoryMeshes = new Map();
+  }
+
+  if (isChat) {
+    if (gl) {
+      gl.hidden = true;
+      gl.classList.add("is-suppressed");
+      gl.style.pointerEvents = "none";
+    }
+    if (chatPanel) {
+      chatPanel.hidden = false;
+      chatPanel.setAttribute("aria-hidden", "false");
+    }
+  } else {
+    if (chatPanel) {
+      chatPanel.hidden = true;
+      chatPanel.setAttribute("aria-hidden", "true");
+    }
+    if (gl) {
+      gl.hidden = false;
+      gl.classList.remove("is-suppressed");
+      gl.style.pointerEvents = "";
+    }
+  }
+}
+
+/**
+ * Switch module. First click wins while a switch is in flight — overlapping
+ * second clicks are ignored so async mounts cannot remount a stale panel.
+ * Pass { force: true } for refresh / boot.
+ */
+async function showModule(mod, opts = {}) {
   if (!MODULES.includes(mod)) mod = "map";
+  const force = Boolean(opts.force);
+
+  // Exclusive lock: ignore a second overlapping click while the first switch runs.
+  if (moduleSwitchLocked && !force) {
+    return moduleSwitchPromise;
+  }
+
   const epoch = ++moduleEpoch;
   state.module = mod;
   syncModuleHash(mod);
   document.querySelectorAll("#moduleNav button").forEach((b) => {
     b.classList.toggle("active", b.dataset.module === mod);
   });
-  const chatPanel = $("chatPanel");
-  const gl = $("glCanvas");
-  const snap = state.snapshot || {};
-  const mapChrome = $("mapChrome");
-  const hud = document.querySelector(".overlay-hud");
-  const pickCard = $("mapPickCard");
-  if (mapChrome) mapChrome.hidden = mod !== "map";
-  if (hud) hud.hidden = mod === "chat";
-  if (pickCard && mod !== "map") pickCard.hidden = true;
 
-  // Always tear down the previous module host so canvases cannot stack / steal clicks.
-  clearViewportHost();
-  document.body.dataset.module = mod;
+  moduleSwitchLocked = true;
+  const run = (async () => {
+    try {
+      const gl = $("glCanvas");
+      const snap = state.snapshot || {};
 
-  if (mod === "chat") {
-    gl.hidden = true;
-    gl.classList.add("is-suppressed");
-    gl.style.pointerEvents = "none";
-    chatPanel.hidden = false;
-    chatPanel.setAttribute("aria-hidden", "false");
-    $("moduleLegend").textContent = "Chat · saved history · voice";
-    sideForModule(mod, snap);
-    await loadChat();
-    if (!stillCurrent(epoch, mod)) return;
-    // Ensure the composer can take focus after overlays are removed
-    requestAnimationFrame(() => {
-      if (!stillCurrent(epoch, mod)) return;
-      $("chatInput")?.focus?.();
-    });
-  } else {
-    chatPanel.hidden = true;
-    chatPanel.setAttribute("aria-hidden", "true");
-    gl.hidden = false;
-    gl.classList.remove("is-suppressed");
-    gl.style.pointerEvents = "";
-    if (mod === "map") {
-      // Progressive 5-level LOD satellite globe (Cesium). Falls back to Three.js Blue Marble.
-      $("moduleLegend").textContent = "Map · loading interactive globe…";
-      try {
-        await mountMapGlobe(gl, {
-          tops: snap.tops,
-          onLod: (lod, heightM) => {
-            if (state.module !== "map") return;
-            const km = heightM > 1000 ? `${(heightM / 1000).toFixed(0)} km` : `${Math.round(heightM)} m`;
-            $("moduleLegend").textContent = `GLOBE LIVE · ${lod.label} · alt ${km}`;
-            $("coverageMini").textContent = `${lod.detail} · drag rotate · scroll zoom · L${lod.level}/5`;
-          },
-          onSelect: (sel) => {
-            if (state.module !== "map") return;
-            const card = $("mapPickCard");
-            if (!card) return;
-            card.hidden = false;
-            $("mapPickTitle").textContent = sel.title || "Selection";
-            $("mapPickDetail").textContent = sel.detail || `${sel.lat?.toFixed?.(3)}, ${sel.lon?.toFixed?.(3)}`;
-          },
+      // Tear down previous host first so canvases cannot stack / steal clicks.
+      clearViewportHost();
+      setExclusivePanels(mod);
+
+      if (mod === "chat") {
+        $("moduleLegend").textContent = "Chat · saved history · voice";
+        sideForModule(mod, snap);
+        await loadChat();
+        if (!stillCurrent(epoch, mod)) return;
+        requestAnimationFrame(() => {
+          if (!stillCurrent(epoch, mod)) return;
+          $("chatInput")?.focus?.();
         });
+      } else if (mod === "map") {
+        $("moduleLegend").textContent = "Map · loading interactive globe…";
+        try {
+          await mountMapGlobe(gl, {
+            tops: snap.tops,
+            onLod: (lod, heightM) => {
+              if (state.module !== "map") return;
+              const km = heightM > 1000 ? `${(heightM / 1000).toFixed(0)} km` : `${Math.round(heightM)} m`;
+              $("moduleLegend").textContent = `GLOBE LIVE · ${lod.label} · alt ${km}`;
+              $("coverageMini").textContent = `${lod.detail} · drag rotate · scroll zoom · L${lod.level}/5`;
+            },
+            onSelect: (sel) => {
+              if (state.module !== "map") return;
+              const card = $("mapPickCard");
+              if (!card) return;
+              state.lastMapPick = sel;
+              card.hidden = false;
+              $("mapPickTitle").textContent = sel.title || "Selection";
+              $("mapPickDetail").textContent = sel.detail || `${sel.lat?.toFixed?.(3)}, ${sel.lon?.toFixed?.(3)}`;
+              const analyze = $("mapPickAnalyze");
+              const compareBtn = $("mapPickCompare");
+              const isTop = sel.kind === "top" || sel.top;
+              if (analyze) analyze.hidden = !isTop && !sel.title;
+              if (compareBtn) compareBtn.hidden = !sel.top;
+              if (sel.top?.id) setFocusedTop(sel.top.id);
+            },
+          });
+          applyMapFilters();
+          emphasizeTopIds(state.compareIds.filter(Boolean));
+          if (!stillCurrent(epoch, mod)) {
+            destroyMapGlobe();
+            return;
+          }
+          state.mapEngine = "cesium";
+        } catch (err) {
+          if (!stillCurrent(epoch, mod)) return;
+          console.warn("Cesium LOD globe failed, Three.js fallback", err);
+          state.mapEngine = "three";
+          clearViewportHost();
+          setExclusivePanels(mod);
+          $("moduleLegend").textContent = "Map · Three.js live fallback · drag / scroll";
+          const root = initThree(gl, { autoRotate: true, minDistance: 2.6, maxDistance: 12 });
+          await buildMap(root, snap.tops);
+          if (!stillCurrent(epoch, mod)) {
+            disposeScene();
+            return;
+          }
+        }
+      } else if (mod === "pipeline") {
+        $("moduleLegend").textContent = "Pipeline · 3D graph · zoomable";
+        const root = initThree(gl, { autoRotate: false, minDistance: 3, maxDistance: 22 });
+        buildPipeline(root, snap.pipeline?.nodes, snap.pipeline?.edges);
         if (!stillCurrent(epoch, mod)) {
-          destroyMapGlobe();
+          disposeScene();
           return;
         }
-        state.mapEngine = "cesium";
-      } catch (err) {
-        if (!stillCurrent(epoch, mod)) return;
-        console.warn("Cesium LOD globe failed, Three.js fallback", err);
-        state.mapEngine = "three";
-        clearViewportHost();
-        gl.hidden = false;
-        gl.style.pointerEvents = "";
-        $("moduleLegend").textContent = "Map · Three.js live fallback · drag / scroll";
-        const root = initThree(gl, { autoRotate: true, minDistance: 2.6, maxDistance: 12 });
-        await buildMap(root, snap.tops);
+      } else if (mod === "memory") {
+        $("moduleLegend").textContent = "Memory · 5D rotatable graph · drag / scroll";
+        const root = initThree(gl, { autoRotate: true, minDistance: 3, maxDistance: 18 });
+        buildMemory(root, snap.memory?.concepts, snap.memory?.links);
         if (!stillCurrent(epoch, mod)) {
           disposeScene();
           return;
         }
       }
-    } else if (mod === "pipeline") {
-      $("moduleLegend").textContent = "Pipeline · 3D graph · zoomable";
-      const root = initThree(gl, { autoRotate: false, minDistance: 3, maxDistance: 22 });
-      buildPipeline(root, snap.pipeline?.nodes, snap.pipeline?.edges);
-      if (!stillCurrent(epoch, mod)) {
-        disposeScene();
-        return;
-      }
-    } else if (mod === "memory") {
-      $("moduleLegend").textContent = "Memory · 5D rotatable graph · drag / scroll";
-      const root = initThree(gl, { autoRotate: true, minDistance: 3, maxDistance: 18 });
-      buildMemory(root, snap.memory?.concepts, snap.memory?.links);
-      if (!stillCurrent(epoch, mod)) {
-        disposeScene();
-        return;
+
+      if (!stillCurrent(epoch, mod)) return;
+      // Re-assert exclusive panels after async mounts (Cesium can leave DOM).
+      setExclusivePanels(mod);
+      sideForModule(mod, snap);
+      if (mod !== "map") renderCoverageMini(snap.coverage);
+      if (snap.health) setHealth(snap.health);
+    } finally {
+      if (epoch === moduleEpoch) {
+        moduleSwitchLocked = false;
+        moduleSwitchPromise = null;
       }
     }
-  }
-  if (!stillCurrent(epoch, mod)) return;
-  sideForModule(mod, snap);
-  if (mod !== "map") renderCoverageMini(snap.coverage);
-  if (snap.health) setHealth(snap.health);
+  })();
+
+  moduleSwitchPromise = run;
+  return run;
 }
 
 async function refresh() {
@@ -1223,7 +1691,7 @@ async function refresh() {
   state.snapshot = snap;
   state.lastUpdated = new Date();
   updateStatsStrip(snap);
-  await showModule(state.module);
+  await showModule(state.module, { force: true });
 }
 
 function readStoredChatModel() {
@@ -1380,17 +1848,15 @@ function wireUi() {
     if (!btn) return;
     e.preventDefault();
     e.stopPropagation();
-    const next = btn.dataset.module;
-    if (next === state.module && location.hash === `#/${next}`) {
-      // Force re-render if user re-clicks the active module
-      showModule(next);
-      return;
-    }
-    showModule(next);
+    // First-wins: if a switch is already running, ignore this overlapping click.
+    if (moduleSwitchLocked) return;
+    showModule(btn.dataset.module);
   });
   window.addEventListener("hashchange", () => {
     const fromHash = moduleFromHash();
-    if (fromHash && fromHash !== state.module) showModule(fromHash);
+    if (!fromHash || fromHash === state.module) return;
+    if (moduleSwitchLocked) return; // first click still owns the transition
+    showModule(fromHash);
   });
   $("sendChat").onclick = () => sendChat($("chatInput").value);
   $("chatInput").addEventListener("keydown", (e) => {
@@ -1420,13 +1886,28 @@ function wireUi() {
     const tag = (e.target?.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea" || tag === "select" || e.target?.isContentEditable) return;
     if (e.key >= "1" && e.key <= "4") {
+      if (moduleSwitchLocked) return;
       const mod = MODULES[Number(e.key) - 1];
       if (mod) showModule(mod);
     } else if (e.key === "r" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       refresh().then(() => showToast("Dashboard aggiornata"));
+    } else if ((e.key === "c" || e.key === "C") && state.module === "map" && state.focusedTopId) {
+      e.preventDefault();
+      submitCorrection(state.focusedTopId, "correct");
+    } else if ((e.key === "i" || e.key === "I") && state.module === "map" && state.focusedTopId) {
+      e.preventDefault();
+      submitCorrection(state.focusedTopId, "incorrect");
     }
   });
+  $("mapPickAnalyze")?.addEventListener("click", () => {
+    const title = state.lastMapPick?.top?.title || state.lastMapPick?.title;
+    if (title) openChatAnalyze(title);
+  });
+  $("mapPickCompare")?.addEventListener("click", () => {
+    if (state.lastMapPick?.top) pinCompare(state.lastMapPick.top);
+  });
+  $("compareClear")?.addEventListener("click", () => clearCompare());
   $("logoutBtn").onclick = async () => {
     await fetch("/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
     window.location.href = "/login";
@@ -1462,6 +1943,7 @@ function wireUi() {
     );
   });
   setupMic($("globalMic"), (text) => {
+    if (handleVoiceLod(text)) return;
     const lower = text.toLowerCase();
     if (lower.includes("map")) showModule("map");
     else if (lower.includes("pipeline")) showModule("pipeline");

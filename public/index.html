@@ -51,7 +51,22 @@
           <div id="mapPickCard" class="map-pick-card" hidden>
             <div class="map-pick-title" id="mapPickTitle">—</div>
             <div class="map-pick-detail muted" id="mapPickDetail"></div>
+            <div class="map-pick-actions">
+              <button type="button" id="mapPickAnalyze" class="pill-btn primary" hidden>Analizza in chat</button>
+              <button type="button" id="mapPickCompare" class="pill-btn" hidden>Confronta</button>
+            </div>
           </div>
+          <div id="mapFilterChips" class="filter-chips" aria-label="Filtri live tops"></div>
+          <div id="coverageScrub" class="coverage-scrub" hidden>
+            <label for="coverageScrubRange">Coverage focus</label>
+            <input id="coverageScrubRange" type="range" min="0" max="0" value="0" />
+            <span id="coverageScrubLabel" class="mono muted">—</span>
+          </div>
+        </div>
+        <div id="compareStrip" class="compare-strip" hidden>
+          <div class="compare-slot" id="compareA"><span class="muted">Pin A</span></div>
+          <div class="compare-slot" id="compareB"><span class="muted">Pin B</span></div>
+          <button type="button" id="compareClear" class="pill-btn">Clear</button>
         </div>
         <div id="glCanvas" class="gl-host" style="position:absolute;inset:0;"></div>
         <div id="chatPanel" class="chat-wrap" hidden>

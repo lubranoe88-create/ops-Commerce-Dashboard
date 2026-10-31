@@ -135,6 +135,90 @@ a { color: var(--cyan); }
   padding: 6px 8px;
   font-size: 12px;
 }
+.filter-chips {
+  position: absolute;
+  left: 12px;
+  bottom: 58px;
+  z-index: 7;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: min(520px, 70%);
+  pointer-events: auto;
+}
+.filter-chips button {
+  background: rgba(8, 12, 18, 0.92);
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+.filter-chips button.active {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.coverage-scrub {
+  position: absolute;
+  right: 12px;
+  bottom: 58px;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(8, 12, 18, 0.92);
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  pointer-events: auto;
+  font-size: 11px;
+}
+.coverage-scrub input[type="range"] {
+  width: 120px;
+}
+.compare-strip {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  z-index: 8;
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(8, 12, 18, 0.95);
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  pointer-events: auto;
+}
+.compare-slot {
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 1px dashed var(--stroke);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.compare-slot strong { display: block; }
+.map-pick-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.card.is-focused {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 1px rgba(61, 214, 255, 0.35);
+}
+.card[draggable="true"] {
+  cursor: grab;
+}
+.card.drag-over {
+  outline: 1px dashed var(--cyan);
+}
+.inspect-panel {
+  border-color: var(--amber);
+}
 
 .topbar {
   display: flex;
@@ -216,11 +300,19 @@ a { color: var(--cyan); }
   min-height: 0;
   height: 100%;
   isolation: isolate;
+  contain: layout paint;
   background:
     radial-gradient(ellipse at 30% 20%, rgba(61, 214, 255, 0.08), transparent 45%),
     radial-gradient(ellipse at center, #101826 0%, #05080d 72%);
   border-right: 1px solid var(--stroke);
   overflow: hidden;
+}
+/* Cesium must never paint above the topbar / stats strip */
+.cesium-viewer,
+.cesium-widget,
+.cesium-widget canvas {
+  max-width: 100%;
+  max-height: 100%;
 }
 #glCanvas {
   position: absolute;

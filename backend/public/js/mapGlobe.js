@@ -417,14 +417,80 @@ export function resetNorth() {
   scheduleIdleResume();
 }
 
+export const CITY_LOD_HEIGHT = 80_000;
+
 export function flyToTop(lon, lat, height = 25000) {
   if (!viewer || !window.Cesium) return;
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
   userInteracting = true;
   viewer.camera.flyTo({
     destination: window.Cesium.Cartesian3.fromDegrees(lon, lat, height),
     duration: 2.0,
   });
   scheduleIdleResume();
+}
+
+/** Dim / hide top pins that fail `matchFn(top)`. Pass null to show all. */
+export function filterTopEntities(matchFn) {
+  if (!viewer) return;
+  const Cesium = window.Cesium;
+  for (const e of viewer.entities.values) {
+    const props = e.properties;
+    if (!props) continue;
+    const kind =
+      typeof props.kind?.getValue === "function"
+        ? props.kind.getValue(viewer.clock.currentTime)
+        : props.kind;
+    if (kind !== "top") continue;
+    const topId =
+      typeof props.topId?.getValue === "function"
+        ? props.topId.getValue(viewer.clock.currentTime)
+        : props.topId;
+    const top = topsCache.find((t) => t.id === topId) || {
+      id: topId,
+      region: props.region?.getValue?.(viewer.clock.currentTime) ?? props.region,
+      source: props.source?.getValue?.(viewer.clock.currentTime) ?? props.source,
+      score: props.score?.getValue?.(viewer.clock.currentTime) ?? props.score,
+      title: e.name,
+    };
+    const ok = typeof matchFn === "function" ? Boolean(matchFn(top)) : true;
+    e.show = ok;
+    if (e.point && Cesium) {
+      e.point.color = ok
+        ? Cesium.Color.WHITE
+        : Cesium.Color.WHITE.withAlpha(0.15);
+    }
+  }
+}
+
+/** Emphasize compare-pinned tops with larger points. */
+export function emphasizeTopIds(ids = []) {
+  if (!viewer || !window.Cesium) return;
+  const Cesium = window.Cesium;
+  const set = new Set(ids.filter(Boolean));
+  for (const e of viewer.entities.values) {
+    const props = e.properties;
+    if (!props) continue;
+    const kind =
+      typeof props.kind?.getValue === "function"
+        ? props.kind.getValue(viewer.clock.currentTime)
+        : props.kind;
+    if (kind !== "top" || !e.point) continue;
+    const topId =
+      typeof props.topId?.getValue === "function"
+        ? props.topId.getValue(viewer.clock.currentTime)
+        : props.topId;
+    const hot = set.has(topId);
+    e.point.pixelSize = hot ? 28 : 14;
+    e.point.outlineWidth = hot ? 6 : 4;
+    e.point.outlineColor = hot
+      ? Cesium.Color.fromCssColorString("#3dd6ff")
+      : e.point.outlineColor;
+  }
+}
+
+export function getTopsCache() {
+  return topsCache.slice();
 }
 
 function scheduleIdleResume() {
