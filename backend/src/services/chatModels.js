@@ -1,7 +1,36 @@
 import { config } from "../config.js";
 
+/** Default economical OpenRouter model for chat. */
+export const DEFAULT_CHAT_MODEL = "deepseek/deepseek-v4.1-flash";
+
 /** Allow-listed OpenRouter model IDs for the chat UI selector. */
 export const CHAT_MODEL_GROUPS = [
+  {
+    id: "value",
+    label: "Economical · capable",
+    models: [
+      {
+        id: "deepseek/deepseek-v4.1-flash",
+        label: "DeepSeek V4.1 Flash (default)",
+      },
+      {
+        id: "meta-llama/llama-3.1-70b-instruct",
+        label: "Llama 3.1 70B",
+      },
+      {
+        id: "mistralai/mixtral-8x7b-instruct",
+        label: "Mixtral 8x7B",
+      },
+      {
+        id: "google/gemini-2.0-flash-001",
+        label: "Gemini 2.0 Flash",
+      },
+      {
+        id: "meta-llama/llama-3.2-3b-instruct",
+        label: "Llama 3.2 3B",
+      },
+    ],
+  },
   {
     id: "top",
     label: "Top-tier",
@@ -17,28 +46,6 @@ export const CHAT_MODEL_GROUPS = [
       {
         id: "google/gemini-2.5-pro",
         label: "Gemini 2.5 Pro",
-      },
-    ],
-  },
-  {
-    id: "value",
-    label: "Powerful · cheaper",
-    models: [
-      {
-        id: "meta-llama/llama-3.1-70b-instruct",
-        label: "Llama 3.1 70B",
-      },
-      {
-        id: "mistralai/mixtral-8x7b-instruct",
-        label: "Mixtral 8x7B",
-      },
-      {
-        id: "google/gemini-2.0-flash-001",
-        label: "Gemini 2.0 Flash",
-      },
-      {
-        id: "meta-llama/llama-3.2-3b-instruct",
-        label: "Llama 3.2 3B (default)",
       },
     ],
   },
@@ -61,12 +68,18 @@ export function resolveChatModel(requested) {
   const raw = typeof requested === "string" ? requested.trim() : "";
   if (raw && isAllowedChatModel(raw)) return raw;
   if (isAllowedChatModel(config.openRouterModel)) return config.openRouterModel;
-  return "meta-llama/llama-3.2-3b-instruct";
+  return DEFAULT_CHAT_MODEL;
 }
 
 export function listChatModels() {
+  // Prefer DeepSeek V4.1 Flash as UI default unless env points at another allow-listed model.
+  const envDefault = config.openRouterModel?.trim();
+  const defaultModel =
+    envDefault && isAllowedChatModel(envDefault) && envDefault !== "meta-llama/llama-3.2-3b-instruct"
+      ? envDefault
+      : DEFAULT_CHAT_MODEL;
   return {
-    default: resolveChatModel(config.openRouterModel),
+    default: defaultModel,
     groups: CHAT_MODEL_GROUPS,
   };
 }

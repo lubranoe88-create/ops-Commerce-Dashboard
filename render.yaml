@@ -17,7 +17,7 @@ services:
       - key: OPENROUTER_API_KEY
         value: CHANGE_ME_OPENROUTER_KEY
       - key: OPENROUTER_MODEL
-        value: meta-llama/llama-3.2-3b-instruct
+        value: deepseek/deepseek-v4.1-flash
       - key: MEMORY_DB_PATH
         value: /opt/render/project/src/data/memory.sqlite
       - key: COOKIE_SECURE

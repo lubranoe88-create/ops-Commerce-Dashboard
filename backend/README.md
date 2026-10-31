@@ -19,7 +19,7 @@ Secrets stay server-side: `OPENROUTER_API_KEY` + single `SITE_PASSWORD` (no user
 - Holds `OPENROUTER_API_KEY` in `.env` (never in the browser)
 - **Single-password gate** via `SITE_PASSWORD`
 - `POST /api/chat` — for judge/decision prompts only (`{ prompt, system? }`)
-- Default model: `meta-llama/llama-3.2-3b-instruct` (swap to small Mistral via env)
+- Default model: `deepseek/deepseek-v4.1-flash` (override via `OPENROUTER_MODEL`)
 - Helmet, localhost CORS, JSON size limit, allow-list validation, per-IP rate limiting
 
 ## Setup

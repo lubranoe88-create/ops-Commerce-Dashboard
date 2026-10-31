@@ -28,7 +28,7 @@ export const config = {
   ),
   openRouterModel:
     process.env.OPENROUTER_MODEL?.trim() ||
-    "meta-llama/llama-3.2-3b-instruct",
+    "deepseek/deepseek-v4.1-flash",
   openRouterHttpReferer:
     process.env.OPENROUTER_HTTP_REFERER?.trim() || "http://localhost:8787",
   openRouterAppTitle:
