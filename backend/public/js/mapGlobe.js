@@ -250,11 +250,14 @@ function topLonLat(t, i) {
 }
 
 function addTopEntities(Cesium, v, tops) {
-  // Keep hover/select helpers; clear data entities
+  // Keep hover/select helpers + news pins; clear other data entities
   const keep = new Set([hoverEntity, selectEntity].filter(Boolean));
   const doomed = [];
   for (const e of v.entities.values) {
-    if (!keep.has(e)) doomed.push(e);
+    if (keep.has(e)) continue;
+    const id = e.id != null ? String(e.id) : "";
+    if (id.startsWith("news-")) continue;
+    doomed.push(e);
   }
   doomed.forEach((e) => v.entities.remove(e));
 
@@ -1008,6 +1011,60 @@ export async function updateMapGlobeTops(tops) {
   if (!viewer || viewer.isDestroyed?.() || !window.Cesium) return false;
   addTopEntities(window.Cesium, viewer, tops);
   ensureHoverSelect(window.Cesium, viewer);
+  return true;
+}
+
+/** Mechanized world-news pins (cyan) — independent of tops refresh. */
+export function updateNewsPins(news = []) {
+  if (!viewer || viewer.isDestroyed?.() || !window.Cesium) return false;
+  const Cesium = window.Cesium;
+  const doomed = [];
+  for (const e of viewer.entities.values) {
+    const id = e.id != null ? String(e.id) : "";
+    if (id.startsWith("news-")) doomed.push(e);
+  }
+  doomed.forEach((e) => viewer.entities.remove(e));
+
+  const cyan = Cesium.Color.fromCssColorString("#7ad7ff");
+  (news || []).slice(0, 12).forEach((n, i) => {
+    const lat = Number(n.lat);
+    const lon = Number(n.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    viewer.entities.add({
+      id: `news-${n.id || n.external_id || i}`,
+      name: n.title || "News",
+      properties: {
+        kind: "news",
+        newsId: n.id || n.external_id || i,
+        url: n.url || "",
+        source: n.source || "",
+        lat,
+        lon,
+      },
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+      point: {
+        pixelSize: 5,
+        color: cyan.withAlpha(0.9),
+        outlineColor: cyan.withAlpha(0.28),
+        outlineWidth: 3,
+        disableDepthTestDistance: 1.2e7,
+        scaleByDistance: new Cesium.NearFarScalar(1.5e3, 1.4, 2.0e7, 0.75),
+      },
+      label: {
+        text: String(n.title || "").slice(0, 42),
+        show: false,
+        font: "11px sans-serif",
+        fillColor: Cesium.Color.WHITE.withAlpha(0.85),
+        outlineColor: Cesium.Color.BLACK.withAlpha(0.55),
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -10),
+        disableDepthTestDistance: 1.2e7,
+      },
+      description: `${n.source || "news"} · ${n.title || ""}`,
+    });
+  });
   return true;
 }
 

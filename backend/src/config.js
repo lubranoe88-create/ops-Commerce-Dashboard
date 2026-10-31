@@ -42,6 +42,34 @@ export const config = {
   maxPromptChars: intEnv("MAX_PROMPT_CHARS", 8000),
   maxSystemChars: intEnv("MAX_SYSTEM_CHARS", 2000),
   maxTokens: intEnv("MAX_TOKENS", 1024),
+  /** Cheap front-agent model (same OpenRouter key). */
+  aiRouterModel:
+    process.env.AI_ROUTER_MODEL?.trim() || "meta-llama/llama-3.2-3b-instruct",
+  /** Main analysis model — only when router escalates and budget allows. */
+  aiMainModel:
+    process.env.OPENROUTER_MODEL?.trim() || "deepseek/deepseek-v4.1-flash",
+  /**
+   * Power override (Grok via OpenRouter). Front agent may escalate here when
+   * the task needs more power — spend counts against the hard daily cap.
+   */
+  aiGrokModel: process.env.AI_GROK_MODEL?.trim() || "x-ai/grok-4.20",
+  /** Hard daily OpenRouter spend CAP in EUR (not a target to fill). */
+  aiDailyBudgetEur: Number.parseFloat(process.env.AI_DAILY_BUDGET_EUR || "10") || 10,
+  /** Soft band: stop main escalations when spent/cap >= this ratio. */
+  aiBudgetSoftRatio: Number.parseFloat(process.env.AI_BUDGET_SOFT_RATIO || "0.75") || 0.75,
+  /** Hard band: block all new LLM calls when spent/cap >= this ratio. */
+  aiBudgetHardRatio: Number.parseFloat(process.env.AI_BUDGET_HARD_RATIO || "0.95") || 0.95,
+  /**
+   * Paid AI entitlement for site-password sessions until Stripe lands.
+   * AI_ENTITLEMENT=paid|free (default paid for single-tenant ops dashboard).
+   */
+  aiEntitlement: (process.env.AI_ENTITLEMENT || "paid").trim().toLowerCase() === "paid"
+    ? "paid"
+    : "free",
+  aiBudgetTz: process.env.AI_BUDGET_TZ?.trim() || "Europe/Berlin",
+  newsRssUrl:
+    process.env.NEWS_RSS_URL?.trim() ||
+    "https://feeds.bbci.co.uk/news/world/rss.xml",
 };
 
 export function assertRuntimeSecrets() {

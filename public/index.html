@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=holo-pack-14" />
+  <link rel="stylesheet" href="/css/app.css?v=paid-ai-1" />
 </head>
 <body>
   <!--
@@ -63,6 +63,9 @@
         </div>
         <div class="top-status" aria-live="polite">
           <span id="healthBadge" class="health warn">HEALTH —</span>
+          <span id="aiBusyMark" class="ai-busy-mark" hidden title="AI al lavoro" aria-hidden="true">
+            <svg class="ai-busy-check" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8.4l3.1 3.2 6.5-7.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
           <span class="status-sep" aria-hidden="true">·</span>
           <span id="statDay" class="stat-pill" title="Giorno dati">DAY</span>
           <span class="status-sep" aria-hidden="true">·</span>
@@ -184,6 +187,29 @@
     </div>
 
     <div id="toastHost" class="toast-host" aria-live="polite"></div>
+
+    <div id="aiBriefingModal" class="ai-briefing" hidden>
+      <form id="aiBriefingForm" class="ai-briefing-panel" autocomplete="off">
+        <h2 class="ai-briefing-title">Briefing di sessione</h2>
+        <p class="ai-briefing-lead">Tre domande, poi l’agente apre il giorno sui dati meccanici.</p>
+        <label class="ai-briefing-field">
+          <span>Cosa vuoi fare oggi?</span>
+          <input id="aiQ1" name="q1" type="text" required maxlength="500" />
+        </label>
+        <label class="ai-briefing-field">
+          <span>Come vuoi procedere?</span>
+          <input id="aiQ2" name="q2" type="text" required maxlength="500" />
+        </label>
+        <label class="ai-briefing-field">
+          <span>Qual è l’obiettivo di oggi?</span>
+          <input id="aiQ3" name="q3" type="text" required maxlength="500" />
+        </label>
+        <div class="ai-briefing-actions">
+          <button type="submit" class="pill-btn primary" id="aiBriefingSubmit">Apri briefing</button>
+          <button type="button" class="pill-btn" id="aiBriefingSkip">Dopo</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <script type="importmap">
@@ -194,6 +220,6 @@
     }
   }
   </script>
-  <script type="module" src="/js/app.js?v=holo-pack-14"></script>
+  <script type="module" src="/js/app.js?v=paid-ai-1"></script>
 </body>
 </html>

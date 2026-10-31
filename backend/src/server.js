@@ -12,7 +12,11 @@ import {
 } from "./middleware/passwordGate.js";
 import { chatRouter } from "./routes/chat.js";
 import { dashboardRouter } from "./routes/dashboard.js";
+import { aiRouter } from "./routes/ai.js";
 import { initDashboardStore } from "./memory/store.js";
+import { ensureAiSchema } from "./memory/aiStore.js";
+import { getDb } from "./memory/db.js";
+import { refreshWorldNews } from "./services/newsIngest.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicCandidates = [
@@ -30,6 +34,11 @@ const publicDir =
 
 assertRuntimeSecrets();
 initDashboardStore();
+ensureAiSchema(getDb());
+// Mechanical news warm (no AI)
+refreshWorldNews({ force: true }).catch((err) =>
+  console.warn("[news] warm failed", err?.message || err),
+);
 
 const app = express();
 
@@ -75,7 +84,10 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     model: config.openRouterModel,
+    routerModel: config.aiRouterModel,
+    grokModel: config.aiGrokModel,
     purpose: "dashboard_ops",
+    aiEntitlement: config.aiEntitlement,
     secrets_configured: {
       site_password: !config.sitePassword.includes("CHANGE_ME"),
       openrouter: !config.openRouterApiKey.includes("CHANGE_ME"),
@@ -88,6 +100,7 @@ app.use("/api", (_req, res, next) => {
   next();
 });
 app.use("/api/chat", chatLimiter, chatRouter);
+app.use("/api/ai", chatLimiter, aiRouter);
 app.use("/api", chatLimiter, dashboardRouter);
 
 app.use(

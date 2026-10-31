@@ -4,23 +4,39 @@ import { resolveChatModel } from "./chatModels.js";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 /**
- * Call OpenRouter chat completions for synthesis/ranking only.
- * The API key stays server-side; never send it to the browser.
- * `model` must already be allow-listed (see resolveChatModel).
+ * Call OpenRouter chat completions. API key stays server-side.
+ * Returns usage for budget metering.
  */
-export async function completeChat({ prompt, system, model }) {
+export async function completeChat({
+  prompt,
+  system,
+  model,
+  maxTokens,
+  temperature = 0.2,
+  messages: priorMessages,
+} = {}) {
   const messages = [];
-  if (system) {
-    messages.push({ role: "system", content: system });
+  if (system) messages.push({ role: "system", content: system });
+  if (Array.isArray(priorMessages) && priorMessages.length) {
+    for (const m of priorMessages) {
+      if (m?.role && typeof m.content === "string") messages.push(m);
+    }
   }
-  messages.push({ role: "user", content: prompt });
+  if (prompt) messages.push({ role: "user", content: prompt });
 
   const modelId = resolveChatModel(model);
+  const key = config.openRouterApiKey;
+  if (!key || /CHANGE_ME|PLACEHOLDER|your-key/i.test(key)) {
+    const err = new Error("OpenRouter not configured");
+    err.code = "NO_OPENROUTER";
+    err.status = 503;
+    throw err;
+  }
 
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${config.openRouterApiKey}`,
+      Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
       "HTTP-Referer": config.openRouterHttpReferer,
       "X-Title": config.openRouterAppTitle,
@@ -28,8 +44,8 @@ export async function completeChat({ prompt, system, model }) {
     body: JSON.stringify({
       model: modelId,
       messages,
-      max_tokens: config.maxTokens,
-      temperature: 0.2,
+      max_tokens: maxTokens || config.maxTokens,
+      temperature,
     }),
   });
 
