@@ -17,7 +17,7 @@ import {
   setOrbitEnabled,
   setPulseTop,
   updateMapGlobeTops,
-} from "./mapGlobe.js?v=holo-pack-9";
+} from "./mapGlobe.js?v=holo-pack-10";
 
 const BUILD_ID = "inventory-6";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
