@@ -78,10 +78,23 @@ app.get("/health", (_req, res) => {
 app.use("/api/chat", chatLimiter, chatRouter);
 app.use("/api", chatLimiter, dashboardRouter);
 
-app.use(express.static(publicDir, { index: false }));
+app.use(
+  express.static(publicDir, {
+    index: false,
+    setHeaders(res, filePath) {
+      // Avoid stale SPA shells / modules after deploy (tablet browsers cache aggressively)
+      if (/\.(?:js|css|html)$/i.test(filePath)) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+      }
+    },
+  }),
+);
 
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api")) return next();
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
   res.sendFile(path.join(publicDir, "index.html"), (err) => {
     if (err) next(err);
   });

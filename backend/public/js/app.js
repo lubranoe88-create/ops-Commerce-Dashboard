@@ -9,7 +9,7 @@ import {
   mountMapGlobe,
   resetNorth,
   searchPlace,
-} from "./mapGlobe.js";
+} from "./mapGlobe.js?v=b8822a8";
 
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
