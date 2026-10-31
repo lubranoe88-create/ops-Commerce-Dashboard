@@ -69,10 +69,30 @@ export function lodFromHeight(meters) {
 }
 
 function applyDarkOpsImagery(layer) {
-  layer.brightness = 1.12;
-  layer.contrast = 1.22;
-  layer.gamma = 1.02;
-  layer.saturation = 0.8;
+  // Night-holo look matching reference photo (city lights / deep navy)
+  layer.brightness = 0.72;
+  layer.contrast = 1.35;
+  layer.gamma = 0.92;
+  layer.saturation = 0.55;
+}
+
+export function detectLowGpu() {
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+    if (!gl) return true;
+    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+    const renderer = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || "") : "";
+    const coarse =
+      (typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches) ||
+      (typeof navigator !== "undefined" && navigator.maxTouchPoints > 1);
+    const weak =
+      /swiftshader|llvmpipe|microsoft basic|intel hd|mali-4|adreno 3/i.test(renderer) ||
+      (coarse && (window.devicePixelRatio || 1) >= 2.5);
+    return Boolean(weak);
+  } catch {
+    return false;
+  }
 }
 
 function buildImagery(Cesium, v) {
@@ -155,6 +175,9 @@ function addTopEntities(Cesium, v, tops) {
       ? Cesium.Color.fromCssColorString("#3dff9a")
       : Cesium.Color.fromCssColorString("#ffc14a");
 
+    const gold = Cesium.Color.fromCssColorString("#ffa500");
+    const beam = Cesium.Color.fromCssColorString("#00a3ff");
+    // Pin + vertical holographic beam (reference photo look)
     v.entities.add({
       id: `top-${t.id || i}`,
       name: t.title || t.id,
@@ -167,45 +190,54 @@ function addTopEntities(Cesium, v, tops) {
         lat,
         lon,
       },
-      position: Cesium.Cartesian3.fromDegrees(lon, lat),
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
       point: {
-        pixelSize: 14 + (t.score || 0.5) * 10,
-        color: Cesium.Color.WHITE,
-        outlineColor: color,
-        outlineWidth: 4,
+        pixelSize: 10 + (t.score || 0.5) * 8,
+        color: gold.withAlpha(0.95),
+        outlineColor: beam,
+        outlineWidth: 2,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        scaleByDistance: new Cesium.NearFarScalar(1.5e3, 1.55, 8.0e6, 0.65),
+        scaleByDistance: new Cesium.NearFarScalar(1.5e3, 1.55, 8.0e6, 0.55),
       },
       label: {
-        text: t.title || t.id,
-        font: "650 13px IBM Plex Sans, sans-serif",
-        fillColor: Cesium.Color.fromCssColorString("#f2f6fa"),
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 4,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        pixelOffset: new Cesium.Cartesian2(0, -18),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        scaleByDistance: new Cesium.NearFarScalar(2.0e3, 1.05, 6.0e6, 0.2),
-        showBackground: true,
-        backgroundColor: Cesium.Color.fromCssColorString("#0a1018").withAlpha(0.9),
-        backgroundPadding: new Cesium.Cartesian2(8, 5),
+        text: "",
+        show: false,
       },
       description: `${t.region || ""} · score ${Math.round((t.score || 0) * 100)}%`,
+      polyline: {
+        positions: [
+          Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+          Cesium.Cartesian3.fromDegrees(lon, lat, 420000 + (t.score || 0.5) * 380000),
+        ],
+        width: 1.25,
+        material: new Cesium.PolylineGlowMaterialProperty({
+          glowPower: 0.35,
+          color: beam.withAlpha(0.85),
+        }),
+        arcType: Cesium.ArcType.NONE,
+      },
     });
 
-    if (i < topsCache.length - 1 && (t.score || 0) > 0.7 && (topsCache[i + 1].score || 0) > 0.7) {
+    // Gold trade arcs between high-score tops (photo-style)
+    if (i < topsCache.length - 1 && (t.score || 0) > 0.65) {
       const n = topsCache[i + 1];
       const lat2 = Number.isFinite(n.lat) ? n.lat : lat;
       const lon2 = Number.isFinite(n.lon) ? n.lon : lon + 20;
       v.entities.add({
         id: `arc-${i}`,
         polyline: {
-          positions: Cesium.Cartesian3.fromDegreesArray([lon, lat, lon2, lat2]),
-          width: 1.5,
+          positions: Cesium.Cartesian3.fromDegreesArrayHeights([
+            lon,
+            lat,
+            80000,
+            lon2,
+            lat2,
+            80000,
+          ]),
+          width: 2.2,
           material: new Cesium.PolylineGlowMaterialProperty({
-            glowPower: 0.25,
-            color: Cesium.Color.fromCssColorString("#3dd6ff").withAlpha(0.75),
+            glowPower: 0.28,
+            color: gold.withAlpha(0.9),
           }),
           arcType: Cesium.ArcType.GEODESIC,
         },
@@ -423,6 +455,7 @@ export function flyToTop(lon, lat, height = 25000) {
   if (!viewer || !window.Cesium) return;
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
   userInteracting = true;
+  unlockProgrammaticZoom(Math.max(2400, height < 1_000_000 ? 3200 : 2400));
   viewer.camera.flyTo({
     destination: window.Cesium.Cartesian3.fromDegrees(lon, lat, height),
     duration: 2.0,
@@ -666,8 +699,8 @@ function stopOrbitDrift() {
 }
 
 /**
- * High-quality Cesium framebuffer. Prefers near-4K (3840×2160) on capable GPUs,
- * but caps aggressively on mobile/tablet to avoid WebGL context loss (blank globe).
+ * Native-DPI framebuffer (no supersampling). Heavy resolutionScale>1 softens fine
+ * lines and stresses GPU; use MSAA + low SSE for crisp imagery instead.
  */
 export function applyFourKResolution(v) {
   if (!v?.scene) return { width: 0, height: 0, scale: 1 };
@@ -675,30 +708,22 @@ export function applyFourKResolution(v) {
   const cssW = Math.max(1, canvas.clientWidth || v.container?.clientWidth || 1);
   const cssH = Math.max(1, canvas.clientHeight || v.container?.clientHeight || 1);
   const dpr = Math.max(1, window.devicePixelRatio || 1);
-  const TARGET_W = 3840;
-  const TARGET_H = 2160;
   const isCoarse =
     (typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches) ||
     (typeof navigator !== "undefined" && navigator.maxTouchPoints > 1) ||
     Math.min(cssW, cssH) < 700;
-  // Ideal scale toward 4K…
-  let scale = Math.max(TARGET_W / (cssW * dpr), TARGET_H / (cssH * dpr));
-  // …but never below 1×; on touch/mobile keep ≤1.5×; desktop ≤2.5× (stable “max quality”)
-  const hardCap = isCoarse ? 1.5 : 2.5;
-  scale = Math.min(Math.max(scale, 1), hardCap);
-  try {
-    const gl = v.scene.context?._gl || v.scene.context?._webgl2Context;
-    const maxDim = gl?.getParameter?.(gl.MAX_VIEWPORT_DIMS)?.[0];
-    if (maxDim) {
-      const maxScale = maxDim / (Math.max(cssW, cssH) * dpr);
-      scale = Math.min(scale, Math.max(1, maxScale * 0.9));
-    }
-  } catch {
-    /* ignore */
+  const lowGpu = detectLowGpu() || document.documentElement.dataset.lowGpu === "1";
+  // 1.0 = native sharpness; tiny bump only on fine desktop GPUs
+  let scale = lowGpu || isCoarse ? 1 : Math.min(1.15, Math.max(1, 1));
+  if (lowGpu && v.scene?.globe) {
+    v.scene.globe.maximumScreenSpaceError = 2.0;
+  } else if (v.scene?.globe) {
+    v.scene.globe.maximumScreenSpaceError = 1.15;
   }
   try {
     v.useBrowserRecommendedResolution = false;
     v.resolutionScale = scale;
+    if (v.scene?.msaaSamples != null) v.scene.msaaSamples = lowGpu ? 1 : 4;
     v.resize();
   } catch (err) {
     console.warn("[globe] resolutionScale failed, falling back to 1×", err);
@@ -715,7 +740,7 @@ export function applyFourKResolution(v) {
   canvas.dataset.renderWidth = String(outW);
   canvas.dataset.renderHeight = String(outH);
   canvas.dataset.resolutionScale = String(scale.toFixed(3));
-  console.info(`[globe] render buffer ~${outW}×${outH} (scale=${scale.toFixed(2)}, dpr=${dpr}, coarse=${isCoarse})`);
+  console.info(`[globe] render buffer ~${outW}×${outH} (scale=${scale.toFixed(2)}, dpr=${dpr}, coarse=${isCoarse}, msaa)`);
   return { width: outW, height: outH, scale, dpr, coarse: isCoarse };
 }
 
@@ -789,11 +814,18 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#00050a");
   viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#00050a");
   viewer.scene.globe.enableLighting = true;
-  viewer.scene.globe.atmosphereLightIntensity = 12.0;
-  viewer.scene.globe.atmosphereBrightnessShift = 0.05;
-  viewer.scene.globe.atmosphereHueShift = -0.02;
+  viewer.scene.globe.atmosphereLightIntensity = 18.0;
+  viewer.scene.globe.atmosphereBrightnessShift = -0.05;
+  viewer.scene.globe.atmosphereHueShift = -0.04;
   viewer.scene.fog.enabled = true;
-  viewer.scene.fog.density = 4.0e-5;
+  viewer.scene.fog.density = 3.2e-5;
+  // Night-side city-light feel
+  try {
+    viewer.scene.globe.nightFadeInDistance = 8.0e6;
+    viewer.scene.globe.nightFadeOutDistance = 2.0e7;
+  } catch {
+    /* older Cesium */
+  }
   // Sharper imagery / terrain LOD (lower SSE = higher quality)
   viewer.scene.globe.maximumScreenSpaceError = 1.25;
   if (viewer.scene.globe.tileCacheSize != null) viewer.scene.globe.tileCacheSize = 1000;
@@ -810,20 +842,18 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   }
 
   const ctrl = viewer.scene.screenSpaceCameraController;
-  ctrl.minimumZoomDistance = 120;
-  ctrl.maximumZoomDistance = 2.8e7;
+  // Fixed globe zoom: user wheel/pinch cannot change altitude (voice/programmatic fly still works).
+  ctrl.enableZoom = false;
+  ctrl.zoomEventTypes = [];
+  ctrl.minimumZoomDistance = 12_000_000;
+  ctrl.maximumZoomDistance = 16_000_000;
   ctrl.enableCollisionDetection = true;
-  ctrl.inertiaSpin = 0.9;
+  ctrl.inertiaSpin = 0.92;
   ctrl.inertiaTranslate = 0.9;
-  ctrl.inertiaZoom = 0.8;
-  ctrl.zoomEventTypes = [
-    Cesium.CameraEventType.WHEEL,
-    Cesium.CameraEventType.PINCH,
-  ];
+  ctrl.inertiaZoom = 0;
   ctrl.rotateEventTypes = [Cesium.CameraEventType.LEFT_DRAG];
   ctrl.tiltEventTypes = [
     Cesium.CameraEventType.RIGHT_DRAG,
-    Cesium.CameraEventType.PINCH,
     {
       eventType: Cesium.CameraEventType.LEFT_DRAG,
       modifier: Cesium.KeyboardEventModifier.CTRL,
@@ -835,8 +865,14 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   addTopEntities(Cesium, viewer, tops);
   wireInteraction(Cesium, viewer);
 
+  // Default home framing matches reference photo (EMEA night orbit)
   viewer.camera.setView({
-    destination: Cesium.Cartesian3.fromDegrees(12.5, 28.0, 14_000_000),
+    destination: Cesium.Cartesian3.fromDegrees(12.5, 22.0, 14_200_000),
+    orientation: {
+      heading: 0,
+      pitch: Cesium.Math.toRadians(-90),
+      roll: 0,
+    },
   });
 
   // Force layout after CSS settles (iPad / tunnel)
@@ -908,4 +944,27 @@ export function destroyMapGlobe() {
 
 export function getViewer() {
   return viewer;
+}
+
+export function setOrbitEnabled(on) {
+  userInteracting = !on;
+  if (on) scheduleIdleResume();
+}
+
+/** Temporarily allow programmatic LOD zoom (voice/fly); re-lock user zoom after. */
+export function unlockProgrammaticZoom(ms = 2200) {
+  if (!viewer || viewer.isDestroyed?.()) return;
+  const ctrl = viewer.scene.screenSpaceCameraController;
+  ctrl.enableZoom = true;
+  ctrl.minimumZoomDistance = 120;
+  ctrl.maximumZoomDistance = 2.8e7;
+  clearTimeout(unlockProgrammaticZoom._t);
+  unlockProgrammaticZoom._t = setTimeout(() => {
+    if (!viewer || viewer.isDestroyed?.()) return;
+    const c = viewer.scene.screenSpaceCameraController;
+    c.enableZoom = false;
+    c.zoomEventTypes = [];
+    c.minimumZoomDistance = 12_000_000;
+    c.maximumZoomDistance = 16_000_000;
+  }, ms);
 }

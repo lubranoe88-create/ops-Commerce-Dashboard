@@ -3,19 +3,25 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   CITY_LOD_HEIGHT,
   destroyMapGlobe,
+  detectLowGpu,
   emphasizeTopIds,
   filterTopEntities,
   flyToTop,
   mountMapGlobe,
   resetNorth,
   searchPlace,
-} from "./mapGlobe.js?v=holo-fix-2";
+  setOrbitEnabled,
+} from "./mapGlobe.js?v=holo-pack-4";
 
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
+const VIEW_MEMORY_KEY = "ops_last_view";
+const ONBOARD_KEY = "ops_voice_onboard_v1";
+const ACCENT_KEY = "ops_accent_theme";
 const MODULES = ["map", "pipeline", "memory", "chat"];
 const CITY_FLY_HEIGHT = CITY_LOD_HEIGHT;
+const AUTO_REFRESH_MS = 60_000;
 const CHAT_SUGGESTIONS = [
   "Riassumi i top di oggi",
   "Quali errori pipeline sono aperti?",
@@ -70,6 +76,9 @@ const state = {
   pickHandler: null,
   memoryLinks: [],
   memoryMeshes: new Map(),
+  autoRefreshTimer: null,
+  autoTourTimer: null,
+  lowGpu: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -1267,6 +1276,111 @@ function syncHoloActive(actionOrModule) {
   });
 }
 
+function playHoloTick() {
+  // Subtle feedback click (no asset files) — original improvement
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!state._audioCtx) state._audioCtx = new Ctx();
+    const ctx = state._audioCtx;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "sine";
+    o.frequency.value = 880;
+    g.gain.value = 0.025;
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.08);
+    o.stop(ctx.currentTime + 0.09);
+  } catch {
+    /* ignore */
+  }
+}
+
+function saveLastView(mod) {
+  try {
+    localStorage.setItem(
+      VIEW_MEMORY_KEY,
+      JSON.stringify({
+        module: mod || state.module,
+        focusedTopId: state.focusedTopId,
+        chatModel: state.chatModel,
+        at: Date.now(),
+      }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+function readLastView() {
+  try {
+    return JSON.parse(localStorage.getItem(VIEW_MEMORY_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function applyAccentTheme(name) {
+  const root = document.documentElement;
+  const themes = {
+    cyan: { accent: "#7ad7ff", gold: "#ffa500" },
+    amber: { accent: "#e8b84a", gold: "#ffd27a" },
+    mint: { accent: "#3dff9a", gold: "#9effc8" },
+  };
+  const t = themes[name] || themes.cyan;
+  root.style.setProperty("--cyan", t.accent);
+  root.style.setProperty("--gold", t.gold);
+  try {
+    localStorage.setItem(ACCENT_KEY, name);
+  } catch {
+    /* ignore */
+  }
+}
+
+function maybeVoiceOnboarding() {
+  try {
+    if (localStorage.getItem(ONBOARD_KEY)) return;
+    localStorage.setItem(ONBOARD_KEY, "1");
+  } catch {
+    return;
+  }
+  const lines = [
+    "Benvenuto nella plancia. Di’ MAPPA, PIPELINE, MEMORY o CHAT.",
+    "Di’ ORBIT, NORD o ZOOM CITTÀ per il globo. Di’ ANALIZZA per la chat.",
+    "Di’ AGGIORNA per i dati freschi. Di’ FILTRO o COVERAGE per i controlli mappa.",
+  ];
+  let i = 0;
+  const step = () => {
+    if (i >= lines.length) return;
+    showToast(lines[i], "ok");
+    i += 1;
+    setTimeout(step, 3200);
+  };
+  setTimeout(step, 900);
+}
+
+function startAutoSystems() {
+  if (state.autoRefreshTimer) clearInterval(state.autoRefreshTimer);
+  state.autoRefreshTimer = setInterval(() => {
+    if (document.visibilityState === "hidden") return;
+    refresh({ silent: true }).catch(() => {});
+  }, AUTO_REFRESH_MS);
+
+  // Gentle auto-tour: pulse focus across tops while on map
+  if (state.autoTourTimer) clearInterval(state.autoTourTimer);
+  let tourIdx = 0;
+  state.autoTourTimer = setInterval(() => {
+    if (document.visibilityState === "hidden" || state.module !== "map") return;
+    const tops = state.snapshot?.tops || [];
+    if (!tops.length) return;
+    const t = tops[tourIdx % tops.length];
+    tourIdx += 1;
+    setFocusedTop(t.id);
+  }, 14000);
+}
+
 /** Dual control: same actions for voice keywords and holographic touch targets. */
 function runHoloAction(action, { fromVoice = false } = {}) {
   const t0 = state.focusedTopId
@@ -1275,20 +1389,33 @@ function runHoloAction(action, { fromVoice = false } = {}) {
   const lon = Number.isFinite(t0?.lon) ? t0.lon : 12.5;
   const lat = Number.isFinite(t0?.lat) ? t0.lat : 42;
   const src = fromVoice ? "voce" : "tocco";
+  playHoloTick();
 
   switch (action) {
     case "map":
       syncHoloActive("map");
-      return showModule("map").then(() => showToast(`MAPPA · ${src}`));
+      return showModule("map").then(() => {
+        saveLastView("map");
+        showToast(`MAPPA · ${src}`);
+      });
     case "pipeline":
       syncHoloActive("pipeline");
-      return showModule("pipeline").then(() => showToast(`PIPELINE · ${src}`));
+      return showModule("pipeline").then(() => {
+        saveLastView("pipeline");
+        showToast(`PIPELINE · ${src}`);
+      });
     case "memory":
       syncHoloActive("memory");
-      return showModule("memory").then(() => showToast(`MEMORY · ${src}`));
+      return showModule("memory").then(() => {
+        saveLastView("memory");
+        showToast(`MEMORY · ${src}`);
+      });
     case "chat":
       syncHoloActive("chat");
-      return showModule("chat").then(() => showToast(`CHAT · ${src}`));
+      return showModule("chat").then(() => {
+        saveLastView("chat");
+        showToast(`CHAT · ${src}`);
+      });
     case "mic":
       $("globalMic")?.click();
       showToast(`MIC · ${src}`);
@@ -1296,6 +1423,7 @@ function runHoloAction(action, { fromVoice = false } = {}) {
     case "orbit":
       return showModule("map").then(() => {
         flyToTop(lon, lat, 12_000_000);
+        setOrbitEnabled(true);
         syncHoloActive("orbit");
         showToast(`ORBIT · ${src}`);
       });
@@ -1311,6 +1439,16 @@ function runHoloAction(action, { fromVoice = false } = {}) {
         syncHoloActive("zoom-citta");
         showToast(`ZOOM CITTÀ · ${src}`);
       });
+    case "zoom-paese":
+      return showModule("map").then(() => {
+        flyToTop(lon, lat, 1_500_000);
+        showToast(`ZOOM PAESE · ${src}`);
+      });
+    case "zoom-continente":
+      return showModule("map").then(() => {
+        flyToTop(lon, lat, 12_000_000);
+        showToast(`ZOOM CONTINENTE · ${src}`);
+      });
     case "analizza": {
       const title =
         state.lastMapPick?.top?.title ||
@@ -1320,55 +1458,85 @@ function runHoloAction(action, { fromVoice = false } = {}) {
       syncHoloActive("analizza");
       return openChatAnalyze(title).then(() => showToast(`ANALIZZA · ${src}`));
     }
+    case "refresh":
+      return refresh().then(() => showToast(`AGGIORNA · ${src}`));
+    case "filtro-score":
+      state.mapChipFilters.minScore = state.mapChipFilters.minScore === 0.75 ? null : 0.75;
+      renderMapFilterChips(state.snapshot?.tops || []);
+      applyMapFilters();
+      showToast(`FILTRO SCORE · ${src}`);
+      return Promise.resolve();
+    case "filtro-reset":
+      state.mapChipFilters = { region: null, source: null, minScore: null };
+      renderMapFilterChips(state.snapshot?.tops || []);
+      applyMapFilters();
+      showToast(`FILTRI OFF · ${src}`);
+      return Promise.resolve();
+    case "coverage-next": {
+      const range = $("coverageScrubRange");
+      const wrap = $("coverageScrub");
+      if (wrap) wrap.hidden = false;
+      if (range) {
+        const max = Number(range.max) || 0;
+        range.value = String((Number(range.value) + 1) % (max + 1));
+        range.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      showToast(`COVERAGE · ${src}`);
+      return Promise.resolve();
+    }
+    case "confronta":
+      if (t0) pinCompare(t0);
+      showToast(`CONFRONTA · ${src}`);
+      return Promise.resolve();
+    case "fly":
+      if (t0) flyToTopCard(t0);
+      return Promise.resolve();
+    case "tema-cyan":
+      applyAccentTheme("cyan");
+      showToast(`TEMA CYAN · ${src}`);
+      return Promise.resolve();
+    case "tema-amber":
+      applyAccentTheme("amber");
+      showToast(`TEMA AMBRA · ${src}`);
+      return Promise.resolve();
+    case "tema-mint":
+      applyAccentTheme("mint");
+      showToast(`TEMA MINT · ${src}`);
+      return Promise.resolve();
     default:
       return Promise.resolve();
   }
 }
 
 function handleVoiceCommand(text) {
-  const lower = String(text || "").toLowerCase();
-  if (/(zoom\s*)?citt[aà]|city/.test(lower)) {
-    runHoloAction("zoom-citta", { fromVoice: true });
-    return true;
-  }
-  if (/orbit|orbita/.test(lower)) {
-    runHoloAction("orbit", { fromVoice: true });
-    return true;
-  }
-  if (/nord|north|reset\s*nord/.test(lower)) {
-    runHoloAction("nord", { fromVoice: true });
-    return true;
-  }
-  if (/\bmap+a?\b|globo|mappa/.test(lower)) {
-    runHoloAction("map", { fromVoice: true });
-    return true;
-  }
-  if (/pipeline/.test(lower)) {
-    runHoloAction("pipeline", { fromVoice: true });
-    return true;
-  }
-  if (/memory|memoria/.test(lower)) {
-    runHoloAction("memory", { fromVoice: true });
-    return true;
-  }
-  if (/analizza|analyze/.test(lower)) {
-    runHoloAction("analizza", { fromVoice: true });
-    return true;
-  }
-  if (/\bchat\b|assistente/.test(lower)) {
-    runHoloAction("chat", { fromVoice: true });
-    return true;
-  }
-  // Legacy LOD: paese
-  if (/paese|country/.test(lower)) {
-    const t0 = state.snapshot?.tops?.[0];
-    const lon = Number.isFinite(t0?.lon) ? t0.lon : 12.5;
-    const lat = Number.isFinite(t0?.lat) ? t0.lat : 42;
-    showModule("map").then(() => {
-      flyToTop(lon, lat, 1_500_000);
-      showToast("LOD · paese · voce");
-    });
-    return true;
+  const lower = String(text || "").toLowerCase().trim();
+  const rules = [
+    [/aggiorna|refresh|ricalcola/, "refresh"],
+    [/filtro\s*(score|punti)|score\s*75|filtro alto/, "filtro-score"],
+    [/filtri?\s*(off|reset|tutti)|reset filtri/, "filtro-reset"],
+    [/coverage|copertura|scrub/, "coverage-next"],
+    [/confronta|compare/, "confronta"],
+    [/fly|vola|vai l[iì]/, "fly"],
+    [/(zoom\s*)?citt[aà]|city/, "zoom-citta"],
+    [/zoom\s*paese|country/, "zoom-paese"],
+    [/zoom\s*continente|continente/, "zoom-continente"],
+    [/orbit|orbita/, "orbit"],
+    [/nord|north/, "nord"],
+    [/\bmappa\b|\bmap\b|globo/, "map"],
+    [/pipeline/, "pipeline"],
+    [/memory|memoria/, "memory"],
+    [/analizza|analyze/, "analizza"],
+    [/\bchat\b|assistente/, "chat"],
+    [/\bmic\b|microfono|ascolta/, "mic"],
+    [/tema\s*(cyan|ciano)/, "tema-cyan"],
+    [/tema\s*(ambra|amber)/, "tema-amber"],
+    [/tema\s*(mint|verde)/, "tema-mint"],
+  ];
+  for (const [re, action] of rules) {
+    if (re.test(lower)) {
+      runHoloAction(action, { fromVoice: true });
+      return true;
+    }
   }
   return false;
 }
@@ -1813,13 +1981,16 @@ async function showModule(mod, opts = {}) {
   return run;
 }
 
-async function refresh() {
+async function refresh({ silent = false } = {}) {
   await refreshSecretsStatus();
   const snap = await api("/api/dashboard/snapshot");
   state.snapshot = snap;
   state.lastUpdated = new Date();
   updateStatsStrip(snap);
   await showModule(state.module, { force: true });
+  if (!silent) {
+    /* toast handled by callers when needed */
+  }
 }
 
 function readStoredChatModel() {
@@ -1950,7 +2121,7 @@ function setupMic(button, onText) {
   const rec = new SR();
   rec.continuous = false;
   rec.interimResults = false;
-  rec.lang = "en-US";
+  rec.lang = "it-IT";
   rec.onresult = (ev) => {
     const text = ev.results[0][0].transcript;
     onText(text);
@@ -2075,6 +2246,8 @@ function wireUi() {
     );
   });
   wireHoloPlancia();
+  wireGestureShortcuts();
+  wireModuleZoom();
   setupMic($("globalMic"), (text) => {
     if (handleVoiceCommand(text)) return;
     // Fallback: free-form → chat
@@ -2089,15 +2262,133 @@ function wireUi() {
   }
   tickUtcClock();
   setInterval(tickUtcClock, 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      refresh({ silent: true }).catch(() => {});
+    }
+  });
+  window.addEventListener("pageshow", () => {
+    refresh({ silent: true }).catch(() => {});
+  });
+}
+
+/** Gesture shortcuts: 2-finger swipe modules · 3-finger tap refresh · side pinch zoom */
+function wireGestureShortcuts() {
+  const root = $("app") || document.body;
+  if (root.dataset.gesturesWired) return;
+  root.dataset.gesturesWired = "1";
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+  root.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length === 3) {
+        e.preventDefault();
+        runHoloAction("refresh", { fromVoice: false });
+        return;
+      }
+      if (e.touches.length !== 2) return;
+      tracking = true;
+      startX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      startY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    },
+    { passive: false },
+  );
+  root.addEventListener(
+    "touchend",
+    (e) => {
+      if (!tracking) return;
+      tracking = false;
+      if (e.changedTouches.length < 1) return;
+      // Approximate end midpoint from remaining/changed touches
+      const t = e.changedTouches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy)) return;
+      const idx = MODULES.indexOf(state.module);
+      const next = dx < 0 ? MODULES[(idx + 1) % MODULES.length] : MODULES[(idx - 1 + MODULES.length) % MODULES.length];
+      runHoloAction(next, { fromVoice: false });
+    },
+    { passive: true },
+  );
+}
+
+function wireModuleZoom() {
+  const side = $("sidePanel");
+  if (!side || side.dataset.zoomWired) return;
+  side.dataset.zoomWired = "1";
+  let scale = 1;
+  const apply = () => {
+    side.style.setProperty("--module-zoom", String(scale));
+    side.dataset.zoomed = scale !== 1 ? "1" : "0";
+  };
+  side.addEventListener(
+    "wheel",
+    (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      scale = Math.min(1.85, Math.max(0.75, scale + (e.deltaY < 0 ? 0.08 : -0.08)));
+      apply();
+    },
+    { passive: false },
+  );
+  let pinch0 = 0;
+  side.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length !== 2) return;
+      const a = e.touches[0];
+      const b = e.touches[1];
+      pinch0 = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    },
+    { passive: true },
+  );
+  side.addEventListener(
+    "touchmove",
+    (e) => {
+      if (e.touches.length !== 2 || !pinch0) return;
+      const a = e.touches[0];
+      const b = e.touches[1];
+      const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const ratio = d / pinch0;
+      pinch0 = d;
+      scale = Math.min(1.85, Math.max(0.75, scale * ratio));
+      apply();
+    },
+    { passive: true },
+  );
 }
 
 async function boot() {
-  wireUi();
-  const initial = moduleFromHash() || "map";
-  state.module = initial;
-  syncHoloActive(initial);
+  // Auto low-GPU profile + accent restore
   try {
+    if (detectLowGpu()) document.documentElement.dataset.lowGpu = "1";
+  } catch {
+    /* ignore */
+  }
+  try {
+    applyAccentTheme(localStorage.getItem(ACCENT_KEY) || "cyan");
+  } catch {
+    applyAccentTheme("cyan");
+  }
+
+  wireUi();
+
+  // Restore last view when present; otherwise map
+  const last = readLastView();
+  const fromHash = moduleFromHash();
+  const initial = fromHash || last?.module || "map";
+  state.module = MODULES.includes(initial) ? initial : "map";
+  if (last?.focusedTopId) state.focusedTopId = last.focusedTopId;
+  syncHoloActive(state.module);
+
+  try {
+    // Always refresh latest data on open
     await refresh();
+    startAutoSystems();
+    maybeVoiceOnboarding();
+    saveLastView(state.module);
   } catch (e) {
     $("moduleLegend").textContent = `Load failed: ${e.message}`;
   }
