@@ -7,7 +7,9 @@ import {
   emphasizeTopIds,
   filterTopEntities,
   flyToTop,
+  getGlobeState,
   getViewer,
+  HOME_VIEW,
   mountMapGlobe,
   resetNorth,
   searchPlace,
@@ -24,6 +26,8 @@ const ACCENT_KEY = "ops_accent_theme";
 const MODULES = ["map", "pipeline", "memory", "chat"];
 const CITY_FLY_HEIGHT = CITY_LOD_HEIGHT;
 const AUTO_REFRESH_MS = 60_000;
+const AUTO_TOUR_MS = 14_000;
+const TOUR_IDLE_MS = 20_000;
 const CHAT_SUGGESTIONS = [
   "Riassumi i top di oggi",
   "Quali errori pipeline sono aperti?",
@@ -81,6 +85,10 @@ const state = {
   memoryMeshes: new Map(),
   autoRefreshTimer: null,
   autoTourTimer: null,
+  tourIdx: 0,
+  tourTopId: null,
+  lastUserInputAt: 0,
+  refreshCount: 0,
   lowGpu: false,
 };
 
@@ -1398,25 +1406,64 @@ function maybeVoiceOnboarding() {
   setTimeout(step, 900);
 }
 
+function markUserInput() {
+  state.lastUserInputAt = Date.now();
+}
+
+function tourShouldPause() {
+  if (document.visibilityState === "hidden" || state.module !== "map") return true;
+  if (state.micLive || moduleSwitchLocked) return true;
+  if (Date.now() - state.lastUserInputAt < TOUR_IDLE_MS) return true;
+  if (document.querySelector("#sideBody .card.is-open")) return true;
+  if (document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return true;
+  return false;
+}
+
+/** One tour step: highlight the next top in the panel and pulse its pin (camera stays put). */
+function tourStep() {
+  if (tourShouldPause()) return false;
+  const tops = orderedTops(state.snapshot);
+  if (!tops.length) return false;
+  const t = tops[state.tourIdx % tops.length];
+  state.tourIdx += 1;
+  state.tourTopId = t.id;
+  document.body.dataset.tourTop = t.id;
+  setFocusedTop(t.id);
+  emphasizeTopIds([...state.compareIds.filter(Boolean), t.id]);
+  return true;
+}
+
 function startAutoSystems() {
+  if (!startAutoSystems.wired) {
+    startAutoSystems.wired = true;
+    ["pointerdown", "keydown", "wheel", "touchstart"].forEach((ev) =>
+      window.addEventListener(ev, markUserInput, { capture: true, passive: true }),
+    );
+  }
   if (state.autoRefreshTimer) clearInterval(state.autoRefreshTimer);
   state.autoRefreshTimer = setInterval(() => {
     if (document.visibilityState === "hidden") return;
     refresh({ silent: true }).catch(() => {});
   }, AUTO_REFRESH_MS);
 
-  // Gentle auto-tour: pulse focus across tops while on map
   if (state.autoTourTimer) clearInterval(state.autoTourTimer);
-  let tourIdx = 0;
-  state.autoTourTimer = setInterval(() => {
-    if (document.visibilityState === "hidden" || state.module !== "map") return;
-    const tops = state.snapshot?.tops || [];
-    if (!tops.length) return;
-    const t = tops[tourIdx % tops.length];
-    tourIdx += 1;
-    setFocusedTop(t.id);
-  }, 14000);
+  state.autoTourTimer = setInterval(tourStep, AUTO_TOUR_MS);
+  setOrbitEnabled(true);
 }
+
+window.__opsDiag = () => ({
+  module: state.module,
+  focusedTopId: state.focusedTopId,
+  tourTopId: state.tourTopId,
+  tourIdx: state.tourIdx,
+  refreshCount: state.refreshCount,
+  lastUpdated: state.lastUpdated ? state.lastUpdated.toISOString() : null,
+  autoRefreshMs: AUTO_REFRESH_MS,
+  autoTourMs: AUTO_TOUR_MS,
+  timers: { refresh: Boolean(state.autoRefreshTimer), tour: Boolean(state.autoTourTimer) },
+  mapEngine: state.mapEngine,
+  globe: getGlobeState(),
+});
 
 /** Dual control: same actions for voice keywords and holographic touch targets. */
 function runHoloAction(action, { fromVoice = false } = {}) {
@@ -1459,7 +1506,7 @@ function runHoloAction(action, { fromVoice = false } = {}) {
       return Promise.resolve();
     case "orbit":
       return showModule("map").then(() => {
-        flyToTop(lon, lat, 12_000_000);
+        flyToTop(lon, lat, HOME_VIEW.height);
         setOrbitEnabled(true);
         syncHoloActive("orbit");
         showToast(`ORBIT · ${src}`);
@@ -2051,7 +2098,7 @@ async function showModule(mod, opts = {}) {
           });
           if (!stillCurrent(epoch, mod)) return;
           applyMapFilters();
-          emphasizeTopIds(state.compareIds.filter(Boolean));
+          emphasizeTopIds([...state.compareIds, state.tourTopId].filter(Boolean));
           state.mapEngine = "cesium";
         } catch (err) {
           if (!stillCurrent(epoch, mod)) return;
@@ -2117,13 +2164,14 @@ function refresh({ silent = false, remount = false } = {}) {
     const snap = await api("/api/dashboard/snapshot");
     state.snapshot = snap;
     state.lastUpdated = new Date();
+    state.refreshCount += 1;
     updateStatsStrip(snap);
     if (snap.health) setHealth(snap.health);
     const mapLive = state.module === "map" && state.mapEngine === "cesium" && getViewer() && !moduleSwitchLocked;
     if (!remount && mapLive) {
       await updateMapGlobeTops(snap.tops);
       applyMapFilters();
-      emphasizeTopIds(state.compareIds.filter(Boolean));
+      emphasizeTopIds([...state.compareIds, state.tourTopId].filter(Boolean));
       sideForModule("map", snap);
     } else {
       await showModule(state.module, { force: true });

@@ -740,13 +740,20 @@ function stopLodWatcher() {
   heightTick = null;
 }
 
-/** Slow orbital drift so the globe never looks like a frozen still. */
+const ORBIT_DRIFT_MIN_HEIGHT = 4_000_000;
+let orbitPaused = false;
+
+/**
+ * Slow orbital drift so the globe never looks like a frozen still.
+ * Only at orbit altitude: rotating about Z after a city fly-in would sweep the ground at ~100 km/s.
+ */
 function startOrbitDrift(Cesium, v) {
   stopOrbitDrift();
   const tick = () => {
     if (!viewer || viewer.isDestroyed?.()) return;
     try {
-      if (!userInteracting && Cesium.defined(v.camera?.positionWC)) {
+      const h = v.camera?.positionCartographic?.height ?? 0;
+      if (!userInteracting && !orbitPaused && h > ORBIT_DRIFT_MIN_HEIGHT && Cesium.defined(v.camera?.positionWC)) {
         // Rotate about world Z only when camera position is valid
         v.camera.rotate(Cesium.Cartesian3.UNIT_Z, -0.00035);
       }
@@ -1012,6 +1019,7 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
 
 export function destroyMapGlobe() {
   mountSeq += 1;
+  orbitPaused = false;
   teardownViewer();
 }
 
@@ -1050,8 +1058,35 @@ export function getViewer() {
 }
 
 export function setOrbitEnabled(on) {
-  userInteracting = !on;
+  orbitPaused = !on;
   if (on) scheduleIdleResume();
+  else userInteracting = true;
+}
+
+/** Camera + automation snapshot for diagnostics / live tests. */
+export function getGlobeState() {
+  if (!viewer || viewer.isDestroyed?.() || !window.Cesium) return null;
+  const c = viewer.camera.positionCartographic;
+  const toDeg = window.Cesium.Math.toDegrees;
+  return {
+    lon: c ? toDeg(c.longitude) : null,
+    lat: c ? toDeg(c.latitude) : null,
+    height: c ? c.height : null,
+    heading: toDeg(viewer.camera.heading),
+    interacting: userInteracting,
+    orbitPaused,
+    driftActive: Boolean(orbitTick),
+    lod: c ? lodFromHeight(c.height).level : null,
+    tops: topsCache.length,
+    imagery: Array.from({ length: viewer.imageryLayers.length }, (_, i) => {
+      const l = viewer.imageryLayers.get(i);
+      return { role: l._opsRole || "base", show: l.show, alpha: Number(l.alpha.toFixed(2)) };
+    }),
+    resolutionScale: viewer.resolutionScale,
+    msaa: viewer.scene.msaaSamples,
+    sse: viewer.scene.globe.maximumScreenSpaceError,
+    canvas: { w: viewer.canvas.width, h: viewer.canvas.height },
+  };
 }
 
 /** Temporarily allow programmatic LOD zoom (voice/fly); re-lock user zoom after. */
