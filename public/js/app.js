@@ -97,6 +97,7 @@ const $ = (id) => document.getElementById(id);
 async function api(path, opts = {}) {
   const res = await fetch(path, {
     credentials: "same-origin",
+    cache: "no-store",
     headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
     ...opts,
   });
@@ -2473,14 +2474,20 @@ function wireUi() {
   }
   tickUtcClock();
   setInterval(tickUtcClock, 1000);
+  // Refresh whenever the dashboard is (re)opened: tab shown, network back, bfcache restore.
+  const refreshOnOpen = (reason) => {
+    const since = Date.now() - (state.lastUpdated?.getTime() || 0);
+    if (since < 3000) return;
+    document.body.dataset.lastOpenRefresh = reason;
+    refresh({ silent: true }).catch(() => {});
+  };
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-      refresh({ silent: true }).catch(() => {});
-    }
+    if (document.visibilityState === "visible") refreshOnOpen("visible");
   });
+  window.addEventListener("online", () => refreshOnOpen("online"));
   // Initial load is handled by boot(); pageshow only matters for back/forward-cache restores.
   window.addEventListener("pageshow", (e) => {
-    if (e.persisted) refresh({ silent: true }).catch(() => {});
+    if (e.persisted) refreshOnOpen("pageshow");
   });
 }
 

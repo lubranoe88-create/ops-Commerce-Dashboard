@@ -75,6 +75,10 @@ app.get("/health", (_req, res) => {
   });
 });
 
+app.use("/api", (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
 app.use("/api/chat", chatLimiter, chatRouter);
 app.use("/api", chatLimiter, dashboardRouter);
 
