@@ -15,6 +15,7 @@ import {
 } from "../memory/aiStore.js";
 import { refreshWorldNews, getCachedNews } from "./newsIngest.js";
 import { budgetDayKey } from "./aiBudget.js";
+import { isAiPaid } from "../middleware/aiPaidGate.js";
 
 function extractJsonObject(text) {
   const raw = String(text || "").trim();
@@ -63,7 +64,22 @@ export async function runAiTurn({
   uiState = {},
   forceTier = null,
 } = {}) {
-  const budget = getBudgetStatus();
+  // Free tier: no models at all — mechanical data only
+  if (!isAiPaid()) {
+    return {
+      route: "blocked_free",
+      reply: "Piano free: nessun modello AI. Usa i dati meccanici della plancia.",
+      actions: [],
+      tier: "none",
+      model: null,
+      escalate_reason: null,
+      escalateReason: null,
+      budget: getBudgetStatus(),
+      blocked: true,
+      code: "AI_PAYMENT_REQUIRED",
+    };
+  }
+
   const catalogBrief = PANEL_CATALOG.map((p) => `${p.id}:${p.label}`).join(", ");
 
   if (forceTier === "grok" || forceTier === "main" || forceTier === "router") {
@@ -74,10 +90,12 @@ export async function runAiTurn({
       maxTokens: tier === "router" ? 400 : 900,
     });
     return {
+      route: `force_${tier}`,
       reply: out.content,
       actions: [],
       tier: out.tier,
       model: out.model,
+      escalate_reason: forceTier !== "router" ? `force_${forceTier}` : null,
       escalateReason: forceTier !== "router" ? `force_${forceTier}` : null,
       budget: getBudgetStatus(),
     };
@@ -109,6 +127,7 @@ export async function runAiTurn({
   } catch (err) {
     if (err.code === "AI_BUDGET_HARD" || err.code === "NO_OPENROUTER") {
       return {
+        route: err.code === "NO_OPENROUTER" ? "no_openrouter" : "budget_hard",
         reply:
           err.code === "NO_OPENROUTER"
             ? "OpenRouter non configurato. Dati meccanici disponibili senza AI."
@@ -116,6 +135,7 @@ export async function runAiTurn({
         actions: [],
         tier: "none",
         model: null,
+        escalate_reason: null,
         escalateReason: null,
         budget: err.budget || getBudgetStatus(),
         blocked: true,
@@ -136,12 +156,14 @@ export async function runAiTurn({
 
   if (route === "need_questions" || parsed.questions?.ask) {
     return {
+      route: "need_questions",
       reply:
         parsed.reply ||
         "Prima di procedere: 1) Cosa vuoi fare oggi? 2) Come vuoi procedere? 3) Qual è l'obiettivo di oggi?",
       actions,
       tier: "router",
       model: routerRaw.model,
+      escalate_reason: null,
       escalateReason: null,
       needQuestions: true,
       budget: getBudgetStatus(),
@@ -150,10 +172,12 @@ export async function runAiTurn({
 
   if (route === "answer_local" || (!route.includes("escalate") && parsed.reply)) {
     return {
+      route: "answer_local",
       reply: parsed.reply || routerRaw.content,
       actions,
       tier: "router",
       model: routerRaw.model,
+      escalate_reason: null,
       escalateReason: null,
       budget: getBudgetStatus(),
     };
@@ -175,6 +199,7 @@ export async function runAiTurn({
         tier = "main";
       } catch {
         return {
+          route: "answer_local",
           reply:
             parsed.reply ||
             routerRaw.content ||
@@ -182,6 +207,7 @@ export async function runAiTurn({
           actions,
           tier: "router",
           model: routerRaw.model,
+          escalate_reason: `blocked_${err.code}`,
           escalateReason: `blocked_${err.code}`,
           budget: getBudgetStatus(),
           blocked: true,
@@ -189,6 +215,7 @@ export async function runAiTurn({
       }
     } else if (err.code === "AI_BUDGET_SOFT" || err.code === "AI_BUDGET_HARD") {
       return {
+        route: "answer_local",
         reply:
           parsed.reply ||
           "Cap/fascia budget: nessuna escalation. Ecco quanto posso dire in locale: " +
@@ -196,6 +223,7 @@ export async function runAiTurn({
         actions,
         tier: "router",
         model: routerRaw.model,
+        escalate_reason: `blocked_${err.code}`,
         escalateReason: `blocked_${err.code}`,
         budget: getBudgetStatus(),
         blocked: true,
@@ -210,7 +238,8 @@ export async function runAiTurn({
   const mainSystem = [
     SYSTEM_CARD,
     "Rispondi in italiano, conciso. Analizza solo il contesto fornito.",
-    "Puoi proporre improvements come JSON opzionale in coda: <!--SUGGESTIONS:[...]-->",
+    "Puoi proporre improvements come JSON opzionale in coda:",
+    '<!--SUGGESTIONS:[{"area":"...","issue":"...","evidence":"...","effort":"l|m|h","action":"refresh"|{}}]-->',
     `Escalate path: ${tier} reason: ${escalateReason}`,
   ].join("\n");
 
@@ -244,10 +273,12 @@ export async function runAiTurn({
   console.info(`[ai] escalate ${routerRaw.model} → ${powered.model} (${tier}): ${escalateReason}`);
 
   return {
+    route: wantGrok ? "escalate_grok" : "escalate_main",
     reply: powered.content,
     actions,
     tier: powered.tier,
     model: powered.model,
+    escalate_reason: escalateReason,
     escalateReason,
     budget: getBudgetStatus(),
   };
@@ -273,7 +304,7 @@ export async function runOpeningAndBriefing({ q1, q2, q3, uiState = {} } = {}) {
       "Genera il briefing di login personalizzato.",
       "Includi: salute pipeline, tops rilevanti, errori aperti, 3-5 news collegate al globo,",
       "e 2-4 improvement suggestions allineate agli obiettivi.",
-      "Alla fine aggiungi <!--SUGGESTIONS:[{\"area\":\"...\",\"issue\":\"...\",\"evidence\":\"...\",\"effort\":\"l|m|h\"}]-->",
+      'Alla fine aggiungi <!--SUGGESTIONS:[{"area":"...","issue":"...","evidence":"...","effort":"l|m|h","action":"refresh"}]-->',
     ].join(" "),
     q1,
     q2,

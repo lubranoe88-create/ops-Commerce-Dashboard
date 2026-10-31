@@ -1,35 +1,53 @@
 import { Router } from "express";
 import { requireAiPaid, aiEntitlementPayload, isAiPaid } from "../middleware/aiPaidGate.js";
-import { getBudgetStatus } from "../services/aiBudget.js";
+import {
+  getBudgetStatus,
+  getUsageAdmin,
+  budgetDayKey,
+  recordTestSpend,
+} from "../services/aiBudget.js";
 import {
   runAiTurn,
   runOpeningAndBriefing,
   runProactiveSuggestions,
 } from "../services/aiAgent.js";
 import { refreshWorldNews, getCachedNews } from "../services/newsIngest.js";
-import { listSuggestions } from "../memory/aiStore.js";
-import { budgetDayKey } from "../services/aiBudget.js";
-import { ACTION_ALLOWLIST } from "../services/panelCatalog.js";
+import {
+  listSuggestions,
+  syncClientMemory,
+  getClientMemory,
+  upsertUserPref,
+} from "../memory/aiStore.js";
+import { ACTION_ALLOWLIST, ACTION_CATALOG } from "../services/panelCatalog.js";
+import { executeWriteAction, listPrefs } from "../services/actionExecutor.js";
+import {
+  pollProactive,
+  setProactiveTtsOptIn,
+  forceIdleNudgeForTest,
+} from "../services/proactive.js";
+import { browserUseStatus, runBrowserUse } from "../services/browserUse.js";
 import { config } from "../config.js";
 
 export const aiRouter = Router();
 
+/** Entitlement probe — readable without paid gate so free clients see paid:false. */
 aiRouter.get("/status", (_req, res) => {
   res.json({
     ...aiEntitlementPayload(),
     budget: getBudgetStatus(),
-    browserUse: {
-      available: false,
-      reason: "sidecar_not_deployed",
-      note: "browser-use is scaffolded; actions[] covers plancia commands",
-    },
+    browserUse: browserUseStatus(),
+    proactiveTts: config.aiProactiveTts,
+    models: isAiPaid()
+      ? {
+          router: config.aiRouterModel,
+          main: config.aiMainModel,
+          grok: config.aiGrokModel,
+        }
+      : null,
   });
 });
 
-aiRouter.get("/budget", requireAiPaid, (_req, res) => {
-  res.json(getBudgetStatus());
-});
-
+/** Mechanical news — zero AI. Still behind site password; not a paid gate. */
 aiRouter.get("/news", async (_req, res) => {
   try {
     const news = await refreshWorldNews({ force: false });
@@ -39,13 +57,40 @@ aiRouter.get("/news", async (_req, res) => {
   }
 });
 
+aiRouter.get("/budget", requireAiPaid, (_req, res) => {
+  res.json(getBudgetStatus());
+});
+
+/** Admin usage: remaining under cap — never "to burn". */
+aiRouter.get("/usage", requireAiPaid, (_req, res) => {
+  res.json(getUsageAdmin());
+});
+
 aiRouter.get("/suggestions", requireAiPaid, (_req, res) => {
   res.json({ suggestions: listSuggestions(budgetDayKey(), 20) });
 });
 
-/** Catalog of first-class actions the client may execute from actions[]. */
-aiRouter.get("/actions/catalog", (_req, res) => {
-  res.json({ actions: [...ACTION_ALLOWLIST] });
+aiRouter.get("/actions/catalog", requireAiPaid, (_req, res) => {
+  res.json({
+    actions: [...ACTION_ALLOWLIST],
+    catalog: ACTION_CATALOG,
+  });
+});
+
+aiRouter.post("/actions/execute", requireAiPaid, (req, res) => {
+  try {
+    const body = req.body || {};
+    const action = body.action || body;
+    const result = executeWriteAction(action, {
+      confirmed: Boolean(body.confirmed || action?.confirmed),
+    });
+    res.status(result.needsConfirm ? 409 : 200).json(result);
+  } catch (err) {
+    res.status(err.status || 500).json({
+      error: err.message || "action failed",
+      code: err.code,
+    });
+  }
 });
 
 aiRouter.post("/turn", requireAiPaid, async (req, res) => {
@@ -59,7 +104,19 @@ aiRouter.post("/turn", requireAiPaid, async (req, res) => {
       uiState: body.uiState || {},
       forceTier: body.forceTier || null,
     });
-    res.json(result);
+    // Canonical JSON: route / reply / actions / escalate_reason
+    res.json({
+      route: result.route || result.tier || "answer_local",
+      reply: result.reply,
+      actions: result.actions || [],
+      escalate_reason: result.escalate_reason ?? result.escalateReason ?? null,
+      tier: result.tier,
+      model: result.model,
+      needQuestions: result.needQuestions || false,
+      blocked: result.blocked || false,
+      code: result.code,
+      budget: result.budget || getBudgetStatus(),
+    });
   } catch (err) {
     res.status(err.status || 502).json({
       error: err.message || "AI turn failed",
@@ -86,6 +143,7 @@ aiRouter.post("/briefing", requireAiPaid, async (req, res) => {
         ],
       });
     }
+    upsertUserPref("goals", { q1, q2, q3 });
     const result = await runOpeningAndBriefing({
       q1,
       q2,
@@ -120,21 +178,102 @@ aiRouter.post("/suggestions/refresh", requireAiPaid, async (req, res) => {
   }
 });
 
-/**
- * browser-use fallback — not wired to a Python sidecar in this deploy.
- * Returns 501 so clients fall back to actions[].
- */
-aiRouter.post("/browser-use", requireAiPaid, (req, res) => {
-  if (!isAiPaid()) {
-    return res.status(402).json({ error: "AI paid tier required" });
+aiRouter.post("/suggestions/:id/accept", requireAiPaid, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = executeWriteAction(
+      {
+        type: "accept-suggestion",
+        id,
+        track: req.body?.track !== false,
+        confirmed: Boolean(req.body?.confirmed),
+      },
+      { confirmed: Boolean(req.body?.confirmed) },
+    );
+    res.status(result.needsConfirm ? 409 : 200).json(result);
+  } catch (err) {
+    res.status(err.status || 500).json({
+      error: err.message || "accept failed",
+      code: err.code,
+    });
   }
-  res.status(501).json({
-    error: "browser-use sidecar not deployed",
-    code: "BROWSER_USE_UNAVAILABLE",
-    hint: "Use actions[] for zoom/fly/module; deploy browser-use worker to enable click-anywhere",
-    requested: {
-      goal: req.body?.goal || null,
-      selector: req.body?.selector || null,
-    },
-  });
+});
+
+aiRouter.post("/client-memory", requireAiPaid, (req, res) => {
+  try {
+    const dayKey = budgetDayKey();
+    const payload = req.body?.payload || req.body || {};
+    const id = syncClientMemory(dayKey, payload);
+    res.json({ ok: true, id, memory: getClientMemory(dayKey) });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "client-memory failed" });
+  }
+});
+
+aiRouter.get("/client-memory", requireAiPaid, (_req, res) => {
+  res.json(getClientMemory(budgetDayKey()));
+});
+
+aiRouter.get("/prefs", requireAiPaid, (_req, res) => {
+  res.json({ prefs: listPrefs() });
+});
+
+aiRouter.get("/proactive/poll", requireAiPaid, (_req, res) => {
+  res.json(pollProactive({ mark: true }));
+});
+
+aiRouter.post("/proactive/tts", requireAiPaid, (req, res) => {
+  const on = Boolean(req.body?.enabled ?? req.body?.on);
+  res.json(setProactiveTtsOptIn(on));
+});
+
+/**
+ * browser-use: Python headless Chrome worker.
+ * Off on free tier (requireAiPaid) and when remaining < €3.
+ */
+aiRouter.post("/browser-use", requireAiPaid, async (req, res) => {
+  try {
+    const cookie = req.headers.cookie || "";
+    const result = await runBrowserUse({
+      goal: req.body?.goal || "",
+      selector: req.body?.selector || "",
+      path: req.body?.path || "/",
+      cookie,
+    });
+    if (!result.ok) {
+      const status =
+        result.code === "PAYMENT_BLOCKED" || result.code === "ORIGIN_BLOCKED"
+          ? 403
+          : result.code === "PLAYWRIGHT_MISSING"
+            ? 501
+            : 502;
+      return res.status(status).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 502).json({
+      error: err.message || "browser-use failed",
+      code: err.code,
+      budget: err.budget || getBudgetStatus(),
+      status: browserUseStatus(),
+    });
+  }
+});
+
+/** Test-only helpers (no secrets). Disabled unless AI_TEST_HOOKS=1. */
+aiRouter.post("/test/spend", requireAiPaid, (req, res) => {
+  if (process.env.AI_TEST_HOOKS !== "1") {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const eur = Number(req.body?.eur || 0);
+  recordTestSpend(eur, { note: req.body?.note || "test_hook" });
+  res.json(getBudgetStatus());
+});
+
+aiRouter.post("/test/idle-nudge", requireAiPaid, (req, res) => {
+  if (process.env.AI_TEST_HOOKS !== "1") {
+    return res.status(404).json({ error: "Not found" });
+  }
+  forceIdleNudgeForTest();
+  res.json(pollProactive({ mark: false }));
 });

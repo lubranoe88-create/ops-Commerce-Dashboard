@@ -164,14 +164,7 @@ export function wireBriefingHandler(fn) {
 }
 
 async function applyActions(actions) {
-  if (!applyActionFn || !Array.isArray(actions)) return;
-  for (const a of actions) {
-    try {
-      await applyActionFn(a);
-    } catch (err) {
-      console.warn("[ai] action failed", a, err);
-    }
-  }
+  await applyAiActions(actions, { runUi: applyActionFn });
 }
 
 export async function runPaidAiTurn({ message, uiState = {} } = {}) {
@@ -287,4 +280,123 @@ export function shouldPromptBriefing(status) {
   const skip = readJson(SKIP_KEY, null);
   if (skip?.dayKey === todayKey()) return false;
   return true;
+}
+
+const CONFIRM_ACTIONS = new Set([
+  "reorder-tops",
+  "correct",
+  "accept-suggestion",
+]);
+
+function onceConfirm(label) {
+  try {
+    return window.confirm(`Confermi: ${label}?`);
+  } catch {
+    return false;
+  }
+}
+
+/** Apply UI + write actions. Dangerous writes ask once. */
+export async function applyAiActions(actions, { runUi } = {}) {
+  const list = Array.isArray(actions) ? actions : [];
+  const uiRunner = runUi || applyActionFn;
+  for (const raw of list) {
+    const type = typeof raw === "string" ? raw : raw?.type;
+    if (!type) continue;
+    if (CONFIRM_ACTIONS.has(type)) {
+      const ok = onceConfirm(type);
+      if (!ok) continue;
+      try {
+        await api("/api/ai/actions/execute", {
+          method: "POST",
+          body: JSON.stringify({ action: { ...(typeof raw === "object" ? raw : { type }), type }, confirmed: true }),
+        });
+      } catch (err) {
+        console.warn("[ai] write action", type, err);
+      }
+      continue;
+    }
+    if (
+      type === "note" ||
+      type === "set-goals" ||
+      type === "set-pref" ||
+      type === "chat-send"
+    ) {
+      try {
+        const res = await api("/api/ai/actions/execute", {
+          method: "POST",
+          body: JSON.stringify({
+            action: { ...(typeof raw === "object" ? raw : { type }), type },
+            confirmed: true,
+          }),
+        });
+        if (type === "chat-send" && res?.clientAction?.text && uiRunner) {
+          await uiRunner("analizza");
+        }
+      } catch (err) {
+        console.warn("[ai] write action", type, err);
+      }
+      continue;
+    }
+    if (uiRunner) {
+      try {
+        await uiRunner(type, raw);
+      } catch (err) {
+        console.warn("[ai] ui action", type, err);
+      }
+    }
+  }
+}
+
+export async function syncClientMemoryToServer() {
+  const payload = {
+    goals: getStoredGoals(),
+    notes: readClientMemory().notes || [],
+    syncedAt: Date.now(),
+  };
+  writeJson(CLIENT_MEM_KEY, { ...readClientMemory(), syncedAt: payload.syncedAt });
+  return api("/api/ai/client-memory", {
+    method: "POST",
+    body: JSON.stringify({ payload }),
+  });
+}
+
+let proactiveTimer = null;
+let proactiveSpeakFn = null;
+let proactiveBubbleFn = null;
+
+export function wireProactiveHandlers({ onEvent, speak } = {}) {
+  proactiveBubbleFn = typeof onEvent === "function" ? onEvent : null;
+  proactiveSpeakFn = typeof speak === "function" ? speak : null;
+}
+
+export function startProactivePolling(intervalMs = 45000) {
+  if (proactiveTimer) clearInterval(proactiveTimer);
+  const tick = async () => {
+    try {
+      const data = await api("/api/ai/proactive/poll");
+      for (const ev of data.events || []) {
+        const toast = ev.payload?.toast || ev.kind;
+        if (proactiveBubbleFn) proactiveBubbleFn(ev, toast);
+        if (data.tts?.enabled && proactiveSpeakFn && toast) {
+          proactiveSpeakFn(toast);
+        }
+      }
+    } catch {
+      /* ignore poll errors */
+    }
+  };
+  tick();
+  proactiveTimer = setInterval(tick, intervalMs);
+  return () => {
+    clearInterval(proactiveTimer);
+    proactiveTimer = null;
+  };
+}
+
+export async function acceptSuggestion(id, { confirmed = false } = {}) {
+  return api(`/api/ai/suggestions/${id}/accept`, {
+    method: "POST",
+    body: JSON.stringify({ confirmed }),
+  });
 }

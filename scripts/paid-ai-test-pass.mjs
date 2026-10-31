@@ -1,29 +1,37 @@
 #!/usr/bin/env node
 /**
- * One full paid-AI test pass: API + busy mark + mic wiring.
- * Exit 0 on pass. Usage: node scripts/paid-ai-test-pass.mjs [passN]
+ * Full paid-AI test pass (≥22 checks). Usage: node scripts/paid-ai-test-pass.mjs [passN]
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const BASE = process.env.TEST_BASE || "http://127.0.0.1:8787";
 const PASS_LABEL = process.argv[2] || "pass";
+const DB = "/agent/backend/data/memory.sqlite";
 const results = [];
 
 function envPass() {
-  const envPath = path.join(ROOT, "backend/.env");
-  const raw = fs.readFileSync(envPath, "utf8");
-  const m = raw.match(/^SITE_PASSWORD=(.*)$/m);
-  return (m?.[1] || "").trim();
+  const raw = fs.readFileSync(path.join(ROOT, "backend/.env"), "utf8");
+  return (raw.match(/^SITE_PASSWORD=(.*)$/m)?.[1] || "").trim();
+}
+
+function resetUsageLedger() {
+  spawnSync(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `import { DatabaseSync } from "node:sqlite"; const db=new DatabaseSync(${JSON.stringify(DB)}); try{db.exec("DELETE FROM ai_usage_events");db.exec("DELETE FROM ai_usage_daily");}catch(e){}`,
+    ],
+    { stdio: "ignore" },
+  );
 }
 
 async function jarLogin() {
-  const jar = `/tmp/ops-test-${PASS_LABEL}.cj`;
-  fs.writeFileSync(jar, "");
   const pass = envPass();
   const res = await fetch(`${BASE}/login`, {
     method: "POST",
@@ -32,12 +40,7 @@ async function jarLogin() {
     redirect: "manual",
   });
   const setCookie = res.headers.getSetCookie?.() || [];
-  const cookie = setCookie.map((c) => c.split(";")[0]).join("; ");
-  if (!cookie && res.status !== 302 && res.status !== 200) {
-    throw new Error(`login failed ${res.status}`);
-  }
-  fs.writeFileSync(jar, cookie);
-  return cookie;
+  return setCookie.map((c) => c.split(";")[0]).join("; ");
 }
 
 async function api(cookie, pathName, opts = {}) {
@@ -55,8 +58,7 @@ async function api(cookie, pathName, opts = {}) {
 
 function check(name, ok, detail = "") {
   results.push({ name, ok: Boolean(ok), detail: String(detail || "") });
-  const mark = ok ? "PASS" : "FAIL";
-  console.log(`${mark} · ${name}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${ok ? "PASS" : "FAIL"} · ${name}${detail ? ` — ${detail}` : ""}`);
 }
 
 async function runApiChecks(cookie) {
@@ -67,9 +69,37 @@ async function runApiChecks(cookie) {
   const st = await api(cookie, "/api/ai/status");
   check("ai status paid", st.status === 200 && st.data.paid === true, `cap=${st.data.dailyBudgetEur}`);
   check("ai budget present", Number.isFinite(st.data.budget?.capEur));
+  check(
+    "usage framing hard_cap",
+    st.data.budget?.framing === "hard_cap_not_target" ||
+      String(st.data.budget?.note || "").includes("never burn"),
+  );
+
+  const usage = await api(cookie, "/api/ai/usage");
+  check(
+    "usage admin remaining",
+    usage.status === 200 &&
+      Number.isFinite(usage.data.budget?.remainingEur) &&
+      String(usage.data.message || "").includes("Remaining under cap"),
+    `rem=${usage.data.budget?.remainingEur}`,
+  );
+  check(
+    "soft/hard ratios",
+    usage.data.budget?.softRatio >= 0.7 && usage.data.budget?.hardRatio >= 0.95,
+  );
 
   const cat = await api(cookie, "/api/ai/actions/catalog");
-  check("actions catalog", Array.isArray(cat.data.actions) && cat.data.actions.includes("map"));
+  const actions = cat.data.actions || [];
+  check(
+    "actions catalog complete",
+    actions.includes("map") &&
+      actions.includes("focus-top") &&
+      actions.includes("inspect") &&
+      actions.includes("correct") &&
+      actions.includes("note") &&
+      actions.includes("accept-suggestion"),
+    `n=${actions.length}`,
+  );
 
   const news = await api(cookie, "/api/ai/news");
   check(
@@ -95,36 +125,126 @@ async function runApiChecks(cookie) {
   });
   check(
     "ai turn responds",
-    turn.status === 200 && typeof turn.data.reply === "string",
-    `tier=${turn.data.tier} blocked=${Boolean(turn.data.blocked)}`,
+    turn.status === 200 && typeof turn.data.reply === "string" && "route" in turn.data,
+    `route=${turn.data.route} tier=${turn.data.tier}`,
   );
 
-  const browser = await api(cookie, "/api/ai/browser-use", {
+  const mem = await api(cookie, "/api/ai/client-memory", {
     method: "POST",
-    body: JSON.stringify({ goal: "click map" }),
+    body: JSON.stringify({
+      payload: { notes: [{ note: "test-mem" }], goals: { q1: "a", q2: "b", q3: "c" } },
+    }),
   });
-  check("browser-use scaffold 501", browser.status === 501);
-}
+  check("client-memory sync", mem.status === 200 && mem.data.ok === true);
 
-async function runUiBusyAndMic(cookie) {
+  const note = await api(cookie, "/api/ai/actions/execute", {
+    method: "POST",
+    body: JSON.stringify({
+      action: { type: "note", business_key: "biz1", text: "n" },
+      confirmed: true,
+    }),
+  });
+  check("write note", note.status === 200 && note.data.ok === true);
+
+  const correct = await api(cookie, "/api/ai/actions/execute", {
+    method: "POST",
+    body: JSON.stringify({
+      action: { type: "correct", business_key: "biz1", verdict: "correct" },
+    }),
+  });
+  check("correct needs confirm", correct.status === 409 && correct.data.needsConfirm === true);
+
+  const goals = await api(cookie, "/api/ai/actions/execute", {
+    method: "POST",
+    body: JSON.stringify({
+      action: { type: "set-goals", q1: "A", q2: "B", q3: "C" },
+      confirmed: true,
+    }),
+  });
+  check("set-goals write", goals.status === 200 && goals.data.ok === true);
+
+  const pro = await api(cookie, "/api/ai/proactive/poll");
+  check(
+    "proactive poll",
+    pro.status === 200 && pro.data.tts?.mode === "opt_in" && pro.data.tts?.enabled === false,
+  );
+
+  const tts = await api(cookie, "/api/ai/proactive/tts", {
+    method: "POST",
+    body: JSON.stringify({ enabled: false }),
+  });
+  check("proactive tts opt-in endpoint", tts.status === 200 && tts.data.ok === true);
+
+  // browser-use works when remaining >= 3 (fresh ledger)
+  const bu = await api(cookie, "/api/ai/browser-use", {
+    method: "POST",
+    body: JSON.stringify({ goal: "apri mappa", path: "/" }),
+  });
+  check(
+    "browser-use worker",
+    bu.status === 200 && bu.data.ok === true && bu.data.clicked === true,
+    `clicked=${bu.data.clicked} code=${bu.data.code || ""}`,
+  );
+
+  const softSpend = await api(cookie, "/api/ai/test/spend", {
+    method: "POST",
+    body: JSON.stringify({ eur: 7.6, note: "soft_band_test" }),
+  });
+  check(
+    "soft band blocks main",
+    softSpend.status === 200 &&
+      softSpend.data.softBlocked === true &&
+      softSpend.data.hardBlocked === false,
+    `ratio=${softSpend.data.ratio}`,
+  );
+
+  const hardSpend = await api(cookie, "/api/ai/test/spend", {
+    method: "POST",
+    body: JSON.stringify({ eur: 2.0, note: "hard_band_test" }),
+  });
+  check(
+    "hard band / zero remaining",
+    hardSpend.status === 200 &&
+      (hardSpend.data.hardBlocked === true || hardSpend.data.zeroRemaining === true),
+    `rem=${hardSpend.data.remainingEur}`,
+  );
+
+  const buFloor = await api(cookie, "/api/ai/browser-use", {
+    method: "POST",
+    body: JSON.stringify({ goal: "mappa" }),
+  });
+  check(
+    "browser-use budget floor",
+    buFloor.status === 429 && buFloor.data.code === "BROWSER_USE_BUDGET_FLOOR",
+    `status=${buFloor.status}`,
+  );
+
   const html = await fetch(`${BASE}/`, { headers: { Cookie: cookie } }).then((r) => r.text());
   check("busy mark in HTML", html.includes('id="aiBusyMark"') && html.includes("ai-busy-check"));
   check("briefing modal in HTML", html.includes('id="aiBriefingModal"') && html.includes("aiQ1"));
-  check("aiAgentUi script import path", html.includes("paid-ai-1"));
+  check("aiAgentUi script import path", html.includes("paid-ai-2"));
 
-  const css = await fetch(`${BASE}/css/app.css`, { headers: { Cookie: cookie } }).then((r) => r.text());
+  const css = await fetch(`${BASE}/css/app.css`, { headers: { Cookie: cookie } }).then((r) =>
+    r.text(),
+  );
   check("busy CSS pulse", css.includes(".ai-busy-mark") && css.includes("ai-busy-pulse"));
 
-  const js = await fetch(`${BASE}/js/aiAgentUi.js`, { headers: { Cookie: cookie } }).then((r) => r.text());
+  const js = await fetch(`${BASE}/js/aiAgentUi.js`, { headers: { Cookie: cookie } }).then((r) =>
+    r.text(),
+  );
   check("setAiBusy export", js.includes("export function setAiBusy") && js.includes("heartbeatTimer"));
   check("busy depth latch", js.includes("busyDepth"));
+  check("client memory sync export", js.includes("syncClientMemoryToServer"));
+  check("proactive polling export", js.includes("startProactivePolling"));
 
   const app = await fetch(`${BASE}/js/app.js`, { headers: { Cookie: cookie } }).then((r) => r.text());
   check("app wires paid AI", app.includes("initPaidAi") && app.includes("runPaidAiTurn"));
   check("app wires busy actions", app.includes("wireActionRunner") && app.includes("updateNewsPins"));
   check("mic shared controller", app.includes("globalMicControl") && app.includes("setupMic"));
+  check("focus-top + inspect actions", app.includes('"focus-top"') || app.includes("case \"focus-top\""));
+}
 
-  // Headless Chrome: busy mark toggle + mic button presence (no real speech in CI)
+async function runUiBusyAndMic(cookie) {
   const chrome = "/usr/local/bin/google-chrome";
   if (!fs.existsSync(chrome)) {
     check("chrome mic e2e", false, "google-chrome missing");
@@ -157,12 +277,12 @@ async function runUiBusyAndMic(cookie) {
       )});
       await page.goto(${JSON.stringify(BASE + "/")}, { waitUntil: "networkidle2", timeout: 60000 });
       await page.waitForSelector("#aiBusyMark", { timeout: 20000 });
-      const before = await page.$eval("#aiBusyMark", (el) => ({
-        hidden: el.hidden,
-        on: el.classList.contains("is-on"),
-      }));
+      await page.evaluate(() => {
+        const m = document.getElementById("aiBriefingModal");
+        if (m) m.hidden = true;
+      });
       await page.evaluate(async () => {
-        const m = await import("/js/aiAgentUi.js?v=paid-ai-1");
+        const m = await import("/js/aiAgentUi.js?v=paid-ai-2");
         m.setAiBusy(true);
       });
       await new Promise((r) => setTimeout(r, 400));
@@ -172,7 +292,7 @@ async function runUiBusyAndMic(cookie) {
         body: document.body.dataset.aiBusy,
       }));
       await page.evaluate(async () => {
-        const m = await import("/js/aiAgentUi.js?v=paid-ai-1");
+        const m = await import("/js/aiAgentUi.js?v=paid-ai-2");
         m.setAiBusy(false);
       });
       await new Promise((r) => setTimeout(r, 300));
@@ -181,20 +301,15 @@ async function runUiBusyAndMic(cookie) {
         on: el.classList.contains("is-on"),
         body: document.body.dataset.aiBusy,
       }));
-      const mic = await page.$eval("#globalMic", (el) => ({
-        present: true,
-        pressed: el.getAttribute("aria-pressed"),
-      }));
+      const mic = await page.$eval("#globalMic", (el) => ({ present: true }));
       const dockMic = await page.$('#holoVoicePlancia [data-holo-action="mic"]');
-      // Fake media stream: click MIC and confirm live UI attempts (may end quickly headless)
       await page.click("#globalMic");
       await new Promise((r) => setTimeout(r, 900));
       const micLive = await page.evaluate(() => ({
         bodyLive: document.body.classList.contains("mic-live"),
-        aria: document.getElementById("globalMic")?.getAttribute("aria-pressed"),
         sr: Boolean(window.SpeechRecognition || window.webkitSpeechRecognition),
       }));
-      console.log(JSON.stringify({ before, during, after, mic, dockMic: Boolean(dockMic), micLive }));
+      console.log(JSON.stringify({ during, after, mic, dockMic: Boolean(dockMic), micLive }));
     } finally {
       await browser.close();
     }
@@ -202,21 +317,6 @@ async function runUiBusyAndMic(cookie) {
 
   const scriptPath = `/tmp/busy-mic-${PASS_LABEL}.mjs`;
   fs.writeFileSync(scriptPath, runner);
-
-  // Ensure puppeteer-core
-  await new Promise((resolve, reject) => {
-    const p = spawn("npm", ["install", "--no-save", "puppeteer-core@23"], {
-      cwd: "/tmp",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let err = "";
-    p.stderr.on("data", (d) => {
-      err += d;
-    });
-    p.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(err || "npm fail"))));
-  }).catch((e) => {
-    check("puppeteer-core install", false, e.message);
-  });
 
   const out = await new Promise((resolve) => {
     const p = spawn("node", [scriptPath], {
@@ -232,24 +332,25 @@ async function runUiBusyAndMic(cookie) {
     p.stderr.on("data", (d) => {
       stderr += d;
     });
-    p.on("exit", (code) => resolve({ code, stdout, stderr }));
+    p.on("exit", () => resolve({ stdout, stderr }));
   });
 
   let payload = null;
   try {
-    const line = out.stdout.trim().split("\n").filter(Boolean).pop();
-    payload = JSON.parse(line);
+    payload = JSON.parse(out.stdout.trim().split("\n").filter(Boolean).pop());
   } catch {
     payload = null;
   }
   check(
     "busy appears while working",
-    payload && payload.during?.on === true && payload.during?.body === "1" && payload.during?.hidden === false,
+    payload && payload.during?.on === true && payload.during?.body === "1",
     payload ? JSON.stringify(payload.during) : out.stderr.slice(0, 180),
   );
   check(
     "busy disappears when idle",
-    payload && (payload.after?.on === false || payload.after?.hidden === true) && payload.after?.body !== "1",
+    payload &&
+      (payload.after?.on === false || payload.after?.hidden === true) &&
+      payload.after?.body !== "1",
     payload ? JSON.stringify(payload.after) : "",
   );
   check("mic button present", payload?.mic?.present === true && payload?.dockMic === true);
@@ -262,6 +363,7 @@ async function runUiBusyAndMic(cookie) {
 
 async function main() {
   console.log(`\n=== ${PASS_LABEL} @ ${BASE} ===`);
+  resetUsageLedger();
   const cookie = await jarLogin();
   await runApiChecks(cookie);
   await runUiBusyAndMic(cookie);

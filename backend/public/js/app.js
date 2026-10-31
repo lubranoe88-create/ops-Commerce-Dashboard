@@ -20,19 +20,22 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=paid-ai-1";
+} from "./mapGlobe.js?v=paid-ai-2";
 import {
   fetchAiNews,
   fetchAiStatus,
   openBriefingModal,
   runPaidAiTurn,
   shouldPromptBriefing,
+  startProactivePolling,
+  syncClientMemoryToServer,
   wireActionRunner,
   wireBriefingForm,
   wireBriefingHandler,
-} from "./aiAgentUi.js?v=paid-ai-1";
+  wireProactiveHandlers,
+} from "./aiAgentUi.js?v=paid-ai-2";
 
-const BUILD_ID = "paid-ai-1";
+const BUILD_ID = "paid-ai-2";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1679,6 +1682,18 @@ function runHoloAction(action, { fromVoice = false } = {}) {
     case "fly":
       if (t0) flyToTopCard(t0);
       return Promise.resolve();
+    case "focus-top": {
+      const id = state.focusedTopId || t0?.id;
+      if (id) setFocusedTop(id);
+      if (t0) flyToTopCard(t0);
+      showToast(`FOCUS TOP · ${src}`);
+      return Promise.resolve();
+    }
+    case "inspect":
+      return showModule("pipeline").then(() => {
+        syncHoloActive("pipeline");
+        showToast(`INSPECT · ${src}`);
+      });
     case "strumenti": {
       const on = setToolsOpen();
       showToast(`STRUMENTI ${on ? "ON" : "OFF"} · ${src}`);
@@ -2780,7 +2795,10 @@ async function loadAiNewsPins() {
 
 async function initPaidAi() {
   wireBriefingForm();
-  wireActionRunner((action) => runHoloAction(action, { fromVoice: false }));
+  wireActionRunner((action, raw) => {
+    const type = typeof action === "string" ? action : action?.type || raw?.type;
+    return runHoloAction(type, { fromVoice: false });
+  });
   wireBriefingHandler(async (result) => {
     if (result?.news?.length) {
       state.news = result.news;
@@ -2798,12 +2816,21 @@ async function initPaidAi() {
       if (tip) postChatUpdate(`Suggerimenti: ${tip}`, "ok");
     }
   });
+  wireProactiveHandlers({
+    onEvent: (ev, toast) => {
+      postChatUpdate(`[proactive:${ev.kind}] ${toast}`, "ok");
+      showToast(toast, "ok");
+    },
+    speak: (text) => speak(text, { force: true }),
+  });
   try {
     state.aiStatus = await fetchAiStatus();
     state.aiPaid = Boolean(state.aiStatus?.paid);
     document.body.dataset.aiPaid = state.aiPaid ? "1" : "0";
     if (state.aiPaid) {
       await loadAiNewsPins();
+      await syncClientMemoryToServer().catch(() => {});
+      startProactivePolling(45000);
       if (shouldPromptBriefing(state.aiStatus)) openBriefingModal();
     }
   } catch (err) {
