@@ -89,6 +89,7 @@ export function passwordGate(req, res, next) {
   if (
     req.path.startsWith("/css/") ||
     req.path.startsWith("/js/") ||
+    req.path.startsWith("/mockups/") ||
     req.path === "/favicon.ico"
   ) {
     return next();
