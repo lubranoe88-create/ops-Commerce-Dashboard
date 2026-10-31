@@ -1,19 +1,14 @@
-# Checkpoint · ops-Commerce-Dashboard
-**Saved:** 2026-10-31 ~19:24 Europe/Berlin  
-**Run:** https://cursor.com/agents/bc-01a17e73-7f89-7d1e-9eb3-f865677b0bb5  
+# Checkpoint · ops-Commerce-Dashboard (updated)
+**Saved:** 2026-10-31 ~19:30 Europe/Berlin  
 **Live:** https://ops-Commerce-Dashboard.onrender.com  
-**Repo tip:** `f70860c`
+**main tip:** `806f8e6` · asset `holo-pack-7`
 
-Copy of durable checkpoint also at: `/cursor/stores/self/artifacts/CHECKPOINT-2026-10-31.md`
+## Finished this session
+- **Overlap:** holo light-points z-index 36/42 above globe; clickable with modules open; chat panel stacking preserved
+- **Voice:** TTS disabled on entry (`dataset.tts=0`); onboarding + command acks → `postChatUpdate` (chat + toast only); MIC recognition hardened (it-IT, error/retry); no spoken assistant readback
+- **Subagents:** Opus `bc-2bda0f69…` errored (quota) — not running; Grok `bc-151a14a2…` succeeded earlier — not running; no kill API, none active in list
+- **Checkpoint:** this file + `/agent/docs/CHECKPOINT-2026-10-31.md`
+- **Chat transcript trim:** not available via API — start a fresh agent chat pointing at this checkpoint if UI is slow
 
-## Stand
-- **Done:** holo pack, automation, refresh-on-open, Cesium night imagery (VIIRS/Sentinel), gestures, fixed zoom, deploy
-- **In progress:** dashboard overlap fix
-- **Queued:** voice chat — no TTS on enter; updates in chat only; perfect + test MIC/voice
-- **Subagents:** Opus (quota error) + Grok (success) + research (success) — none running
-- **Tests:** smoke live OK; formal 10/10 automated cycles not green
-
-## Resume next
-1. Overlap fix  
-2. Voice silence on boot + reliable voice chat  
-3. Retest
+## Verify
+Re-run `/tmp/live-qa-checks.mjs` against live after deploy.
