@@ -1312,7 +1312,6 @@ function sideForModule(mod, snap) {
 
     const notes = readCompanyNotes();
     const tops = orderedTops(snap);
-    let dragId = null;
     tops.forEach((t) => {
       const el = document.createElement("div");
       el.className = "card";
@@ -1339,11 +1338,20 @@ function sideForModule(mod, snap) {
         if (e.target.closest("button, input, textarea")) return;
         setFocusedTop(t.id);
       });
-      el.addEventListener("dragstart", () => {
-        dragId = t.id;
+      el.addEventListener("dragstart", (e) => {
+        state.dragTopId = t.id;
+        try {
+          e.dataTransfer.setData("text/top-id", t.id);
+          e.dataTransfer.effectAllowed = "move";
+        } catch {
+          /* ignore */
+        }
         el.classList.add("dragging");
       });
-      el.addEventListener("dragend", () => el.classList.remove("dragging"));
+      el.addEventListener("dragend", () => {
+        el.classList.remove("dragging");
+        state.dragTopId = null;
+      });
       el.addEventListener("dragover", (e) => {
         e.preventDefault();
         el.classList.add("drag-over");
@@ -1352,9 +1360,15 @@ function sideForModule(mod, snap) {
       el.addEventListener("drop", (e) => {
         e.preventDefault();
         el.classList.remove("drag-over");
-        if (!dragId || dragId === t.id) return;
+        let fromId = state.dragTopId;
+        try {
+          fromId = e.dataTransfer.getData("text/top-id") || fromId;
+        } catch {
+          /* ignore */
+        }
+        if (!fromId || fromId === t.id) return;
         const ids = tops.map((x) => x.id);
-        const from = ids.indexOf(dragId);
+        const from = ids.indexOf(fromId);
         const to = ids.indexOf(t.id);
         if (from < 0 || to < 0) return;
         ids.splice(to, 0, ids.splice(from, 1)[0]);
