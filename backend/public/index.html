@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=holo-pack-5" />
+  <link rel="stylesheet" href="/css/app.css?v=holo-pack-6" />
 </head>
 <body>
   <div id="app" class="holo-home">
@@ -26,7 +26,7 @@
       <div class="top-right">
         <span id="utcClock" class="utc-clock">--:--:-- UTC</span>
         <button type="button" id="signalBars" class="signal-bars" aria-haspopup="true" aria-expanded="false" aria-controls="topMenu" title="Segnale · menu">
-          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
         </button>
         <div id="topMenu" class="top-menu" role="menu">
           <nav class="nav nav--ghost" id="moduleNav" aria-label="Moduli">
@@ -59,6 +59,7 @@
           <div class="legend" id="moduleLegend"></div>
           <div class="legend mono" id="coverageMini"></div>
         </div>
+        <p id="imageryCredit" class="imagery-credit">NASA VIIRS (public domain) · Sentinel-2 / EOX CC BY 4.0</p>
         <!-- Holo light points (reference photo): dot + hairline beam; label on hover/focus/voice -->
         <div id="holoVoicePlancia" class="holo-voice-plancia holo-voice-plancia--overlay" aria-label="Plancia vocale olografica">
           <button type="button" class="holo-node" data-holo-action="map" aria-label="MAPPA" style="--hx:25%;--hy:20.5%;--hb:12vh;">
@@ -194,6 +195,6 @@
     }
   }
   </script>
-  <script type="module" src="/js/app.js?v=holo-pack-5"></script>
+  <script type="module" src="/js/app.js?v=holo-pack-6"></script>
 </body>
 </html>

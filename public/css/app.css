@@ -971,13 +971,44 @@ body.tools-open #mapChrome.map-chrome { bottom: calc(17vh + 70px); }
   transition: opacity 0.25s ease;
   pointer-events: none;
 }
+.holo-node.label-flip .holo-label {
+  left: auto;
+  right: 20px;
+  text-align: right;
+}
 .holo-node:hover .holo-label,
 .holo-node:focus-visible .holo-label,
+.holo-node.is-active .holo-label,
 body.holo-labels-on .holo-label,
 body.mic-live .holo-label {
   opacity: 0.9;
   animation: holo-pulse 3.2s ease-in-out infinite;
   animation-delay: calc(var(--hx) * -0.04s);
+}
+.globe-follow-label {
+  position: absolute;
+  z-index: 6;
+  transform: translate(-50%, calc(-100% - 10px));
+  pointer-events: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 214, 150, 0.95);
+  text-shadow: 0 1px 2px #000, 0 0 10px rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
+}
+.imagery-credit {
+  position: absolute;
+  left: var(--photo-edge);
+  bottom: 1.2vh;
+  z-index: 8;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: rgba(196, 206, 220, 0.42);
+  pointer-events: none;
 }
 .holo-node.is-active .holo-dot {
   background: #fff;
@@ -1041,7 +1072,9 @@ body[data-module="map"] .side--holo .side-head { display: none; }
   box-shadow: none;
 }
 .side--holo .card.top-row-card {
-  min-height: 13.1vh;
+  /* Five rows fill the rail, matching the reference photo; the rest scroll. */
+  height: 16.3vh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1315,7 +1348,7 @@ body[data-module="chat"] .analizza-bar { z-index: 50; }
     bottom: calc(7.1vh + 56px);
     max-height: 30vh;
   }
-  .side--holo .card.top-row-card { min-height: 52px; }
+  .side--holo .card.top-row-card { height: auto; min-height: 52px; }
   .analizza-bar { width: 94vw; }
   #chatPanel { inset: 14vh 3vw calc(7.1vh + 56px + 31vh) 3vw; }
   .coverage-scrub--holo, .compare-strip--holo { right: 3vw; }

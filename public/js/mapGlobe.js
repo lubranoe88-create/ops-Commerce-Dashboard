@@ -1,8 +1,9 @@
 /**
  * Interactive tactical globe (Cesium): 5-level LOD, night-holo styling,
  * drag, pick + hover, Nominatim search, compass/reset-north.
- * Orbit views use NASA GIBS VIIRS Black Marble (public domain, keyless, CORS);
- * satellite + reference overlays fade in from city LOD down.
+ * Orbit views use NASA GIBS VIIRS Black Marble (U.S. Government work, public domain).
+ * Closer LOD fades in Copernicus Sentinel-2 cloudless via EOX (CC BY 4.0).
+ * No unlicensed tile endpoints.
  */
 
 const CESIUM_VER = "1.125.0";
@@ -10,6 +11,11 @@ const CESIUM_BASE = `https://cdn.jsdelivr.net/npm/cesium@${CESIUM_VER}/Build/Ces
 const NOMINATIM = "https://nominatim.openstreetmap.org";
 const BLACK_MARBLE_URL =
   "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png";
+/** Copernicus Sentinel-2 cloudless, served by EOX under CC BY 4.0. */
+const SENTINEL_CLOUDLESS_URL =
+  "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg";
+const EOX_TERRAIN_URL =
+  "https://tiles.maps.eox.at/wmts/1.0.0/terrain-light_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg";
 /** Home framing matching the reference photo: EMEA night hemisphere, crown under the header. */
 export const HOME_VIEW = { lon: 30, lat: 24, height: 12_600_000 };
 const LOCK_MIN_ZOOM = 11_000_000;
@@ -106,24 +112,28 @@ export function detectLowGpu() {
 
 function buildImagery(Cesium, v) {
   v.imageryLayers.removeAll();
+  // Day/detail base: Copernicus Sentinel-2 cloudless (CC BY 4.0, EOX).
   const sat = v.imageryLayers.addImageryProvider(
     new Cesium.UrlTemplateImageryProvider({
-      url: "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      maximumLevel: 19,
-      credit: "Esri World Imagery (public)",
+      url: SENTINEL_CLOUDLESS_URL,
+      maximumLevel: 13,
+      credit: "Copernicus Sentinel-2 cloudless © EOX IT Services GmbH (CC BY 4.0)",
     }),
   );
   applyDarkOpsImagery(sat);
   sat._opsRole = "sat";
+  sat._opsLicense = "CC BY 4.0";
 
+  // Night hemisphere: NASA VIIRS Black Marble (public domain).
   const night = v.imageryLayers.addImageryProvider(
     new Cesium.UrlTemplateImageryProvider({
       url: BLACK_MARBLE_URL,
       maximumLevel: 8,
-      credit: "NASA Earth Observatory · VIIRS Black Marble",
+      credit: "NASA Earth Observatory · VIIRS Black Marble (public domain)",
     }),
   );
   night._opsRole = "night";
+  night._opsLicense = "public-domain";
   // Shift Black Marble's violet land toward navy and its city lights toward warm gold
   night.brightness = 0.95;
   night.contrast = 1.3;
@@ -131,28 +141,19 @@ function buildImagery(Cesium, v) {
   night.saturation = 0.85;
   night.hue = 0.4;
 
+  // Licensed relief only at street zoom (still EOX / Copernicus-derived, not a scraped basemap).
   const ref = v.imageryLayers.addImageryProvider(
     new Cesium.UrlTemplateImageryProvider({
-      url: "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-      maximumLevel: 16,
-      credit: "Esri Boundaries",
+      url: EOX_TERRAIN_URL,
+      maximumLevel: 8,
+      credit: "EOX terrain-light © EOX IT Services GmbH",
     }),
   );
   ref.alpha = 0;
   ref._opsRole = "ref";
+  ref._opsLicense = "EOX";
 
-  const roads = v.imageryLayers.addImageryProvider(
-    new Cesium.UrlTemplateImageryProvider({
-      url: "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
-      maximumLevel: 19,
-      credit: "Esri Transportation",
-    }),
-  );
-  roads.alpha = 0;
-  roads._opsRole = "roads";
-
-  // No tile.openstreetmap.org layer: its usage policy blocks app traffic (403 "Access blocked" tiles).
-  return { sat, night, ref, roads };
+  return { sat, night, ref };
 }
 
 function setOverlayByLod(v, lod) {
@@ -165,7 +166,8 @@ function setOverlayByLod(v, lod) {
       layer.show = layer.alpha > 0;
     }
     if (role === "ref") {
-      layer.alpha = lod.level <= 2 ? 0 : 0.7;
+      // Faint licensed relief only once the camera is down at streets.
+      layer.alpha = lod.level >= 4 ? 0.28 : 0;
       layer.show = layer.alpha > 0;
     }
     if (role === "roads") {
@@ -709,6 +711,82 @@ function wireInteraction(Cesium, v) {
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 }
 
+let pulseTopId = null;
+let pulsePhase = 0;
+let followTopId = null;
+let followText = "";
+let followEl = null;
+
+/** Pulse the toured/focused pin so auto-tour is visible on the globe. */
+export function setPulseTop(id) {
+  pulseTopId = id || null;
+}
+
+/** Screen-space label that tracks a pin as the globe orbits. */
+export function setFollowLabel(id, text) {
+  followTopId = id || null;
+  followText = text || "";
+  if (!followTopId && followEl) followEl.hidden = true;
+}
+
+function ensureFollowEl() {
+  const host = viewer?.container;
+  if (!host) return null;
+  if (followEl && followEl.isConnected) return followEl;
+  followEl = document.createElement("div");
+  followEl.id = "globeFollowLabel";
+  followEl.className = "globe-follow-label";
+  followEl.hidden = true;
+  host.appendChild(followEl);
+  return followEl;
+}
+
+function updatePulseAndFollow(Cesium, v) {
+  pulsePhase += 0.085;
+  if (pulseTopId) {
+    const entity = v.entities.getById(`top-${pulseTopId}`);
+    if (entity?.point) {
+      const s = 9 + Math.sin(pulsePhase) * 3;
+      entity.point.pixelSize = s;
+    }
+  }
+  const el = ensureFollowEl();
+  if (!el) return;
+  if (!followTopId) {
+    el.hidden = true;
+    return;
+  }
+  const entity = v.entities.getById(`top-${followTopId}`);
+  const time = v.clock.currentTime;
+  const pos = entity?.position?.getValue?.(time);
+  if (!pos || !Cesium.defined(pos)) {
+    el.hidden = true;
+    return;
+  }
+  let canvasPos = null;
+  try {
+    canvasPos = v.scene.cartesianToCanvasCoordinates(pos);
+  } catch {
+    canvasPos = null;
+  }
+  if (!canvasPos || !Number.isFinite(canvasPos.x) || !Number.isFinite(canvasPos.y)) {
+    el.hidden = true;
+    return;
+  }
+  let visible = true;
+  try {
+    const occluder = new Cesium.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84, v.camera.position);
+    visible = occluder.isPointVisible(pos);
+  } catch {
+    visible = true;
+  }
+  el.hidden = !visible;
+  if (!visible) return;
+  el.textContent = followText || entity.name || "";
+  el.style.left = `${canvasPos.x}px`;
+  el.style.top = `${canvasPos.y}px`;
+}
+
 function startLodWatcher(Cesium, v) {
   stopLodWatcher();
   let lastLevel = -1;
@@ -729,6 +807,7 @@ function startLodWatcher(Cesium, v) {
         selectEntity.ellipse.semiMajorAxis = r;
         selectEntity.ellipse.semiMinorAxis = r;
       }
+      updatePulseAndFollow(Cesium, viewer);
     }
     heightTick = requestAnimationFrame(tick);
   };
@@ -771,8 +850,9 @@ function stopOrbitDrift() {
 }
 
 /**
- * Native-DPI framebuffer (no supersampling). Heavy resolutionScale>1 softens fine
- * lines and stresses GPU; use MSAA + low SSE for crisp imagery instead.
+ * Native device pixels. useBrowserRecommendedResolution applies devicePixelRatio;
+ * resolutionScale is an extra multiplier (keep at 1, or below 1 on weak GPUs).
+ * FXAA is left off — it softens imagery. MSAA stays on for edges.
  */
 export function applyFourKResolution(v) {
   if (!v?.scene) return { width: 0, height: 0, scale: 1 };
@@ -785,21 +865,25 @@ export function applyFourKResolution(v) {
     (typeof navigator !== "undefined" && navigator.maxTouchPoints > 1) ||
     Math.min(cssW, cssH) < 700;
   const lowGpu = detectLowGpu() || document.documentElement.dataset.lowGpu === "1";
-  // 1.0 = native sharpness; tiny bump only on fine desktop GPUs
-  let scale = lowGpu || isCoarse ? 1 : Math.min(1.15, Math.max(1, 1));
+  // Cap the framebuffer near 2× CSS on phones; desktop stays at native DPR.
+  let scale = 1;
+  if (lowGpu) scale = dpr >= 2 ? 0.7 : 0.85;
+  else if (isCoarse && dpr > 2) scale = 2 / dpr;
   if (lowGpu && v.scene?.globe) {
     v.scene.globe.maximumScreenSpaceError = 2.0;
   } else if (v.scene?.globe) {
-    v.scene.globe.maximumScreenSpaceError = 1.15;
+    v.scene.globe.maximumScreenSpaceError = 1.0;
   }
   try {
-    v.useBrowserRecommendedResolution = false;
+    v.useBrowserRecommendedResolution = true;
     v.resolutionScale = scale;
     if (v.scene?.msaaSamples != null) v.scene.msaaSamples = lowGpu ? 1 : 4;
+    if (v.scene?.postProcessStages?.fxaa) v.scene.postProcessStages.fxaa.enabled = false;
     v.resize();
   } catch (err) {
     console.warn("[globe] resolutionScale failed, falling back to 1×", err);
     try {
+      v.useBrowserRecommendedResolution = true;
       v.resolutionScale = 1;
       v.resize();
       scale = 1;
@@ -858,8 +942,8 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
     shouldAnimate: true,
     requestRenderMode: false,
     orderIndependentTranslucency: true,
-    // Drive framebuffer toward 4K-class pixel density
-    useBrowserRecommendedResolution: false,
+    // Native device pixels (resolutionScale applied in applyFourKResolution)
+    useBrowserRecommendedResolution: true,
     contextOptions: {
       webgl: {
         alpha: false,
@@ -928,17 +1012,25 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   } catch {
     /* older Cesium */
   }
-  // Sharper imagery / terrain LOD (lower SSE = higher quality)
-  viewer.scene.globe.maximumScreenSpaceError = 1.25;
+  // Sharper imagery (lower SSE). FXAA stays off; MSAA handles edges.
+  viewer.scene.globe.maximumScreenSpaceError = 1.0;
   if (viewer.scene.globe.tileCacheSize != null) viewer.scene.globe.tileCacheSize = 1000;
   if (viewer.scene.postProcessStages?.fxaa) {
-    viewer.scene.postProcessStages.fxaa.enabled = true;
+    viewer.scene.postProcessStages.fxaa.enabled = false;
+  }
+  const lowGpuMount = document.documentElement.dataset.lowGpu === "1" || detectLowGpu();
+  if (lowGpuMount) {
+    viewer.scene.fog.enabled = false;
+    viewer.scene.globe.showGroundAtmosphere = false;
+    if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
+    viewer.scene.highDynamicRange = false;
+    viewer.scene.globe.maximumScreenSpaceError = 2.0;
   }
   viewer.shadows = false;
-  // HDR breaks the globe on some mobile GPUs — enable only on fine pointers
+  // HDR breaks the globe on some mobile / low GPUs — fine desktop pointers only
   try {
     const fine = typeof matchMedia === "function" && matchMedia("(pointer: fine)").matches;
-    viewer.scene.highDynamicRange = Boolean(fine);
+    viewer.scene.highDynamicRange = Boolean(fine) && !lowGpuMount;
   } catch {
     viewer.scene.highDynamicRange = false;
   }
@@ -1027,11 +1119,16 @@ function teardownViewer() {
   stopLodWatcher();
   stopOrbitDrift();
   clearTimeout(idleTimer);
+  clearTimeout(unlockProgrammaticZoom._t);
   onLodCallback = null;
   onSelectCallback = null;
   hoverEntity = null;
   selectEntity = null;
   topsCache = [];
+  pulseTopId = null;
+  followTopId = null;
+  followText = "";
+  followEl = null;
   const container = viewer?.container || null;
   if (viewer && !viewer.isDestroyed?.()) {
     try {
@@ -1083,13 +1180,25 @@ export function getGlobeState() {
       return { role: l._opsRole || "base", show: l.show, alpha: Number(l.alpha.toFixed(2)) };
     }),
     resolutionScale: viewer.resolutionScale,
+    useBrowserRecommendedResolution: viewer.useBrowserRecommendedResolution,
+    fxaa: Boolean(viewer.scene.postProcessStages?.fxaa?.enabled),
     msaa: viewer.scene.msaaSamples,
     sse: viewer.scene.globe.maximumScreenSpaceError,
+    zoomEnabled: viewer.scene.screenSpaceCameraController.enableZoom,
+    followTopId,
+    pulseTopId,
     canvas: { w: viewer.canvas.width, h: viewer.canvas.height },
+    imageryLicenses: Array.from({ length: viewer.imageryLayers.length }, (_, i) => {
+      const l = viewer.imageryLayers.get(i);
+      return l._opsLicense || l._opsRole || "base";
+    }),
   };
 }
 
-/** Temporarily allow programmatic LOD zoom (voice/fly); re-lock user zoom after. */
+/**
+ * Allow a programmatic fly, then freeze user zoom around the altitude we arrived at.
+ * Re-applying the orbit band (11–16e6 m) would yank a city fly back out to space.
+ */
 export function unlockProgrammaticZoom(ms = 2200) {
   if (!viewer || viewer.isDestroyed?.()) return;
   const ctrl = viewer.scene.screenSpaceCameraController;
@@ -1100,9 +1209,11 @@ export function unlockProgrammaticZoom(ms = 2200) {
   unlockProgrammaticZoom._t = setTimeout(() => {
     if (!viewer || viewer.isDestroyed?.()) return;
     const c = viewer.scene.screenSpaceCameraController;
+    const h = viewer.camera.positionCartographic?.height || HOME_VIEW.height;
+    const pad = Math.max(40_000, h * 0.06);
     c.enableZoom = false;
     c.zoomEventTypes = [];
-    c.minimumZoomDistance = LOCK_MIN_ZOOM;
-    c.maximumZoomDistance = LOCK_MAX_ZOOM;
+    c.minimumZoomDistance = Math.max(80, h - pad);
+    c.maximumZoomDistance = h + pad;
   }, ms);
 }

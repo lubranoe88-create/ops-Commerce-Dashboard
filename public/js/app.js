@@ -13,10 +13,13 @@ import {
   mountMapGlobe,
   resetNorth,
   searchPlace,
+  setFollowLabel,
   setOrbitEnabled,
+  setPulseTop,
   updateMapGlobeTops,
-} from "./mapGlobe.js?v=holo-pack-5";
+} from "./mapGlobe.js?v=holo-pack-6";
 
+const BUILD_ID = "inventory-6";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1078,6 +1081,9 @@ function setFocusedTop(id) {
   document.querySelectorAll(".card[data-top-id]").forEach((card) => {
     card.classList.toggle("is-focused", card.dataset.topId === id);
   });
+  const top = id ? findTop(id) : null;
+  setFollowLabel(id, top?.title || "");
+  setPulseTop(id);
 }
 
 function flyToTopCard(t) {
@@ -1322,6 +1328,22 @@ function syncHoloActive(actionOrModule) {
   });
 }
 
+function speak(text) {
+  const synth = window.speechSynthesis;
+  const line = String(text || "").trim();
+  if (!synth || !line) return;
+  try {
+    synth.cancel();
+    const utter = new SpeechSynthesisUtterance(line.slice(0, 420));
+    utter.lang = "it-IT";
+    utter.rate = 1.02;
+    utter.volume = 0.9;
+    synth.speak(utter);
+  } catch {
+    /* TTS unavailable */
+  }
+}
+
 function playHoloTick() {
   // Subtle feedback click (no asset files) — original improvement
   try {
@@ -1392,6 +1414,7 @@ function maybeVoiceOnboarding() {
   } catch {
     return;
   }
+  document.body.dataset.voiceOnboard = "shown";
   const lines = [
     "Benvenuto nella plancia. Di’ MAPPA, PIPELINE, MEMORY o CHAT.",
     "Di’ ORBIT, NORD o ZOOM CITTÀ per il globo. Di’ ANALIZZA per la chat.",
@@ -1401,6 +1424,7 @@ function maybeVoiceOnboarding() {
   const step = () => {
     if (i >= lines.length) return;
     showToast(lines[i], "ok");
+    speak(lines[i]);
     i += 1;
     setTimeout(step, 3200);
   };
@@ -1463,8 +1487,16 @@ window.__opsDiag = () => ({
   autoTourMs: AUTO_TOUR_MS,
   timers: { refresh: Boolean(state.autoRefreshTimer), tour: Boolean(state.autoTourTimer) },
   mapEngine: state.mapEngine,
+  build: BUILD_ID,
+  lowGpu: document.documentElement.dataset.lowGpu === "1",
+  lastOpenRefresh: document.body.dataset.lastOpenRefresh || null,
+  voiceOnboard: document.body.dataset.voiceOnboard || null,
+  lastView: readLastView(),
   globe: getGlobeState(),
 });
+
+window.__opsVoice = (text) => handleVoiceCommand(text);
+window.__opsRun = (action) => runHoloAction(action, { fromVoice: false });
 
 /** Dual control: same actions for voice keywords and holographic touch targets. */
 function runHoloAction(action, { fromVoice = false } = {}) {
@@ -1475,6 +1507,10 @@ function runHoloAction(action, { fromVoice = false } = {}) {
   const lat = Number.isFinite(t0?.lat) ? t0.lat : 42;
   const src = fromVoice ? "voce" : "tocco";
   playHoloTick();
+  if (fromVoice) {
+    const label = document.querySelector(`.holo-node[data-holo-action="${action}"] .holo-label`);
+    speak(label?.textContent || String(action).replace(/-/g, " "));
+  }
 
   switch (action) {
     case "map":
@@ -1703,6 +1739,10 @@ function wireHoloPlancia() {
   const host = $("holoVoicePlancia");
   if (!host || host.dataset.wired) return;
   host.dataset.wired = "1";
+  host.querySelectorAll(".holo-node").forEach((node) => {
+    const hx = parseFloat(node.style.getPropertyValue("--hx")) || 0;
+    if (hx > 58) node.classList.add("label-flip");
+  });
   host.addEventListener("click", (e) => {
     const node = e.target.closest(".holo-node[data-holo-action]");
     if (!node) return;
@@ -2040,6 +2080,7 @@ async function showModule(mod, opts = {}) {
   // Globe already live: map actions (orbit / nord / zoom) must not remount it.
   if (!force && mod === "map" && state.module === "map" && state.mapEngine === "cesium" && getViewer()) {
     syncHoloActive(mod);
+    saveLastView("map");
     return Promise.resolve();
   }
 
@@ -2139,6 +2180,7 @@ async function showModule(mod, opts = {}) {
       sideForModule(mod, snap);
       if (mod !== "map") renderCoverageMini(snap.coverage);
       if (snap.health) setHealth(snap.health);
+      saveLastView(mod);
     } finally {
       if (epoch === moduleEpoch) {
         moduleSwitchLocked = false;
@@ -2286,7 +2328,7 @@ async function loadChat() {
   msgs.scrollTop = msgs.scrollHeight;
 }
 
-async function sendChat(text) {
+async function sendChat(text, { voice = false } = {}) {
   if (!text.trim()) return;
   if (!state.threadId) {
     const t = await api("/api/chat/threads", { method: "POST", body: JSON.stringify({ title: "Session" }) });
@@ -2301,6 +2343,11 @@ async function sendChat(text) {
     });
     $("chatInput").value = "";
     await loadChat();
+    if (voice) {
+      const replies = document.querySelectorAll("#messageList .bubble.assistant");
+      const last = replies[replies.length - 1];
+      if (last?.textContent) speak(last.textContent);
+    }
   } catch (err) {
     showToast(err.message || "Chat fallita", "bad");
   }
@@ -2462,8 +2509,8 @@ function wireUi() {
   wireModuleZoom();
   setupMic($("globalMic"), (text) => {
     if (handleVoiceCommand(text)) return;
-    // Fallback: free-form → chat
-    runHoloAction("chat", { fromVoice: true }).then(() => sendChat(text));
+    // Fallback: free-form → chat, then speak the assistant reply
+    runHoloAction("chat", { fromVoice: true }).then(() => sendChat(text, { voice: true }));
   });
   const chatMic = $("chatMic");
   if (chatMic) {
@@ -2507,6 +2554,8 @@ function wireGestureShortcuts() {
         runHoloAction("refresh", { fromVoice: false });
         return;
       }
+      // Side-panel pinch is module zoom, not a module swipe.
+      if (e.target.closest?.("#sidePanel")) return;
       if (e.touches.length !== 2) return;
       tracking = true;
       startX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
