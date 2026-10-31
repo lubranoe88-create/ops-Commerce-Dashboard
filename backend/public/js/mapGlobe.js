@@ -2,9 +2,9 @@
  * Interactive tactical globe (Cesium): military-style grayscale satellite,
  * single lightweight imagery layer, country → road zoom, drag/pick/search.
  *
- * Imagery: Esri World Imagery (satellite) displayed desaturated — no night
- * marble, no color grading stacks. Ellipsoid only (no world terrain / ion).
- * 5D/OSM buildings require Cesium ion — intentionally not loaded (keep fast).
+ * Imagery: Esri World Imagery (satellite) displayed desaturated — unchanged.
+ * Buildings: Re:Earth global OSM 3D Tiles (no ion token), gray-styled and
+ * altitude-gated so orbit stays light; detail only near city zoom.
  */
 
 const CESIUM_VER = "1.125.0";
@@ -16,6 +16,10 @@ const NOMINATIM = "https://nominatim.openstreetmap.org";
  */
 const ESRI_WORLD_IMAGERY_URL =
   "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+/** Free global OSM/Overture extruded buildings (3D Tiles) — no Cesium ion. */
+const REEARTH_BUILDINGS_URL = "https://buildings.reearth.land/tileset.json";
+/** Show buildings only below this altitude (~country → city band). */
+const BUILDINGS_SHOW_BELOW_M = 1_200_000;
 /** Home framing: EMEA hemisphere. */
 export const HOME_VIEW = { lon: 30, lat: 24, height: 12_600_000 };
 /** User zoom range — street to full-globe. (Old "fixed orbit" lock blocked all zoom.) */
@@ -35,6 +39,8 @@ let selectEntity = null;
 let userInteracting = false;
 let idleTimer = null;
 let topsCache = [];
+let buildingsTileset = null;
+let buildingsLoadPromise = null;
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -130,6 +136,78 @@ function buildImagery(Cesium, v) {
 
 function setOverlayByLod(_v, _lod) {
   // Single grayscale satellite layer — nothing to cross-fade by LOD.
+}
+
+/**
+ * Lazy-load Re:Earth buildings once the camera enters city/country band.
+ * High maximumScreenSpaceError keeps mesh detail coarse until close in.
+ */
+async function ensureReEarthBuildings(Cesium, v) {
+  if (buildingsTileset && !buildingsTileset.isDestroyed?.()) return buildingsTileset;
+  if (buildingsLoadPromise) return buildingsLoadPromise;
+  const seq = mountSeq;
+  buildingsLoadPromise = (async () => {
+    try {
+      const lowGpu = detectLowGpu() || document.documentElement.dataset.lowGpu === "1";
+      const opts = {
+        // Higher SSE = fewer tiles / coarser LOD until camera is near city scale.
+        maximumScreenSpaceError: lowGpu ? 48 : 28,
+        skipLevelOfDetail: true,
+        immediatelyLoadDesiredLevelOfDetail: false,
+        loadSiblings: false,
+        cullWithChildrenBounds: true,
+      };
+      let tileset;
+      if (typeof Cesium.Cesium3DTileset.fromUrl === "function") {
+        tileset = await Cesium.Cesium3DTileset.fromUrl(REEARTH_BUILDINGS_URL, opts);
+      } else {
+        tileset = new Cesium.Cesium3DTileset({ url: REEARTH_BUILDINGS_URL, ...opts });
+        if (tileset.readyPromise) await tileset.readyPromise;
+      }
+      if (seq !== mountSeq || !viewer || viewer !== v || viewer.isDestroyed?.()) {
+        try {
+          tileset.destroy?.();
+        } catch {
+          /* ignore */
+        }
+        return null;
+      }
+      // Match military grayscale Esri base — no colorized facades.
+      try {
+        tileset.style = new Cesium.Cesium3DTileStyle({
+          color: "color('#a6a6a6', 0.94)",
+        });
+      } catch (err) {
+        console.warn("[globe] building style skipped", err);
+      }
+      tileset.show = false;
+      v.scene.primitives.add(tileset);
+      buildingsTileset = tileset;
+      console.info("[globe] Re:Earth buildings ready (altitude-gated)");
+      return tileset;
+    } catch (err) {
+      console.warn("[globe] Re:Earth buildings failed to load", err);
+      buildingsLoadPromise = null;
+      return null;
+    }
+  })();
+  return buildingsLoadPromise;
+}
+
+/** Orbit: hide. City band: show (and trigger first load). Esri imagery untouched. */
+function gateBuildingsByAltitude(Cesium, v, heightM) {
+  const h = Number(heightM) || 0;
+  if (h >= BUILDINGS_SHOW_BELOW_M) {
+    if (buildingsTileset && !buildingsTileset.isDestroyed?.()) {
+      buildingsTileset.show = false;
+    }
+    return;
+  }
+  ensureReEarthBuildings(Cesium, v).then((tileset) => {
+    if (!tileset || viewer !== v || viewer?.isDestroyed?.()) return;
+    const stillLow = (viewer.camera.positionCartographic?.height ?? 0) < BUILDINGS_SHOW_BELOW_M;
+    tileset.show = stillLow;
+  });
 }
 
 const PIN_GOLD = "#ffb347";
@@ -809,6 +887,7 @@ function updatePulseAndFollow(Cesium, v) {
 function startLodWatcher(Cesium, v) {
   stopLodWatcher();
   let lastLevel = -1;
+  let lastBuildingsGate = null;
   const tick = () => {
     if (!viewer || viewer.isDestroyed?.()) return;
     const carto = viewer.camera.positionCartographic;
@@ -819,6 +898,11 @@ function startLodWatcher(Cesium, v) {
         lastLevel = lod.level;
         setOverlayByLod(viewer, lod);
         onLodCallback?.(lod, h);
+      }
+      const wantBuildings = h < BUILDINGS_SHOW_BELOW_M;
+      if (wantBuildings !== lastBuildingsGate) {
+        lastBuildingsGate = wantBuildings;
+        gateBuildingsByAltitude(Cesium, v, h);
       }
       // Scale selection rings with altitude
       if (selectEntity?.show && selectEntity.ellipse) {
@@ -1034,7 +1118,7 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   // Slightly higher SSE = fewer tiles, faster load; still readable to road level.
   viewer.scene.globe.maximumScreenSpaceError = 1.75;
   if (viewer.scene.globe.tileCacheSize != null) viewer.scene.globe.tileCacheSize = 600;
-  // No Cesium ion 3D Tiles / OSM Buildings — keeps GPU light (see file header).
+  // Re:Earth buildings load lazily when altitude drops below BUILDINGS_SHOW_BELOW_M.
   if (viewer.scene.postProcessStages?.fxaa) {
     viewer.scene.postProcessStages.fxaa.enabled = false;
   }
@@ -1153,6 +1237,16 @@ function teardownViewer() {
   followTopId = null;
   followText = "";
   followEl = null;
+  if (buildingsTileset && !buildingsTileset.isDestroyed?.()) {
+    try {
+      viewer?.scene?.primitives?.remove?.(buildingsTileset);
+      buildingsTileset.destroy?.();
+    } catch {
+      /* ignore */
+    }
+  }
+  buildingsTileset = null;
+  buildingsLoadPromise = null;
   const container = viewer?.container || null;
   if (viewer && !viewer.isDestroyed?.()) {
     try {
@@ -1216,6 +1310,14 @@ export function getGlobeState() {
       const l = viewer.imageryLayers.get(i);
       return l._opsLicense || l._opsRole || "base";
     }),
+    buildings: {
+      source: "reearth",
+      url: REEARTH_BUILDINGS_URL,
+      loaded: Boolean(buildingsTileset && !buildingsTileset.isDestroyed?.()),
+      show: Boolean(buildingsTileset?.show),
+      gateBelowM: BUILDINGS_SHOW_BELOW_M,
+      sse: buildingsTileset?.maximumScreenSpaceError ?? null,
+    },
   };
 }
 
