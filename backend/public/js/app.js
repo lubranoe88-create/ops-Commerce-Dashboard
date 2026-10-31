@@ -2085,8 +2085,8 @@ function setExclusivePanels(mod) {
     if (gl) {
       gl.hidden = false;
       gl.classList.remove("is-suppressed");
-      // Map: globe receives drag. Pipeline/memory: WebGL host stays but left holo UI wins clicks.
-      gl.style.pointerEvents = isMap ? "" : "none";
+      // Canvas stays interactive for Three.js (pipeline/memory); holo nodes sit above via z-index.
+      gl.style.pointerEvents = "";
     }
   }
 }

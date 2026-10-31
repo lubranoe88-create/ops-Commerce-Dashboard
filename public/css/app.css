@@ -1323,14 +1323,6 @@ body[data-module="map"] .side--holo .side-head { display: none; }
 /* Light points stay reachable above the chat panel so touch users can always leave chat */
 body[data-module="chat"] .holo-voice-plancia--overlay { z-index: 42; opacity: 0.85; }
 body[data-module="chat"] .analizza-bar { z-index: 50; }
-body[data-module="pipeline"] #glCanvas,
-body[data-module="memory"] #glCanvas {
-  pointer-events: none !important;
-}
-body[data-module="pipeline"] #glCanvas canvas,
-body[data-module="memory"] #glCanvas canvas {
-  pointer-events: none !important;
-}
 .bubble.system {
   align-self: stretch;
   background: rgba(8, 18, 28, 0.9);
