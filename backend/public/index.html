@@ -1,86 +1,96 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="it">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ops Dashboard — Commerce Intelligence</title>
+  <title>OPS · COMMERCE INTEL</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;650&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=holo-touch-1" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/app.css?v=holo-home-4k" />
 </head>
 <body>
-  <div id="app">
-    <header class="topbar">
-      <div class="brand">OPS · COMMERCE INTEL</div>
-      <div id="healthBadge" class="health warn">HEALTH —</div>
-      <nav class="nav" id="moduleNav">
-        <button data-module="map" class="active" title="Shortcut 1">Map</button>
-        <button data-module="pipeline" title="Shortcut 2">Pipeline</button>
-        <button data-module="memory" title="Shortcut 3">Memory</button>
-        <button data-module="chat" title="Shortcut 4">Chat</button>
-      </nav>
-      <button id="refreshBtn" class="pill-btn" title="Refresh snapshot">Refresh</button>
-      <button id="globalMic" class="icon-btn mic" title="Voice command (all modules)">MIC</button>
-      <button id="logoutBtn" class="pill-btn" title="Logout">Logout</button>
+  <div id="app" class="holo-home">
+    <header class="topbar topbar--holo">
+      <div class="brand-block">
+        <div class="brand">OPS · COMMERCE INTEL</div>
+        <div class="brand-tag">GLOBAL OPERATIONS · INTELLIGENCE · ADVANTAGE</div>
+      </div>
+      <div class="top-status" aria-live="polite">
+        <span id="healthBadge" class="health warn">HEALTH —</span>
+        <span id="statDay" class="stat-pill mono">DAY —</span>
+        <span id="statCoverage" class="stat-pill">COVERAGE —</span>
+      </div>
+      <div class="top-right">
+        <span id="utcClock" class="mono utc-clock">--:--:-- UTC</span>
+        <nav class="nav nav--ghost" id="moduleNav" aria-label="Moduli">
+          <button data-module="map" class="active" title="Map">Map</button>
+          <button data-module="pipeline" title="Pipeline">Pipe</button>
+          <button data-module="memory" title="Memory">Mem</button>
+          <button data-module="chat" title="Chat">Chat</button>
+        </nav>
+        <button id="refreshBtn" class="ghost-btn" title="Refresh">↻</button>
+        <button id="logoutBtn" class="ghost-btn" title="Logout">⎋</button>
+      </div>
     </header>
-    <!-- Holographic voice plancia: labels anchored to light points; voice + touch -->
-    <div id="holoVoicePlancia" class="holo-voice-plancia" aria-label="Plancia vocale olografica">
-      <button type="button" class="holo-node" data-holo-action="map" style="--hx:18%;--hy:42%;">
+
+    <!-- Light-point modules over the globe (voice + touch), like reference beams -->
+    <div id="holoVoicePlancia" class="holo-voice-plancia holo-voice-plancia--overlay" aria-label="Plancia vocale olografica">
+      <button type="button" class="holo-node" data-holo-action="map" style="--hx:16%;--hy:38%;">
         <span class="holo-dot" aria-hidden="true"></span>
         <span class="holo-label">MAPPA</span>
       </button>
-      <button type="button" class="holo-node" data-holo-action="pipeline" style="--hx:32%;--hy:28%;">
+      <button type="button" class="holo-node" data-holo-action="pipeline" style="--hx:28%;--hy:24%;">
         <span class="holo-dot" aria-hidden="true"></span>
         <span class="holo-label">PIPELINE</span>
       </button>
-      <button type="button" class="holo-node" data-holo-action="memory" style="--hx:68%;--hy:30%;">
+      <button type="button" class="holo-node" data-holo-action="memory" style="--hx:72%;--hy:26%;">
         <span class="holo-dot" aria-hidden="true"></span>
         <span class="holo-label">MEMORY</span>
       </button>
-      <button type="button" class="holo-node" data-holo-action="chat" style="--hx:82%;--hy:48%;">
+      <button type="button" class="holo-node" data-holo-action="chat" style="--hx:84%;--hy:40%;">
         <span class="holo-dot" aria-hidden="true"></span>
         <span class="holo-label">CHAT</span>
       </button>
-      <button type="button" class="holo-node holo-node--amber" data-holo-action="mic" style="--hx:50%;--hy:52%;">
+      <button type="button" class="holo-node holo-node--amber" data-holo-action="mic" style="--hx:50%;--hy:48%;">
         <span class="holo-dot" aria-hidden="true"></span>
         <span class="holo-label">MIC</span>
       </button>
-      <button type="button" class="holo-node" data-holo-action="orbit" style="--hx:44%;--hy:72%;">
+      <button type="button" class="holo-node" data-holo-action="orbit" style="--hx:42%;--hy:70%;">
         <span class="holo-dot" aria-hidden="true"></span>
         <span class="holo-label">ORBIT</span>
       </button>
-      <button type="button" class="holo-node" data-holo-action="nord" style="--hx:56%;--hy:72%;">
+      <button type="button" class="holo-node" data-holo-action="nord" style="--hx:58%;--hy:70%;">
         <span class="holo-dot" aria-hidden="true"></span>
         <span class="holo-label">NORD</span>
       </button>
-      <button type="button" class="holo-node" data-holo-action="zoom-citta" style="--hx:22%;--hy:68%;">
+      <button type="button" class="holo-node" data-holo-action="zoom-citta" style="--hx:20%;--hy:66%;">
         <span class="holo-dot" aria-hidden="true"></span>
         <span class="holo-label">ZOOM CITTÀ</span>
       </button>
-      <button type="button" class="holo-node" data-holo-action="analizza" style="--hx:78%;--hy:68%;">
+      <button type="button" class="holo-node" data-holo-action="analizza" style="--hx:80%;--hy:66%;">
         <span class="holo-dot" aria-hidden="true"></span>
         <span class="holo-label">ANALIZZA</span>
       </button>
     </div>
-    <div id="statsStrip" class="stats-strip" aria-live="polite">
-      <span id="statDay" class="stat mono">DAY —</span>
+
+    <!-- Hidden stats kept for JS updateStatsStrip compatibility -->
+    <div id="statsStrip" class="stats-strip stats-strip--sr" aria-hidden="true">
       <span id="statTops" class="stat">Tops —</span>
       <span id="statErrors" class="stat">Errors —</span>
-      <span id="statCoverage" class="stat">Coverage —</span>
       <span id="statSecrets" class="stat">API —</span>
       <span id="statUpdated" class="stat muted mono">Updated —</span>
     </div>
 
-    <main class="stage">
+    <main class="stage stage--holo">
       <section class="viewport" id="viewport">
-        <div class="overlay-hud">
-          <div class="legend" id="moduleLegend">Loading…</div>
+        <div class="overlay-hud overlay-hud--minimal">
+          <div class="legend" id="moduleLegend"></div>
           <div class="legend mono" id="coverageMini"></div>
         </div>
         <div id="mapChrome" class="map-chrome" hidden>
           <form id="mapSearchForm" class="map-search" autocomplete="off">
-            <input id="mapSearchInput" type="search" placeholder="Search country, city, place…" enterkeyhint="search" />
+            <input id="mapSearchInput" type="search" placeholder="Search place…" enterkeyhint="search" />
             <button type="submit" class="pill-btn primary">Go</button>
           </form>
           <div class="map-tools">
@@ -97,7 +107,7 @@
           </div>
           <div id="mapFilterChips" class="filter-chips" aria-label="Filtri live tops"></div>
           <div id="coverageScrub" class="coverage-scrub" hidden>
-            <label for="coverageScrubRange">Coverage focus</label>
+            <label for="coverageScrubRange">Coverage</label>
             <input id="coverageScrubRange" type="range" min="0" max="0" value="0" />
             <span id="coverageScrubLabel" class="mono muted">—</span>
           </div>
@@ -118,15 +128,15 @@
           </div>
           <div id="chatPromptChips" class="prompt-chips" aria-label="Suggested prompts"></div>
           <div class="messages" id="messageList"></div>
-          <div class="composer">
+          <div class="composer composer--legacy" hidden>
             <button id="chatMic" class="icon-btn mic" title="Dictate">MIC</button>
-            <input id="chatInput" type="text" placeholder="Ask about tops, sources, memory…" autocomplete="off" />
-            <button id="sendChat" class="pill-btn primary">Send</button>
+            <input id="chatInputLegacy" type="text" disabled tabindex="-1" aria-hidden="true" />
+            <button id="sendChatLegacy" class="pill-btn primary" type="button" tabindex="-1">Send</button>
           </div>
         </div>
       </section>
 
-      <aside class="side" id="sidePanel">
+      <aside class="side side--holo" id="sidePanel">
         <div class="side-head">
           <h2 id="sideTitle">Ops</h2>
           <div id="sideTools" class="side-tools"></div>
@@ -135,8 +145,20 @@
       </aside>
     </main>
 
-    <footer class="footer">
-      <span id="footerLeft">Verification threshold raised · mechanical first · keys 1–4 switch modules</span>
+    <!-- Bottom capsule matching reference photo -->
+    <div class="analizza-bar" id="analizzaBar">
+      <input id="chatInput" type="text" placeholder="Analizza…" autocomplete="off" />
+      <div class="analizza-actions">
+        <button type="button" id="globalMic" class="analizza-mic" title="Voce">
+          <span class="mic-glyph" aria-hidden="true"></span>
+          <span>MIC</span>
+        </button>
+        <button type="button" id="sendChat" class="analizza-send" title="Invia">◎</button>
+      </div>
+    </div>
+
+    <footer class="footer footer--holo">
+      <span id="footerLeft" class="sr-only">Ops commerce dashboard</span>
       <span id="footerRight" class="mono"></span>
     </footer>
     <div id="toastHost" class="toast-host" aria-live="polite"></div>
@@ -150,6 +172,6 @@
     }
   }
   </script>
-  <script type="module" src="/js/app.js?v=holo-touch-1"></script>
+  <script type="module" src="/js/app.js?v=holo-home-4k"></script>
 </body>
 </html>

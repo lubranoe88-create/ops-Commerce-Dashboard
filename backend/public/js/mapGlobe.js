@@ -665,6 +665,48 @@ function stopOrbitDrift() {
   orbitTick = null;
 }
 
+/**
+ * Scale Cesium's drawing buffer toward 4K (3840×2160) pixel density.
+ * Caps at device limits / WebGL MAX_VIEWPORT_DIMS to avoid context loss.
+ */
+export function applyFourKResolution(v) {
+  if (!v?.scene) return { width: 0, height: 0, scale: 1 };
+  const canvas = v.scene.canvas;
+  const cssW = Math.max(1, canvas.clientWidth || v.container?.clientWidth || 1);
+  const cssH = Math.max(1, canvas.clientHeight || v.container?.clientHeight || 1);
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const TARGET_W = 3840;
+  const TARGET_H = 2160;
+  // Scale so CSS×scale×dpr approaches 4K on the longer axis
+  let scale = Math.max(TARGET_W / cssW, TARGET_H / cssH) / dpr;
+  scale = Math.min(Math.max(scale, 1), 3); // never below 1×, cap 3× for GPU safety
+  // Respect WebGL max viewport if available
+  try {
+    const gl = v.scene.context?._gl || v.scene.context?._webgl2Context;
+    const maxDim = gl?.getParameter?.(gl.MAX_VIEWPORT_DIMS)?.[0];
+    if (maxDim) {
+      const maxScale = maxDim / (Math.max(cssW, cssH) * dpr);
+      scale = Math.min(scale, Math.max(1, maxScale));
+    }
+  } catch {
+    /* ignore */
+  }
+  v.resolutionScale = scale;
+  v.useBrowserRecommendedResolution = false;
+  try {
+    v.resize();
+  } catch {
+    /* ignore */
+  }
+  const outW = Math.round(cssW * dpr * scale);
+  const outH = Math.round(cssH * dpr * scale);
+  canvas.dataset.renderWidth = String(outW);
+  canvas.dataset.renderHeight = String(outH);
+  canvas.dataset.resolutionScale = String(scale.toFixed(3));
+  console.info(`[globe] render buffer ~${outW}×${outH} (scale=${scale.toFixed(2)}, dpr=${dpr})`);
+  return { width: outW, height: outH, scale, dpr };
+}
+
 export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   onLodCallback = onLod || null;
   onSelectCallback = onSelect || null;
@@ -687,16 +729,24 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
     timeline: false,
     baseLayerPicker: false,
     geocoder: false,
-    homeButton: true,
+    homeButton: false,
     sceneModePicker: false,
     navigationHelpButton: false,
     fullscreenButton: false,
-    infoBox: true,
-    selectionIndicator: true,
+    infoBox: false,
+    selectionIndicator: false,
     shouldAnimate: true,
     requestRenderMode: false,
     orderIndependentTranslucency: true,
-    contextOptions: { webgl: { alpha: false } },
+    // Drive framebuffer toward 4K-class pixel density
+    useBrowserRecommendedResolution: false,
+    contextOptions: {
+      webgl: {
+        alpha: false,
+        antialias: true,
+        powerPreference: "high-performance",
+      },
+    },
   };
   if ("baseLayer" in (Cesium.Viewer.defaultOptions || {}) || Cesium.VERSION) {
     viewerOpts.baseLayer = false;
@@ -716,18 +766,30 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   }
   viewer.scene.rethrowRenderErrors = false;
 
+  // Target ≥ 3840×2160 framebuffer when the viewport allows (4K-class output).
+  applyFourKResolution(viewer);
+
   // Live render loop + sun motion (avoids "frozen still" look)
   viewer.clock.shouldAnimate = true;
   viewer.clock.multiplier = 1;
   viewer.useDefaultRenderLoop = true;
   viewer.scene.requestRenderMode = false;
-  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#05080d");
-  viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#05080d");
+  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#00050a");
+  viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#00050a");
   viewer.scene.globe.enableLighting = true;
-  viewer.scene.globe.atmosphereLightIntensity = 5.0;
-  viewer.scene.globe.atmosphereBrightnessShift = -0.12;
+  viewer.scene.globe.atmosphereLightIntensity = 12.0;
+  viewer.scene.globe.atmosphereBrightnessShift = 0.05;
+  viewer.scene.globe.atmosphereHueShift = -0.02;
   viewer.scene.fog.enabled = true;
-  viewer.scene.fog.density = 8.0e-5;
+  viewer.scene.fog.density = 4.0e-5;
+  // Sharper imagery / terrain LOD (lower SSE = higher quality)
+  viewer.scene.globe.maximumScreenSpaceError = 1.0;
+  if (viewer.scene.globe.tileCacheSize != null) viewer.scene.globe.tileCacheSize = 2000;
+  if (viewer.scene.postProcessStages?.fxaa) {
+    viewer.scene.postProcessStages.fxaa.enabled = true;
+  }
+  viewer.shadows = false;
+  viewer.scene.highDynamicRange = true;
 
   const ctrl = viewer.scene.screenSpaceCameraController;
   ctrl.minimumZoomDistance = 120;
@@ -775,15 +837,21 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   setOverlayByLod(viewer, initial);
   onLodCallback?.(initial, 14_000_000);
 
-  viewer.homeButton.viewModel.command.beforeExecute.addEventListener((e) => {
-    e.cancel = true;
-    userInteracting = true;
-    viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(12.5, 42.0, 12_000_000),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
-      duration: 1.6,
+  if (viewer.homeButton?.viewModel?.command) {
+    viewer.homeButton.viewModel.command.beforeExecute.addEventListener((e) => {
+      e.cancel = true;
+      userInteracting = true;
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(12.5, 42.0, 12_000_000),
+        orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
+        duration: 1.6,
+      });
+      scheduleIdleResume();
     });
-    scheduleIdleResume();
+  }
+
+  window.addEventListener("resize", () => {
+    if (viewer && !viewer.isDestroyed?.()) applyFourKResolution(viewer);
   });
 
   viewer.canvas.style.cursor = "grab";

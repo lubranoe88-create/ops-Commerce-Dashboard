@@ -9,7 +9,7 @@ import {
   mountMapGlobe,
   resetNorth,
   searchPlace,
-} from "./mapGlobe.js?v=holo-touch-1";
+} from "./mapGlobe.js?v=holo-home-4k";
 
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
@@ -97,9 +97,22 @@ function healthClass(status) {
 
 function setHealth(health) {
   const el = $("healthBadge");
-  el.className = `health ${healthClass(health.status)}`;
-  el.textContent = `HEALTH ${String(health.status || "—").toUpperCase()}`;
-  $("footerRight").textContent = `errs ${health.openErrors ?? 0} · thr ${(health.verificationThreshold ?? 0.72) * 100 | 0}% · cov ${Math.round((health.coverageAvg ?? 0) * 100)}%`;
+  if (el) {
+    el.className = `health ${healthClass(health.status)}`;
+    el.textContent = `HEALTH ${String(health.status || "—").toUpperCase()}`;
+  }
+  const cov = $("statCoverage");
+  if (cov) cov.textContent = `COVERAGE ${Math.round((health.coverageAvg ?? 0) * 100)}%`;
+  if ($("footerRight")) {
+    $("footerRight").textContent = `errs ${health.openErrors ?? 0} · thr ${((health.verificationThreshold ?? 0.72) * 100) | 0}%`;
+  }
+}
+
+function tickUtcClock() {
+  const el = $("utcClock");
+  if (!el) return;
+  const now = new Date();
+  el.textContent = `${now.toISOString().slice(11, 19)} UTC`;
 }
 
 function renderCoverageMini(coverage) {
@@ -166,7 +179,9 @@ function initThree(container, { autoRotate = true, minDistance = 2.4, maxDistanc
   const camera = new THREE.PerspectiveCamera(42, w / Math.max(h, 1), 0.1, 200);
   camera.position.set(0, 1.4, 5.6);
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  // Prefer near-4K backing store for Three.js modules (pipeline/memory/map fallback)
+  const dprCap = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
+  renderer.setPixelRatio(dprCap);
   renderer.setSize(w, h, false);
   renderer.setClearColor(0x05080d, 1);
   container.appendChild(renderer.domElement);
@@ -915,10 +930,10 @@ function updateStatsStrip(snap) {
   const health = snap?.health || {};
   const errors = (snap?.errors || []).filter((e) => e.status === "open");
   const cov = Math.round((health.coverageAvg ?? 0) * 100);
-  if ($("statDay")) $("statDay").innerHTML = `DAY <strong>${escapeHtml(snap?.day_key || "—")}</strong>`;
+  if ($("statDay")) $("statDay").textContent = `DAY ${snap?.day_key || "—"}`;
   if ($("statTops")) $("statTops").innerHTML = `Tops <strong>${(snap?.tops || []).length}</strong>`;
   if ($("statErrors")) $("statErrors").innerHTML = `Errors <strong>${errors.length}</strong>`;
-  if ($("statCoverage")) $("statCoverage").innerHTML = `Coverage <strong>${cov}%</strong>`;
+  if ($("statCoverage")) $("statCoverage").textContent = `COVERAGE ${cov}%`;
   if ($("statUpdated")) {
     const ts = state.lastUpdated ? state.lastUpdated.toLocaleTimeString() : "—";
     $("statUpdated").textContent = `Updated ${ts}`;
@@ -1412,15 +1427,21 @@ function sideForModule(mod, snap) {
       el.dataset.filter = `${t.title || ""} ${t.region || ""} ${t.source || ""}`.toLowerCase();
       if (state.focusedTopId === t.id) el.classList.add("is-focused");
       el.innerHTML = `
-        <div class="row"><strong class="top-fly">${escapeHtml(t.title)}</strong><span class="mono">${Math.round((t.score || 0) * 100)}%</span></div>
-        <div class="muted">${escapeHtml(t.region || "")} · ${escapeHtml(t.source || "")}</div>
-        <input type="text" placeholder="Correction note (optional)" data-note="${t.id}" />
-        <textarea class="note-local" rows="2" placeholder="Nota locale (solo browser)" data-local-note="${t.id}"></textarea>
-        <div class="actions">
-          <button class="pill-btn" data-fly="${t.id}">Fly</button>
-          <button class="pill-btn" data-compare="${t.id}">Confronta</button>
-          <button class="pill-btn" data-correct="1" data-id="${t.id}">Correct</button>
-          <button class="pill-btn" data-correct="0" data-id="${t.id}">Incorrect</button>
+        <div class="row top-holo-row">
+          <span class="top-mark" aria-hidden="true"></span>
+          <strong class="top-fly">${escapeHtml(t.title)}</strong>
+          <span class="mono top-pct">${Math.round((t.score || 0) * 100)}%</span>
+        </div>
+        <div class="top-holo-detail muted">${escapeHtml(t.region || "")} · ${escapeHtml(t.source || "")}</div>
+        <div class="top-holo-tools">
+          <input type="text" placeholder="Nota correzione" data-note="${t.id}" />
+          <textarea class="note-local" rows="1" placeholder="Nota locale" data-local-note="${t.id}"></textarea>
+          <div class="actions">
+            <button class="pill-btn" data-fly="${t.id}">Fly</button>
+            <button class="pill-btn" data-compare="${t.id}">Confronta</button>
+            <button class="pill-btn" data-correct="1" data-id="${t.id}">✓</button>
+            <button class="pill-btn" data-correct="0" data-id="${t.id}">✗</button>
+          </div>
         </div>`;
       el.querySelector(".top-fly")?.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -2059,10 +2080,15 @@ function wireUi() {
     // Fallback: free-form → chat
     runHoloAction("chat", { fromVoice: true }).then(() => sendChat(text));
   });
-  setupMic($("chatMic"), (text) => {
-    $("chatInput").value = text;
-    sendChat(text);
-  });
+  const chatMic = $("chatMic");
+  if (chatMic) {
+    setupMic(chatMic, (text) => {
+      $("chatInput").value = text;
+      sendChat(text);
+    });
+  }
+  tickUtcClock();
+  setInterval(tickUtcClock, 1000);
 }
 
 async function boot() {
