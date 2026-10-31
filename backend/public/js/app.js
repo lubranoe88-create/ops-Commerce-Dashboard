@@ -62,6 +62,7 @@ const state = {
   pulse: [],
   mapEngine: "cesium", // progressive 5-level LOD satellite zoom
   focusedTopId: null,
+  dragTopId: null,
   compareIds: [],
   mapChipFilters: { region: null, source: null, minScore: null },
   coverageFocusIdx: 0,
@@ -1915,8 +1916,12 @@ function wireUi() {
     }
   });
   $("mapPickAnalyze")?.addEventListener("click", () => {
-    const title = state.lastMapPick?.top?.title || state.lastMapPick?.title;
-    if (title) openChatAnalyze(title);
+    const title =
+      state.lastMapPick?.top?.title ||
+      state.lastMapPick?.title ||
+      $("mapPickTitle")?.textContent ||
+      "";
+    if (title && title !== "—") openChatAnalyze(title);
   });
   $("mapPickCompare")?.addEventListener("click", () => {
     if (state.lastMapPick?.top) pinCompare(state.lastMapPick.top);
