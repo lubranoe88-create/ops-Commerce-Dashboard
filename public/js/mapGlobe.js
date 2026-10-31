@@ -1,22 +1,22 @@
 /**
- * Interactive tactical globe (Cesium): 5-level LOD, night-holo styling,
- * drag, pick + hover, Nominatim search, compass/reset-north.
- * Orbit views use NASA GIBS VIIRS Black Marble (U.S. Government work, public domain).
- * Closer LOD fades in Copernicus Sentinel-2 cloudless via EOX (CC BY 4.0).
- * No unlicensed tile endpoints.
+ * Interactive tactical globe (Cesium): military-style grayscale satellite,
+ * single lightweight imagery layer, country → road zoom, drag/pick/search.
+ *
+ * Imagery: Esri World Imagery (satellite) displayed desaturated — no night
+ * marble, no color grading stacks. Ellipsoid only (no world terrain / ion).
+ * 5D/OSM buildings require Cesium ion — intentionally not loaded (keep fast).
  */
 
 const CESIUM_VER = "1.125.0";
 const CESIUM_BASE = `https://cdn.jsdelivr.net/npm/cesium@${CESIUM_VER}/Build/Cesium`;
 const NOMINATIM = "https://nominatim.openstreetmap.org";
-const BLACK_MARBLE_URL =
-  "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png";
-/** Copernicus Sentinel-2 cloudless, served by EOX under CC BY 4.0. */
-const SENTINEL_CLOUDLESS_URL =
-  "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg";
-const EOX_TERRAIN_URL =
-  "https://tiles.maps.eox.at/wmts/1.0.0/terrain-light_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg";
-/** Home framing matching the reference photo: EMEA night hemisphere, crown under the header. */
+/**
+ * Esri World Imagery — raw satellite tiles to ~L19 (road / block).
+ * Credit: Esri, Maxar, Earthstar Geographics, and the GIS User Community.
+ */
+const ESRI_WORLD_IMAGERY_URL =
+  "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+/** Home framing: EMEA hemisphere. */
 export const HOME_VIEW = { lon: 30, lat: 24, height: 12_600_000 };
 /** User zoom range — street to full-globe. (Old "fixed orbit" lock blocked all zoom.) */
 const USER_MIN_ZOOM = 400;
@@ -84,12 +84,13 @@ export function lodFromHeight(meters) {
   return { level: 5, key: "detail", label: "L5 STREET DETAIL", detail: "max tile LOD" };
 }
 
-function applyDarkOpsImagery(layer) {
-  // Night-holo look matching reference photo (city lights / deep navy)
-  layer.brightness = 0.72;
-  layer.contrast = 1.35;
-  layer.gamma = 0.92;
-  layer.saturation = 0.55;
+function applyMilitaryGrayscale(layer) {
+  // Raw satellite → tactical grayscale. No hue shifts / gold city-light grade.
+  layer.saturation = 0;
+  layer.brightness = 1.0;
+  layer.contrast = 1.05;
+  layer.gamma = 1.0;
+  layer.hue = 0;
 }
 
 export function detectLowGpu() {
@@ -113,76 +114,22 @@ export function detectLowGpu() {
 
 function buildImagery(Cesium, v) {
   v.imageryLayers.removeAll();
-  // Day/detail base: Copernicus Sentinel-2 cloudless (CC BY 4.0, EOX).
+  // Single satellite layer only — faster than stacked night/relief overlays.
   const sat = v.imageryLayers.addImageryProvider(
     new Cesium.UrlTemplateImageryProvider({
-      url: SENTINEL_CLOUDLESS_URL,
-      maximumLevel: 13,
-      credit: "Copernicus Sentinel-2 cloudless © EOX IT Services GmbH (CC BY 4.0)",
+      url: ESRI_WORLD_IMAGERY_URL,
+      maximumLevel: 19,
+      credit: "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
     }),
   );
-  applyDarkOpsImagery(sat);
+  applyMilitaryGrayscale(sat);
   sat._opsRole = "sat";
-  sat._opsLicense = "CC BY 4.0";
-
-  // Night hemisphere: NASA VIIRS Black Marble (public domain).
-  const night = v.imageryLayers.addImageryProvider(
-    new Cesium.UrlTemplateImageryProvider({
-      url: BLACK_MARBLE_URL,
-      maximumLevel: 8,
-      credit: "NASA Earth Observatory · VIIRS Black Marble (public domain)",
-    }),
-  );
-  night._opsRole = "night";
-  night._opsLicense = "public-domain";
-  // Shift Black Marble's violet land toward navy and its city lights toward warm gold
-  night.brightness = 0.95;
-  night.contrast = 1.3;
-  night.gamma = 1.1;
-  night.saturation = 0.85;
-  night.hue = 0.4;
-
-  // Licensed relief only at street zoom (still EOX / Copernicus-derived, not a scraped basemap).
-  const ref = v.imageryLayers.addImageryProvider(
-    new Cesium.UrlTemplateImageryProvider({
-      url: EOX_TERRAIN_URL,
-      maximumLevel: 8,
-      credit: "EOX terrain-light © EOX IT Services GmbH",
-    }),
-  );
-  ref.alpha = 0;
-  ref._opsRole = "ref";
-  ref._opsLicense = "EOX";
-
-  return { sat, night, ref };
+  sat._opsLicense = "Esri World Imagery";
+  return { sat };
 }
 
-function setOverlayByLod(v, lod) {
-  const layers = v.imageryLayers;
-  for (let i = 0; i < layers.length; i++) {
-    const layer = layers.get(i);
-    const role = layer._opsRole;
-    if (role === "night") {
-      layer.alpha = lod.level <= 2 ? 1 : lod.level === 3 ? 0.35 : 0;
-      layer.show = layer.alpha > 0;
-    }
-    if (role === "ref") {
-      // Faint licensed relief only once the camera is down at streets.
-      layer.alpha = lod.level >= 4 ? 0.28 : 0;
-      layer.show = layer.alpha > 0;
-    }
-    if (role === "roads") {
-      if (lod.level >= 5) layer.alpha = 0.85;
-      else if (lod.level === 4) layer.alpha = 0.7;
-      else if (lod.level === 3) layer.alpha = 0.25;
-      else layer.alpha = 0;
-    }
-    if (role === "osm") {
-      if (lod.level >= 5) layer.alpha = 0.35;
-      else if (lod.level === 4) layer.alpha = 0.18;
-      else layer.alpha = 0;
-    }
-  }
+function setOverlayByLod(_v, _lod) {
+  // Single grayscale satellite layer — nothing to cross-fade by LOD.
 }
 
 const PIN_GOLD = "#ffb347";
@@ -1057,9 +1004,9 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   // Soft blue rim on the limb (photo) without washing the night side
   viewer.scene.globe.showGroundAtmosphere = true;
   if (viewer.scene.atmosphere) {
-    viewer.scene.atmosphere.lightIntensity = 4.5;
-    viewer.scene.atmosphere.brightnessShift = -0.2;
-    viewer.scene.atmosphere.saturationShift = -0.15;
+    viewer.scene.atmosphere.lightIntensity = 3.2;
+    viewer.scene.atmosphere.brightnessShift = -0.25;
+    viewer.scene.atmosphere.saturationShift = -0.45;
     viewer.scene.atmosphere.hueShift = 0.0;
   }
   if (viewer.scene.skyBox) viewer.scene.skyBox.show = false;
@@ -1067,13 +1014,13 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   if (viewer.scene.moon) viewer.scene.moon.show = false;
   if (viewer.scene.skyAtmosphere) {
     viewer.scene.skyAtmosphere.show = true;
-    viewer.scene.skyAtmosphere.brightnessShift = -0.12;
-    viewer.scene.skyAtmosphere.saturationShift = 0.25;
-    viewer.scene.skyAtmosphere.hueShift = 0.02;
+    viewer.scene.skyAtmosphere.brightnessShift = -0.2;
+    viewer.scene.skyAtmosphere.saturationShift = -0.35;
+    viewer.scene.skyAtmosphere.hueShift = 0.0;
   }
-  viewer.scene.globe.atmosphereLightIntensity = 3.0;
-  viewer.scene.globe.atmosphereBrightnessShift = -0.32;
-  viewer.scene.globe.atmosphereSaturationShift = -0.1;
+  viewer.scene.globe.atmosphereLightIntensity = 2.4;
+  viewer.scene.globe.atmosphereBrightnessShift = -0.28;
+  viewer.scene.globe.atmosphereSaturationShift = -0.4;
   viewer.scene.globe.atmosphereHueShift = 0.0;
   viewer.scene.fog.enabled = true;
   viewer.scene.fog.density = 3.2e-5;
@@ -1084,9 +1031,10 @@ export async function mountMapGlobe(container, { tops, onLod, onSelect } = {}) {
   } catch {
     /* older Cesium */
   }
-  // Sharper imagery (lower SSE). FXAA stays off; MSAA handles edges.
-  viewer.scene.globe.maximumScreenSpaceError = 1.0;
-  if (viewer.scene.globe.tileCacheSize != null) viewer.scene.globe.tileCacheSize = 1000;
+  // Slightly higher SSE = fewer tiles, faster load; still readable to road level.
+  viewer.scene.globe.maximumScreenSpaceError = 1.75;
+  if (viewer.scene.globe.tileCacheSize != null) viewer.scene.globe.tileCacheSize = 600;
+  // No Cesium ion 3D Tiles / OSM Buildings — keeps GPU light (see file header).
   if (viewer.scene.postProcessStages?.fxaa) {
     viewer.scene.postProcessStages.fxaa.enabled = false;
   }
