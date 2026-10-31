@@ -908,13 +908,17 @@ body.tools-open #mapChrome.map-chrome { bottom: calc(17vh + 70px); }
 .holo-voice-plancia--overlay {
   position: absolute;
   inset: 0;
-  z-index: 12;
+  /* Above globe (1) / map chrome; nodes stay clickable over the scene */
+  z-index: 36;
   height: auto;
   border: 0;
   background: transparent;
   overflow: visible;
   /* Must NOT intercept globe drags (esp. iOS/WebKit); only the nodes are hit targets */
   pointer-events: none !important;
+}
+body:not([data-module="map"]) .holo-voice-plancia--overlay {
+  z-index: 42;
 }
 .holo-node {
   position: absolute;
@@ -1317,8 +1321,24 @@ body[data-module="map"] .side--holo .side-head { display: none; }
   border: 1px solid var(--photo-line);
 }
 /* Light points stay reachable above the chat panel so touch users can always leave chat */
-body[data-module="chat"] .holo-voice-plancia--overlay { z-index: 22; opacity: 0.6; }
+body[data-module="chat"] .holo-voice-plancia--overlay { z-index: 42; opacity: 0.85; }
 body[data-module="chat"] .analizza-bar { z-index: 50; }
+body[data-module="pipeline"] #glCanvas,
+body[data-module="memory"] #glCanvas {
+  pointer-events: none !important;
+}
+body[data-module="pipeline"] #glCanvas canvas,
+body[data-module="memory"] #glCanvas canvas {
+  pointer-events: none !important;
+}
+.bubble.system {
+  align-self: stretch;
+  background: rgba(8, 18, 28, 0.9);
+  border: 1px solid rgba(122, 215, 255, 0.28);
+  color: rgba(220, 230, 240, 0.9);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
 #glCanvas.cesium-ops,
 #glCanvas .cesium-viewer,
 #glCanvas .cesium-widget,

@@ -17,7 +17,7 @@ import {
   setOrbitEnabled,
   setPulseTop,
   updateMapGlobeTops,
-} from "./mapGlobe.js?v=holo-pack-6";
+} from "./mapGlobe.js?v=holo-pack-7";
 
 const BUILD_ID = "inventory-6";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
@@ -1328,7 +1328,9 @@ function syncHoloActive(actionOrModule) {
   });
 }
 
-function speak(text) {
+/** TTS is opt-in only. System/status updates never speak — they go to chat/toast. */
+function speak(text, { force = false } = {}) {
+  if (!force || document.documentElement.dataset.tts !== "1") return;
   const synth = window.speechSynthesis;
   const line = String(text || "").trim();
   if (!synth || !line) return;
@@ -1342,6 +1344,28 @@ function speak(text) {
   } catch {
     /* TTS unavailable */
   }
+}
+
+function silenceVoice() {
+  try {
+    window.speechSynthesis?.cancel?.();
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Status / onboarding / command acks → chat panel (and toast), never TTS. */
+function postChatUpdate(text, kind = "ok") {
+  const line = String(text || "").trim();
+  if (!line) return;
+  showToast(line, kind);
+  const msgs = $("messageList");
+  if (!msgs) return;
+  const d = document.createElement("div");
+  d.className = "bubble system";
+  d.textContent = line;
+  msgs.appendChild(d);
+  msgs.scrollTop = msgs.scrollHeight;
 }
 
 function playHoloTick() {
@@ -1408,6 +1432,7 @@ function applyAccentTheme(name) {
 }
 
 function maybeVoiceOnboarding() {
+  silenceVoice();
   try {
     if (localStorage.getItem(ONBOARD_KEY)) return;
     localStorage.setItem(ONBOARD_KEY, "1");
@@ -1415,6 +1440,7 @@ function maybeVoiceOnboarding() {
     return;
   }
   document.body.dataset.voiceOnboard = "shown";
+  // Entry: never speak. Guidance only in chat + toast.
   const lines = [
     "Benvenuto nella plancia. Di’ MAPPA, PIPELINE, MEMORY o CHAT.",
     "Di’ ORBIT, NORD o ZOOM CITTÀ per il globo. Di’ ANALIZZA per la chat.",
@@ -1423,12 +1449,11 @@ function maybeVoiceOnboarding() {
   let i = 0;
   const step = () => {
     if (i >= lines.length) return;
-    showToast(lines[i], "ok");
-    speak(lines[i]);
+    postChatUpdate(lines[i], "ok");
     i += 1;
-    setTimeout(step, 3200);
+    setTimeout(step, 900);
   };
-  setTimeout(step, 900);
+  setTimeout(step, 400);
 }
 
 function markUserInput() {
@@ -1508,8 +1533,9 @@ function runHoloAction(action, { fromVoice = false } = {}) {
   const src = fromVoice ? "voce" : "tocco";
   playHoloTick();
   if (fromVoice) {
+    silenceVoice();
     const label = document.querySelector(`.holo-node[data-holo-action="${action}"] .holo-label`);
-    speak(label?.textContent || String(action).replace(/-/g, " "));
+    postChatUpdate(`${(label?.textContent || String(action)).trim()} · ${src}`);
   }
 
   switch (action) {
@@ -2059,7 +2085,8 @@ function setExclusivePanels(mod) {
     if (gl) {
       gl.hidden = false;
       gl.classList.remove("is-suppressed");
-      gl.style.pointerEvents = "";
+      // Map: globe receives drag. Pipeline/memory: WebGL host stays but left holo UI wins clicks.
+      gl.style.pointerEvents = isMap ? "" : "none";
     }
   }
 }
@@ -2344,9 +2371,8 @@ async function sendChat(text, { voice = false } = {}) {
     $("chatInput").value = "";
     await loadChat();
     if (voice) {
-      const replies = document.querySelectorAll("#messageList .bubble.assistant");
-      const last = replies[replies.length - 1];
-      if (last?.textContent) speak(last.textContent);
+      // Voice input → text reply in chat only (no TTS readback)
+      postChatUpdate("Risposta vocale ricevuta in chat", "ok");
     }
   } catch (err) {
     showToast(err.message || "Chat fallita", "bad");
@@ -2357,24 +2383,46 @@ function setupMic(button, onText) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
     button.title = "Speech recognition not supported in this browser";
+    button.disabled = true;
     return;
   }
+  if (button.dataset.micWired) return;
+  button.dataset.micWired = "1";
   const rec = new SR();
   rec.continuous = false;
   rec.interimResults = false;
   rec.lang = "it-IT";
-  rec.onresult = (ev) => {
-    const text = ev.results[0][0].transcript;
-    onText(text);
-  };
-  rec.onend = () => {
+  rec.maxAlternatives = 1;
+  const stopUi = () => {
     state.micLive = false;
     button.classList.remove("live");
     document.body.classList.remove("mic-live");
   };
+  rec.onresult = (ev) => {
+    const text = ev.results?.[0]?.[0]?.transcript || "";
+    stopUi();
+    if (text.trim()) {
+      postChatUpdate(`Ascoltato: ${text.trim()}`);
+      onText(text.trim());
+    }
+  };
+  rec.onerror = (ev) => {
+    stopUi();
+    const err = ev?.error || "mic";
+    if (err !== "aborted" && err !== "no-speech") {
+      postChatUpdate(`Microfono: ${err}`, "warn");
+    }
+  };
+  rec.onend = () => stopUi();
   button.addEventListener("click", () => {
+    silenceVoice();
     if (state.micLive) {
-      rec.stop();
+      try {
+        rec.stop();
+      } catch {
+        /* ignore */
+      }
+      stopUi();
       return;
     }
     state.micLive = true;
@@ -2382,10 +2430,25 @@ function setupMic(button, onText) {
     document.body.classList.add("mic-live");
     try {
       rec.start();
-    } catch {
-      state.micLive = false;
-      button.classList.remove("live");
-      document.body.classList.remove("mic-live");
+    } catch (err) {
+      stopUi();
+      // Restart once if already started
+      try {
+        rec.stop();
+      } catch {
+        /* ignore */
+      }
+      setTimeout(() => {
+        try {
+          state.micLive = true;
+          button.classList.add("live");
+          document.body.classList.add("mic-live");
+          rec.start();
+        } catch {
+          stopUi();
+          postChatUpdate("Microfono non disponibile in questo browser", "warn");
+        }
+      }, 120);
     }
   });
 }
@@ -2629,6 +2692,8 @@ function wireModuleZoom() {
 }
 
 async function boot() {
+  silenceVoice();
+  document.documentElement.dataset.tts = "0";
   // Auto low-GPU profile + accent restore
   try {
     if (detectLowGpu()) document.documentElement.dataset.lowGpu = "1";
