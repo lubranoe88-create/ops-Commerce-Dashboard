@@ -11,6 +11,7 @@ import {
 } from "../memory/aiStore.js";
 import { WRITE_ACTIONS, actionNeedsConfirm } from "./panelCatalog.js";
 import { isAiPaid } from "../middleware/aiPaidGate.js";
+import { reportFunctionStatus } from "./functionBoard.js";
 
 export function executeWriteAction(action, { confirmed = false } = {}) {
   if (!isAiPaid()) {
@@ -116,6 +117,16 @@ export function executeWriteAction(action, { confirmed = false } = {}) {
         type,
         clientAction: { type: "chat-send", text: payload.text || payload.message || "" },
       };
+    }
+    case "report-function": {
+      const result = reportFunctionStatus({
+        functionId: payload.functionId || payload.function_id || payload.id,
+        status: payload.status,
+        errorType: payload.errorType || payload.error_type || payload.code || "",
+        detail: payload.detail || payload.message || payload.error || "",
+        source: payload.source || "ai",
+      });
+      return { ok: true, type, ...result };
     }
     default: {
       const err = new Error(`Unhandled write action: ${type}`);

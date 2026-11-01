@@ -1582,7 +1582,7 @@ body[data-module="chat"] .analizza-bar { z-index: 50; }
   grid-column: 2;
   grid-row: 1;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -1732,6 +1732,121 @@ body[data-module="map"] #app.clear-globe-layout #glCanvas {
 }
 #app.page-rail-layout .footer--holo,
 #app.clear-globe-layout .footer--holo { display: none; }
+
+/* ---------- Quadro 2D funzioni (griglia affiancata, fondo plancia) ---------- */
+#app.page-rail-layout .function-board,
+#app.clear-globe-layout .function-board {
+  grid-column: 1 / -1;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(28vh, 260px);
+  min-height: 96px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid rgba(120, 200, 220, 0.22);
+  background: rgba(2, 8, 12, 0.94);
+  overflow: hidden;
+}
+.function-board.is-collapsed {
+  max-height: 44px;
+  min-height: 44px;
+}
+.function-board.is-collapsed .function-board-grid {
+  display: none;
+}
+.function-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.function-board-title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.function-board-title {
+  margin: 0;
+  font-family: "Sora", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(210, 235, 240, 0.92);
+}
+.function-board-summary[data-error-count]:not([data-error-count="0"]) {
+  color: #ff8f7a;
+}
+.function-board-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.function-board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 6px;
+  overflow: auto;
+  align-content: start;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 2px;
+}
+.fn-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 58px;
+  padding: 7px 8px;
+  border: 1px solid rgba(120, 180, 200, 0.18);
+  border-radius: 4px;
+  background: rgba(6, 14, 20, 0.88);
+}
+.fn-cell-name {
+  font-family: "Sora", sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(230, 240, 245, 0.95);
+  line-height: 1.2;
+}
+.fn-cell-status {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.fn-cell-detail,
+.fn-cell-error {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  line-height: 1.25;
+  color: rgba(170, 190, 200, 0.85);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.fn-cell--ok {
+  border-color: rgba(70, 190, 140, 0.45);
+  box-shadow: inset 3px 0 0 rgba(70, 190, 140, 0.85);
+}
+.fn-cell--ok .fn-cell-status { color: #6ddea8; }
+.fn-cell--error {
+  border-color: rgba(255, 110, 90, 0.55);
+  background: rgba(40, 10, 10, 0.55);
+  box-shadow: inset 3px 0 0 rgba(255, 100, 80, 0.95);
+}
+.fn-cell--error .fn-cell-status,
+.fn-cell--error .fn-cell-error { color: #ff9a88; }
+.fn-cell--unverified {
+  border-color: rgba(180, 160, 80, 0.35);
+  box-shadow: inset 3px 0 0 rgba(210, 180, 70, 0.7);
+}
+.fn-cell--unverified .fn-cell-status { color: #e0c56a; }
 
 /* Narrow: keep a compact LEFT rail (icons), never move toggles over the globe */
 @media (max-width: 900px) {

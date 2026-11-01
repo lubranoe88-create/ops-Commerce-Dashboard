@@ -320,7 +320,8 @@ export async function applyAiActions(actions, { runUi } = {}) {
       type === "note" ||
       type === "set-goals" ||
       type === "set-pref" ||
-      type === "chat-send"
+      type === "chat-send" ||
+      type === "report-function"
     ) {
       try {
         const res = await api("/api/ai/actions/execute", {
@@ -332,6 +333,11 @@ export async function applyAiActions(actions, { runUi } = {}) {
         });
         if (type === "chat-send" && res?.clientAction?.text && uiRunner) {
           await uiRunner("analizza");
+        }
+        if (type === "report-function") {
+          window.dispatchEvent(
+            new CustomEvent("ops:function-board-report", { detail: res }),
+          );
         }
       } catch (err) {
         console.warn("[ai] write action", type, err);

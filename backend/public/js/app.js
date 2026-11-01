@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=paid-ai-3";
+} from "./mapGlobe.js?v=fn-board-1";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,9 +33,14 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=paid-ai-3";
+} from "./aiAgentUi.js?v=fn-board-1";
+import {
+  noteAiFunctionReports,
+  startFunctionBoardPolling,
+  wireFunctionBoardUi,
+} from "./functionBoardUi.js?v=fn-board-1";
 
-const BUILD_ID = "paid-ai-3";
+const BUILD_ID = "fn-board-1";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2869,6 +2874,11 @@ async function initPaidAi() {
       await loadAiNewsPins();
       await syncClientMemoryToServer().catch(() => {});
       startProactivePolling(45000);
+      wireFunctionBoardUi();
+      startFunctionBoardPolling(20000);
+      window.addEventListener("ops:function-board-report", () => {
+        noteAiFunctionReports([{ type: "report-function" }]);
+      });
       if (shouldPromptBriefing(state.aiStatus)) openBriefingModal();
     }
   } catch (err) {

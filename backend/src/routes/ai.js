@@ -26,6 +26,11 @@ import {
   forceIdleNudgeForTest,
 } from "../services/proactive.js";
 import { browserUseStatus, runBrowserUse, resolveAllowOrigin } from "../services/browserUse.js";
+import {
+  buildFunctionBoard,
+  reportFunctionStatus,
+  FUNCTION_CATALOG,
+} from "../services/functionBoard.js";
 import { config } from "../config.js";
 
 export const aiRouter = Router();
@@ -225,6 +230,34 @@ aiRouter.get("/proactive/poll", requireAiPaid, (_req, res) => {
 aiRouter.post("/proactive/tts", requireAiPaid, (req, res) => {
   const on = Boolean(req.body?.enabled ?? req.body?.on);
   res.json(setProactiveTtsOptIn(on));
+});
+
+/** Live 2D function board — probes + AI/client overlays. */
+aiRouter.get("/function-board", requireAiPaid, async (_req, res) => {
+  try {
+    res.json(await buildFunctionBoard());
+  } catch (err) {
+    res.status(500).json({ error: err.message || "function-board failed" });
+  }
+});
+
+aiRouter.get("/function-board/catalog", requireAiPaid, (_req, res) => {
+  res.json({ catalog: FUNCTION_CATALOG });
+});
+
+aiRouter.post("/function-board/report", requireAiPaid, (req, res) => {
+  try {
+    const result = reportFunctionStatus({
+      functionId: req.body?.functionId || req.body?.function_id || req.body?.id,
+      status: req.body?.status,
+      errorType: req.body?.errorType || req.body?.error_type || req.body?.code || "",
+      detail: req.body?.detail || req.body?.message || req.body?.error || "",
+      source: req.body?.source || "client",
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "report failed" });
+  }
 });
 
 /**

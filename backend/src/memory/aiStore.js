@@ -103,6 +103,14 @@ export function ensureAiSchema(db = getDb()) {
     CREATE INDEX IF NOT EXISTS idx_world_news_fetched ON world_news(fetched_at DESC);
     CREATE INDEX IF NOT EXISTS idx_ai_usage_events_day ON ai_usage_events(day_key, id DESC);
     CREATE INDEX IF NOT EXISTS idx_ai_proactive_day ON ai_proactive_events(day_key, delivered, id);
+    CREATE TABLE IF NOT EXISTS ai_function_reports (
+      function_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'unverified',
+      error_type TEXT NOT NULL DEFAULT '',
+      detail TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT 'ai',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
   try {
     db.exec(`ALTER TABLE ai_suggestions ADD COLUMN action_json TEXT NOT NULL DEFAULT ''`);
@@ -430,6 +438,54 @@ function normalizeAction(action) {
   if (typeof action === "string") return [action];
   if (typeof action === "object" && action.type) return [action];
   return [];
+}
+
+export function upsertFunctionReport(
+  { functionId, status, errorType = "", detail = "", source = "ai" },
+  db = getDb(),
+) {
+  ensureAiSchema(db);
+  db.prepare(
+    `INSERT INTO ai_function_reports (function_id, status, error_type, detail, source, updated_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(function_id) DO UPDATE SET
+       status = excluded.status,
+       error_type = excluded.error_type,
+       detail = excluded.detail,
+       source = excluded.source,
+       updated_at = datetime('now')`,
+  ).run(
+    functionId,
+    status,
+    errorType || "",
+    detail || "",
+    source || "ai",
+  );
+}
+
+export function listFunctionReports(limit = 80, db = getDb()) {
+  ensureAiSchema(db);
+  return db
+    .prepare(
+      `SELECT function_id, status, error_type, detail, source, updated_at
+       FROM ai_function_reports
+       ORDER BY updated_at DESC
+       LIMIT ?`,
+    )
+    .all(limit)
+    .map((r) => ({
+      functionId: r.function_id,
+      status: r.status,
+      errorType: r.error_type,
+      detail: r.detail,
+      source: r.source,
+      updatedAt: r.updated_at,
+    }));
+}
+
+export function clearFunctionReport(functionId, db = getDb()) {
+  ensureAiSchema(db);
+  db.prepare(`DELETE FROM ai_function_reports WHERE function_id = ?`).run(functionId);
 }
 
 export { dayKeyInTz };

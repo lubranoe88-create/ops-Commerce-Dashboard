@@ -36,7 +36,10 @@ export const SYSTEM_CARD = `OPS Commerce Intel dashboard.
 Panels: MAPPA (globe), PIPELINE, MEMORY, CHAT, side rail.
 AI analyzes mechanical SQLite data only — never scrapes/collects.
 Tools: emit actions[] for zoom/fly/module switches and paid write tools; browser_use only as fallback.
-Budget: hard €/day OpenRouter cap — unused budget stays unused.`;
+Budget: hard €/day OpenRouter cap — unused budget stays unused.
+Function board: when you detect a broken capability, emit write action
+{"type":"report-function","functionId":"<id>","status":"error","errorType":"CODE","detail":"..."}.
+Use status ok to clear. Known ids include browser-use, openrouter-key, auth-2fa, proactive-mechanical, proactive-ai, auto-router, cross-thread-memory, chat-attachments, budget-openrouter, paid-ai-turn, mic-voice.`;
 
 /** Client-side UI actions (safe; no confirm). */
 export const UI_ACTIONS = [
@@ -79,6 +82,11 @@ export const WRITE_ACTIONS = {
   "set-goals": { confirm: false, paid: true, desc: "Update Q1–Q3 goals prefs" },
   "set-pref": { confirm: false, paid: true, desc: "Update user preference" },
   "accept-suggestion": { confirm: true, paid: true, desc: "Accept improvement suggestion" },
+  "report-function": {
+    confirm: false,
+    paid: true,
+    desc: "Segnala stato funzione sul quadro 2D (ok|error|unverified)",
+  },
 };
 
 export const ACTION_ALLOWLIST = new Set([
