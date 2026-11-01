@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=fn-board-4";
+} from "./mapGlobe.js?v=fn-board-5";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,14 +33,13 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=fn-board-4";
+} from "./aiAgentUi.js?v=fn-board-5";
 import {
   noteAiFunctionReports,
-  startFunctionBoardPolling,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=fn-board-4";
+} from "./functionBoardUi.js?v=fn-board-5";
 
-const BUILD_ID = "fn-board-4";
+const BUILD_ID = "fn-board-5";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -3099,38 +3098,100 @@ function wireGestureShortcuts() {
   root.dataset.gesturesWired = "1";
   let startX = 0;
   let startY = 0;
+  let startDist = 0;
   let tracking = false;
+  let blocked = false;
+
+  const touchDist = (a, b) => {
+    const dx = a.clientX - b.clientX;
+    const dy = a.clientY - b.clientY;
+    return Math.hypot(dx, dy);
+  };
+
+  const isGlobeGestureTarget = (el) =>
+    Boolean(
+      el?.closest?.(
+        "#glCanvas, .cesium-viewer, .cesium-widget, .viewport, #viewport, canvas.cesium-widget-canvas",
+      ),
+    );
+
   root.addEventListener(
     "touchstart",
     (e) => {
       if (e.touches.length === 3) {
         e.preventDefault();
+        tracking = false;
+        blocked = true;
         runHoloAction("refresh", { fromVoice: false });
         return;
       }
       // Side-panel pinch is module zoom, not a module swipe.
-      if (e.target.closest?.("#sidePanel")) return;
-      if (e.touches.length !== 2) return;
+      if (e.target.closest?.("#sidePanel")) {
+        tracking = false;
+        blocked = true;
+        return;
+      }
+      // Globe / map pinch-zoom must NEVER be reinterpreted as module navigation
+      // (that was opening pipeline/memory/chat while the user zoomed the mappamondo).
+      if (isGlobeGestureTarget(e.target) || state.module === "map") {
+        tracking = false;
+        blocked = true;
+        return;
+      }
+      if (e.touches.length !== 2) {
+        tracking = false;
+        return;
+      }
+      blocked = false;
       tracking = true;
       startX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       startY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      startDist = touchDist(e.touches[0], e.touches[1]);
     },
     { passive: false },
   );
   root.addEventListener(
+    "touchmove",
+    (e) => {
+      if (!tracking || blocked || e.touches.length !== 2) return;
+      // Pinch (distance change) ≠ horizontal module swipe.
+      const dist = touchDist(e.touches[0], e.touches[1]);
+      if (Math.abs(dist - startDist) > 28) {
+        tracking = false;
+        blocked = true;
+      }
+    },
+    { passive: true },
+  );
+  root.addEventListener(
     "touchend",
     (e) => {
+      if (blocked) {
+        if (e.touches.length === 0) blocked = false;
+        tracking = false;
+        return;
+      }
       if (!tracking) return;
       tracking = false;
       if (e.changedTouches.length < 1) return;
-      // Approximate end midpoint from remaining/changed touches
+      // Require a clear horizontal swipe using the gesture midpoint, not a single lifted finger
+      // vs an old midpoint (pinch-zoom leftovers used to fire false module switches).
+      if (e.touches.length > 0) return; // wait until both fingers are up
       const t = e.changedTouches[0];
       const dx = t.clientX - startX;
       const dy = t.clientY - startY;
-      if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy)) return;
+      if (Math.abs(dx) < 120 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
       const idx = MODULES.indexOf(state.module);
       const next = dx < 0 ? MODULES[(idx + 1) % MODULES.length] : MODULES[(idx - 1 + MODULES.length) % MODULES.length];
       runHoloAction(next, { fromVoice: false });
+    },
+    { passive: true },
+  );
+  root.addEventListener(
+    "touchcancel",
+    () => {
+      tracking = false;
+      blocked = false;
     },
     { passive: true },
   );
@@ -3198,9 +3259,8 @@ async function boot() {
   }
 
   wireUi();
-  // Mount quadro 2D immediately (do not wait for paid-AI status / briefing).
+  // Quadro 2D: wire panel controls only — opens from «Funzionamento plancia», not on home.
   wireFunctionBoardUi();
-  startFunctionBoardPolling(20000);
   window.addEventListener("ops:function-board-report", () => {
     noteAiFunctionReports([{ type: "report-function" }]);
   });

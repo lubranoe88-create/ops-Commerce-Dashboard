@@ -1,10 +1,12 @@
 /**
- * Quadro 2D funzioni plancia — griglia affiancata, poll live, alert AI.
+ * Quadro 2D funzioni plancia — pannello separato (non in home), poll live, fili dipendenze.
  */
 const POLL_MS = 20000;
 
 let pollTimer = null;
 let lastBoard = null;
+let panelOpen = false;
+let resizeWired = false;
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -24,7 +26,6 @@ async function api(path, opts = {}) {
 
 function statusLabel(status) {
   if (status === "ok") return "funzionante";
-  // Plain wording only — never ✗ / X / barrato (looks like deleted from list).
   if (status === "error") return "errore runtime";
   return "non verificata";
 }
@@ -34,6 +35,46 @@ function formatErrorLine(fn) {
   const detail = String(fn?.detail || "").trim();
   if (type && detail) return `${type} · ${detail}`;
   return type || detail || "errore runtime";
+}
+
+function wireTone(fromStatus, toStatus) {
+  if (fromStatus === "error" || toStatus === "error" || fromStatus === "unverified" || toStatus === "unverified") {
+    return "bad";
+  }
+  return "ok";
+}
+
+function drawWires(board) {
+  const svg = document.getElementById("functionBoardWires");
+  const host = document.getElementById("functionBoardGrid");
+  if (!svg || !host) return;
+  const edges = Array.isArray(board?.edges) ? board.edges : [];
+  const wrap = host.parentElement;
+  const wr = wrap?.getBoundingClientRect?.() || host.getBoundingClientRect();
+  svg.setAttribute("width", String(Math.max(1, Math.round(wr.width))));
+  svg.setAttribute("height", String(Math.max(1, Math.round(wr.height))));
+  svg.setAttribute("viewBox", `0 0 ${Math.max(1, wr.width)} ${Math.max(1, wr.height)}`);
+  svg.replaceChildren();
+
+  const byId = new Map((board?.functions || []).map((f) => [f.id, f]));
+  for (const edge of edges) {
+    const a = host.querySelector(`.fn-cell[data-fn-id="${CSS.escape(edge.from)}"]`);
+    const b = host.querySelector(`.fn-cell[data-fn-id="${CSS.escape(edge.to)}"]`);
+    if (!a || !b) continue;
+    const ar = a.getBoundingClientRect();
+    const br = b.getBoundingClientRect();
+    const x1 = ar.left + ar.width / 2 - wr.left;
+    const y1 = ar.top + ar.height / 2 - wr.top;
+    const x2 = br.left + br.width / 2 - wr.left;
+    const y2 = br.top + br.height / 2 - wr.top;
+    const midX = (x1 + x2) / 2;
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`);
+    const tone = wireTone(byId.get(edge.from)?.status, byId.get(edge.to)?.status);
+    path.setAttribute("class", `fn-wire fn-wire--${tone}`);
+    path.setAttribute("data-label", edge.label || "");
+    svg.appendChild(path);
+  }
 }
 
 function renderBoard(board) {
@@ -52,6 +93,7 @@ function renderBoard(board) {
     cell.className = `fn-cell fn-cell--${status}`;
     cell.dataset.fnId = fn.id;
     cell.dataset.status = status;
+    cell.dataset.group = fn.group || "other";
     cell.title = [fn.errorType, fn.detail].filter(Boolean).join(" · ");
 
     const head = document.createElement("div");
@@ -60,8 +102,6 @@ function renderBoard(board) {
     const mark = document.createElement("span");
     mark.className = `fn-cell-mark fn-cell-mark--${status}`;
     mark.setAttribute("aria-hidden", "true");
-    // Red filled dot / amber dot / green dot — never a cross glyph.
-    mark.textContent = "";
 
     const name = document.createElement("div");
     name.className = "fn-cell-name";
@@ -97,11 +137,16 @@ function renderBoard(board) {
   }
   if (stampEl) {
     const t = board?.updatedAt ? new Date(board.updatedAt) : new Date();
-    stampEl.textContent = t.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    stampEl.textContent = t.toLocaleTimeString("it-IT", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
   }
+
+  requestAnimationFrame(() => drawWires(board));
 }
 
-/** Client-side DOM probes refine UX cells. */
 async function pushClientDomProbes() {
   const probes = [
     { id: "ux-stats-strip", el: "#statsStrip, #statDay" },
@@ -133,7 +178,7 @@ async function pushClientDomProbes() {
         }),
       });
     } catch {
-      /* ignore individual probe failures */
+      /* ignore */
     }
   }
 }
@@ -142,6 +187,7 @@ function renderBoardError(message) {
   renderBoard({
     updatedAt: new Date().toISOString(),
     summary: { ok: 0, error: 1, unverified: 0, total: 1 },
+    edges: [],
     functions: [
       {
         id: "board-fetch",
@@ -171,15 +217,13 @@ export async function refreshFunctionBoard({ withDomProbes = false } = {}) {
 export function startFunctionBoardPolling(intervalMs = POLL_MS) {
   stopFunctionBoardPolling();
   const tick = async () => {
+    if (!panelOpen) return;
     try {
       await refreshFunctionBoard({ withDomProbes: false });
     } catch (err) {
       console.warn("[function-board]", err?.message || err);
     }
   };
-  tick();
-  // First tick with DOM probes shortly after paint
-  setTimeout(() => refreshFunctionBoard({ withDomProbes: true }).catch(() => {}), 2500);
   pollTimer = setInterval(tick, intervalMs);
   return () => stopFunctionBoardPolling();
 }
@@ -193,76 +237,80 @@ export function getLastFunctionBoard() {
   return lastBoard;
 }
 
-/** After AI actions run — if report-function present, refresh board immediately. */
 export function noteAiFunctionReports(actions) {
   const list = Array.isArray(actions) ? actions : [];
   const hit = list.some((a) => {
     const t = typeof a === "string" ? a : a?.type;
     return t === "report-function";
   });
-  if (hit) {
+  if (hit && panelOpen) {
     refreshFunctionBoard({ withDomProbes: false }).catch(() => {});
   }
 }
 
-function ensureFunctionBoardDom() {
-  let root = document.getElementById("functionBoard");
-  const dock = document.getElementById("bottomDock");
-  const analizza = document.getElementById("analizzaBar");
-  if (root && document.getElementById("functionBoardGrid")) {
-    // Keep board between tools and Analizza even after older HTML deploys.
-    if (dock && analizza && root.parentElement !== dock) {
-      dock.insertBefore(root, analizza);
-    } else if (dock && analizza && root.nextElementSibling !== analizza) {
-      dock.insertBefore(root, analizza);
-    }
-    root.classList.remove("is-collapsed");
-    return root;
-  }
+export function openFunctionBoardPanel() {
+  const panel = document.getElementById("functionBoardPanel");
+  if (!panel) return;
+  panel.hidden = false;
+  panel.setAttribute("aria-hidden", "false");
+  panel.classList.add("is-open");
+  document.body.dataset.functionBoard = "1";
+  panelOpen = true;
+  startFunctionBoardPolling(POLL_MS);
+  refreshFunctionBoard({ withDomProbes: true }).catch(() => {});
+}
 
-  root = document.createElement("section");
-  root.id = "functionBoard";
-  root.className = "function-board";
-  root.setAttribute("aria-label", "Quadro stato funzioni plancia");
-  root.innerHTML = `
-    <header class="function-board-head">
-      <div class="function-board-title-wrap">
-        <h2 class="function-board-title">Quadro funzioni</h2>
-        <span id="functionBoardSummary" class="function-board-summary mono muted">—</span>
-        <span id="functionBoardStamp" class="function-board-stamp mono muted"></span>
-      </div>
-      <div class="function-board-actions">
-        <button type="button" id="functionBoardRefresh" class="pill-btn" title="Aggiorna ora">Aggiorna</button>
-        <button type="button" id="functionBoardToggle" class="pill-btn" aria-expanded="true">Comprimi quadro</button>
-      </div>
-    </header>
-    <div id="functionBoardGrid" class="function-board-grid" role="list"></div>
-  `;
-  if (dock && analizza) dock.insertBefore(root, analizza);
-  else if (dock) dock.appendChild(root);
-  else document.querySelector(".page-shell")?.appendChild(root);
-  return root;
+export function closeFunctionBoardPanel() {
+  const panel = document.getElementById("functionBoardPanel");
+  if (!panel) return;
+  panel.hidden = true;
+  panel.setAttribute("aria-hidden", "true");
+  panel.classList.remove("is-open");
+  document.body.dataset.functionBoard = "0";
+  panelOpen = false;
+  stopFunctionBoardPolling();
+}
+
+export function toggleFunctionBoardPanel() {
+  const panel = document.getElementById("functionBoardPanel");
+  if (!panel || panel.hidden) openFunctionBoardPanel();
+  else closeFunctionBoardPanel();
 }
 
 export function wireFunctionBoardUi() {
-  const root = ensureFunctionBoardDom();
-  if (!root) return;
-  root.classList.remove("is-collapsed");
+  const root = document.getElementById("functionBoard");
+  const panel = document.getElementById("functionBoardPanel");
+  if (!root || !panel) return;
   if (root.dataset.wired === "1") return;
   root.dataset.wired = "1";
 
-  const toggle = document.getElementById("functionBoardToggle");
-  if (toggle) {
-    toggle.addEventListener("click", () => {
-      const collapsed = root.classList.toggle("is-collapsed");
-      toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      toggle.textContent = collapsed ? "Espandi quadro" : "Comprimi quadro";
-    });
-  }
-  const refreshBtn = document.getElementById("functionBoardRefresh");
-  refreshBtn?.addEventListener("click", () => {
+  // Never remount into home bottom-dock — panel-only.
+  panel.hidden = true;
+  panel.setAttribute("aria-hidden", "true");
+  panelOpen = false;
+
+  document.getElementById("funzionamentoPlanciaBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleFunctionBoardPanel();
+  });
+  document.getElementById("functionBoardClose")?.addEventListener("click", () => closeFunctionBoardPanel());
+  document.getElementById("functionBoardRefresh")?.addEventListener("click", () => {
     refreshFunctionBoard({ withDomProbes: true }).catch((err) => {
       console.warn("[function-board] refresh", err?.message || err);
     });
   });
+  panel.addEventListener("click", (e) => {
+    if (e.target === panel) closeFunctionBoardPanel();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && panelOpen) closeFunctionBoardPanel();
+  });
+
+  if (!resizeWired) {
+    resizeWired = true;
+    window.addEventListener("resize", () => {
+      if (panelOpen && lastBoard) drawWires(lastBoard);
+    });
+  }
 }

@@ -23,6 +23,47 @@ import { searchCrossThreadMemory, listChatThreads } from "../memory/store.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKER = path.resolve(__dirname, "../../workers/browser_use_worker.py");
 
+/**
+ * Real interaction edges for the quadro 2D wires.
+ * from → to = dependency / data flow on the plancia.
+ */
+export const FUNCTION_EDGES = [
+  { from: "auth-password", to: "auth-2fa", label: "login gate" },
+  { from: "auth-2fa", to: "paid-ai-turn", label: "session" },
+  { from: "openrouter-key", to: "budget-openrouter", label: "spend" },
+  { from: "budget-openrouter", to: "auto-router", label: "route" },
+  { from: "auto-router", to: "paid-ai-turn", label: "models" },
+  { from: "openrouter-key", to: "paid-ai-turn", label: "key" },
+  { from: "briefing", to: "paid-ai-turn", label: "Q1–Q3" },
+  { from: "paid-ai-turn", to: "busy-mark", label: "busy" },
+  { from: "paid-ai-turn", to: "actions", label: "actions[]" },
+  { from: "actions", to: "browser-use", label: "browser_use" },
+  { from: "budget-openrouter", to: "browser-use", label: "cap" },
+  { from: "paid-ai-turn", to: "proactive-ai", label: "suggest" },
+  { from: "proactive-mechanical", to: "news-pins", label: "pins" },
+  { from: "proactive-mechanical", to: "proactive-ai", label: "escalate" },
+  { from: "cross-thread-memory", to: "paid-ai-turn", label: "memory" },
+  { from: "cross-thread-memory", to: "module-chat", label: "threads" },
+  { from: "chat-attachments", to: "module-chat", label: "attach" },
+  { from: "mic-voice", to: "analizza", label: "voice" },
+  { from: "analizza", to: "module-chat", label: "chat" },
+  { from: "analizza", to: "paid-ai-turn", label: "turn" },
+  { from: "dock-rail", to: "globe-map", label: "MAPPA" },
+  { from: "dock-rail", to: "module-pipeline", label: "PIPELINE" },
+  { from: "dock-rail", to: "module-memory", label: "MEMORY" },
+  { from: "dock-rail", to: "module-chat", label: "CHAT" },
+  { from: "dock-rail", to: "mic-voice", label: "MIC" },
+  { from: "globe-map", to: "news-pins", label: "pins" },
+  { from: "ux-refresh", to: "globe-map", label: "refresh" },
+  { from: "ux-tops-filter", to: "globe-map", label: "filter" },
+  { from: "ux-csv-export", to: "ux-tops-filter", label: "csv" },
+  { from: "ux-prompt-chips", to: "analizza", label: "chips" },
+  { from: "ux-thread-export", to: "module-chat", label: "export" },
+  { from: "ux-cost-hint", to: "budget-openrouter", label: "hint" },
+  { from: "ux-toasts", to: "actions", label: "feedback" },
+  { from: "ux-stats-strip", to: "globe-map", label: "stats" },
+];
+
 /** Canonical catalog shown on the 2D board (grid cells). */
 export const FUNCTION_CATALOG = [
   { id: "ux-stats-strip", label: "Stats strip", group: "ux-1-10" },
@@ -355,6 +396,7 @@ export async function buildFunctionBoard() {
       total: ordered.length,
     },
     functions: ordered,
+    edges: FUNCTION_EDGES,
   };
 }
 
