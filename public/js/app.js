@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=fn-board-2";
+} from "./mapGlobe.js?v=fn-board-3";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,14 +33,14 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=fn-board-2";
+} from "./aiAgentUi.js?v=fn-board-3";
 import {
   noteAiFunctionReports,
   startFunctionBoardPolling,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=fn-board-2";
+} from "./functionBoardUi.js?v=fn-board-3";
 
-const BUILD_ID = "fn-board-2";
+const BUILD_ID = "fn-board-3";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2865,12 +2865,6 @@ async function initPaidAi() {
       showToast(toast, "ok");
     },
     speak: (text) => speak(text, { force: true }),
-  });
-  // Quadro 2D: always mount (even if paid status fails) so the bottom grid is visible.
-  wireFunctionBoardUi();
-  startFunctionBoardPolling(20000);
-  window.addEventListener("ops:function-board-report", () => {
-    noteAiFunctionReports([{ type: "report-function" }]);
   });
   try {
     state.aiStatus = await fetchAiStatus();
