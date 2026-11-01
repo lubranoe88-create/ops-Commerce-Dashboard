@@ -273,6 +273,8 @@ aiRouter.post("/browser-use", requireAiPaid, async (req, res) => {
       goal: req.body?.goal || "",
       selector: req.body?.selector || "",
       path: req.body?.path || "/",
+      url: req.body?.url || "",
+      maxSteps: req.body?.maxSteps,
       cookie,
       allowOrigin: resolveAllowOrigin(req),
     });

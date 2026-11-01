@@ -61,3 +61,22 @@ fi
 echo "[browser-use-runtime] done"
 "$VENV/bin/python" --version
 "$VENV/bin/python" -c "from playwright.sync_api import sync_playwright; print('playwright ok')"
+
+echo "[browser-use-runtime] chromium launch smoke"
+if ! PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" "$VENV/bin/python" - <<'PY'
+import os
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    browser = p.chromium.launch(
+        headless=True,
+        args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+        timeout=30000,
+    )
+    page = browser.new_page()
+    page.goto("about:blank", timeout=10000)
+    browser.close()
+print("chromium launch ok")
+PY
+then
+  echo "[browser-use-runtime] warn: chromium launch smoke failed (continuing)"
+fi

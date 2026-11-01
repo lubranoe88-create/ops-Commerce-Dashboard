@@ -10,8 +10,10 @@ import { canUseBrowserAutomation, getBudgetStatus } from "./aiBudget.js";
 import { isAiPaid } from "../middleware/aiPaidGate.js";
 import {
   applyBrowserUseRuntimeEnv,
+  browserUseChildEnv,
   probeBrowserUsePython,
   resolveBrowserUsePython,
+  resolveChromiumExecutable,
 } from "./browserUseRuntime.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -61,19 +63,21 @@ export function browserUseStatus(req = null) {
   };
 }
 
-function runPython(payload, timeoutMs = 55000) {
+function runPython(payload, timeoutMs = 70000) {
   return new Promise((resolve) => {
     const pythonBin = resolveBrowserUsePython();
+    const chrome = resolveChromiumExecutable();
+    const body = chrome ? { ...payload, chromePath: chrome } : { ...payload };
+    const env = browserUseChildEnv({
+      BROWSER_USE_ALLOW_ORIGIN: body.allowOrigin || config.browserUseAllowOrigin,
+      BROWSER_USE_AUDIT_DIR:
+        process.env.BROWSER_USE_AUDIT_DIR ||
+        path.resolve(__dirname, "../../data/browser-use-audit"),
+    });
+    if (chrome) env.CHROME_PATH = chrome;
     const child = spawn(pythonBin, [WORKER], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        BROWSER_USE_ALLOW_ORIGIN: config.browserUseAllowOrigin,
-        CHROME_PATH: process.env.CHROME_PATH || "/usr/local/bin/google-chrome",
-        BROWSER_USE_AUDIT_DIR:
-          process.env.BROWSER_USE_AUDIT_DIR ||
-          path.resolve(__dirname, "../../data/browser-use-audit"),
-      },
+      env,
     });
     let stdout = "";
     let stderr = "";
@@ -115,7 +119,7 @@ function runPython(payload, timeoutMs = 55000) {
         });
       }
     });
-    child.stdin.write(JSON.stringify(payload));
+    child.stdin.write(JSON.stringify(body));
     child.stdin.end();
   });
 }
@@ -136,6 +140,8 @@ export async function runBrowserUse({
   goal,
   selector,
   path: pagePath = "/",
+  url = "",
+  maxSteps = 1,
   cookie = "",
   allowOrigin = null,
 } = {}) {
@@ -182,10 +188,13 @@ export async function runBrowserUse({
   }
 
   const origin = allowOrigin || config.browserUseAllowOrigin;
+  const steps = Math.max(1, Math.min(3, Number(maxSteps) || 1));
   const result = await runPython({
     goal,
     selector,
     path: pagePath,
+    url: String(url || "").trim().slice(0, 500),
+    maxSteps: steps,
     cookie,
     allowOrigin: origin,
   });
