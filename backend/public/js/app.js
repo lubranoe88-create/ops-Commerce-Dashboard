@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-3";
+} from "./mapGlobe.js?v=rail-4";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,13 +33,13 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-3";
+} from "./aiAgentUi.js?v=rail-4";
 import {
   noteAiFunctionReports,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-3";
+} from "./functionBoardUi.js?v=rail-4";
 
-const BUILD_ID = "rail-3";
+const BUILD_ID = "rail-4";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1474,7 +1474,7 @@ function maybeVoiceOnboarding() {
   // Entry: never speak. Guidance only in chat + toast.
   const lines = [
     "Benvenuto nella plancia. Di’ MAPPA, PIPELINE, MEMORY o CHAT.",
-    "Di’ ZOOM CITTÀ per il globo. Di’ CHAT per la chat.",
+    "Di’ CHAT per aprire la chat. Usa la rotella o i tasti +/− per lo zoom mappa.",
     "Di’ AGGIORNA per i dati freschi. Di’ FILTRO o COVERAGE per i controlli mappa.",
   ];
   let i = 0;
@@ -1594,24 +1594,15 @@ function runHoloAction(action, { fromVoice = false } = {}) {
         saveLastView("chat");
         showToast(`CHAT · ${src}`);
       });
-    case "mic":
-      // Call the shared mic controller directly — never synthesize a click.
-      // Safari drops user-activation on programmatic .click(), so getUserMedia
-      // / SpeechRecognition would fail when MIC is tapped from the left rail.
-      if (globalMicControl) globalMicControl.toggle();
-      else $("globalMic")?.click();
-      showToast(`MIC · ${src}`);
-      return Promise.resolve();
+    // Left-rail ZOOM/MIC entries removed. Globe still zooms via keys/wheel; MIC lives on Analizza bar.
     case "zoom-citta":
       return showModule("map").then(() => {
         flyToTop(lon, lat, CITY_FLY_HEIGHT);
-        syncHoloActive("zoom-citta");
         showToast(`ZOOM CITTÀ · ${src}`);
       });
     case "zoom-in":
       return showModule("map").then(() => {
         const h = zoomByFactor(0.55);
-        syncHoloActive("zoom-citta");
         showToast(`ZOOM IN · ${src}${h ? ` · ${formatAlt(h)}` : ""}`);
       });
     case "zoom-out":
@@ -1722,7 +1713,6 @@ function handleVoiceCommand(text) {
     [/pipeline/, "pipeline"],
     [/memory|memoria/, "memory"],
     [/\bchat\b|assistente/, "chat"],
-    [/\bmic\b|microfono|ascolta/, "mic"],
     [/strumenti|controlli|tools/, "strumenti"],
     [/tema\s*(cyan|ciano)/, "tema-cyan"],
     [/tema\s*(ambra|amber)/, "tema-amber"],
@@ -2606,8 +2596,6 @@ function setupMic(button, onText) {
       btn.classList.toggle("live", live);
       btn.setAttribute("aria-pressed", live ? "true" : "false");
     }
-    const dockMic = document.querySelector('#holoVoicePlancia [data-holo-action="mic"]');
-    dockMic?.classList.toggle("is-active", live);
   };
 
   const stopUi = () => {
