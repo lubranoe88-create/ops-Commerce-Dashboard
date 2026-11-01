@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=fn-board-5";
+} from "./mapGlobe.js?v=rail-1";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,13 +33,13 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=fn-board-5";
+} from "./aiAgentUi.js?v=rail-1";
 import {
   noteAiFunctionReports,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=fn-board-5";
+} from "./functionBoardUi.js?v=rail-1";
 
-const BUILD_ID = "fn-board-5";
+const BUILD_ID = "rail-1";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1474,7 +1474,7 @@ function maybeVoiceOnboarding() {
   // Entry: never speak. Guidance only in chat + toast.
   const lines = [
     "Benvenuto nella plancia. Di’ MAPPA, PIPELINE, MEMORY o CHAT.",
-    "Di’ ORBIT, NORD o ZOOM CITTÀ per il globo. Di’ ANALIZZA per la chat.",
+    "Di’ NORD o ZOOM CITTÀ per il globo. Di’ ANALIZZA per la chat.",
     "Di’ AGGIORNA per i dati freschi. Di’ FILTRO o COVERAGE per i controlli mappa.",
   ];
   let i = 0;
@@ -1602,13 +1602,6 @@ function runHoloAction(action, { fromVoice = false } = {}) {
       else $("globalMic")?.click();
       showToast(`MIC · ${src}`);
       return Promise.resolve();
-    case "orbit":
-      return showModule("map").then(() => {
-        flyToTop(lon, lat, HOME_VIEW.height);
-        setOrbitEnabled(true);
-        syncHoloActive("orbit");
-        showToast(`ORBIT · ${src}`);
-      });
     case "nord":
       return showModule("map").then(() => {
         resetNorth();
@@ -1740,7 +1733,6 @@ function handleVoiceCommand(text) {
     [/zoom\s*out|allontana|riduci|piu\s*lontano/, "zoom-out"],
     [/zoom\s*in|avvicina|ingrandisci|piu\s*vicino/, "zoom-in"],
     [/\bzoom\b|citta|city/, "zoom-citta"],
-    [/orbit|orbita/, "orbit"],
     [/nord|north/, "nord"],
     [/\bmappa\b|\bmap\b|globo|cartina/, "map"],
     [/pipeline/, "pipeline"],
