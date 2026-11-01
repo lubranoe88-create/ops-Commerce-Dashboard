@@ -32,6 +32,7 @@ import {
   FUNCTION_CATALOG,
 } from "../services/functionBoard.js";
 import { config } from "../config.js";
+import { transcribeAudio } from "../services/openrouter.js";
 
 export const aiRouter = Router();
 
@@ -294,6 +295,40 @@ aiRouter.post("/browser-use", requireAiPaid, async (req, res) => {
       code: err.code,
       budget: err.budget || getBudgetStatus(),
       status: browserUseStatus(),
+    });
+  }
+});
+
+/**
+ * Safari/iOS mic fallback: browser records audio, server transcribes via Whisper.
+ * Body: { audioBase64, mimeType?, filename? }
+ */
+aiRouter.post("/transcribe", requireAiPaid, async (req, res) => {
+  try {
+    const b64 = String(req.body?.audioBase64 || req.body?.audio || "").replace(
+      /^data:[^;]+;base64,/,
+      "",
+    );
+    if (!b64) {
+      return res.status(400).json({ error: "audioBase64 richiesto" });
+    }
+    const buffer = Buffer.from(b64, "base64");
+    const mimeType = String(req.body?.mimeType || req.body?.mime || "audio/webm");
+    const filename =
+      String(req.body?.filename || "") ||
+      (mimeType.includes("mp4") ? "mic.mp4" : mimeType.includes("ogg") ? "mic.ogg" : "mic.webm");
+    const result = await transcribeAudio({
+      buffer,
+      mimeType,
+      filename,
+      language: req.body?.language || "it",
+    });
+    res.json({ text: result.text, model: result.model, ok: true });
+  } catch (err) {
+    const status = err.status && Number.isInteger(err.status) ? err.status : 502;
+    res.status(status).json({
+      error: err.message || "transcribe failed",
+      code: err.code || null,
     });
   }
 });
