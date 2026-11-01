@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-4";
+} from "./mapGlobe.js?v=rail-5";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,13 +33,13 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-4";
+} from "./aiAgentUi.js?v=rail-5";
 import {
   noteAiFunctionReports,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-4";
+} from "./functionBoardUi.js?v=rail-5";
 
-const BUILD_ID = "rail-4";
+const BUILD_ID = "rail-5";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -204,6 +204,17 @@ function disposeScene() {
     state.resizeObserver = null;
   }
   if (state.renderer) {
+    try {
+      const lose = state.renderer.getContext()?.getExtension?.("WEBGL_lose_context");
+      lose?.loseContext?.();
+    } catch {
+      /* ignore */
+    }
+    try {
+      state.renderer.forceContextLoss?.();
+    } catch {
+      /* ignore */
+    }
     state.renderer.dispose();
     const canvas = state.renderer.domElement;
     canvas?.parentNode?.removeChild(canvas);
@@ -213,6 +224,29 @@ function disposeScene() {
   state.camera = null;
   state.controls = null;
   state.rootGroup = null;
+}
+
+/** Wait two animation frames so Cesium/WebGL teardown can release the GPU before Three.js mounts. */
+function settleGlAfterTeardown() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
+
+function forceLoseLeftoverWebgl(container) {
+  if (!container) return;
+  container.querySelectorAll("canvas").forEach((canvas) => {
+    try {
+      const gl =
+        canvas.getContext("webgl2") ||
+        canvas.getContext("webgl") ||
+        canvas.getContext("experimental-webgl");
+      const lose = gl?.getExtension?.("WEBGL_lose_context");
+      lose?.loseContext?.();
+    } catch {
+      /* ignore — context may already be gone */
+    }
+  });
 }
 
 function addStarfield(scene) {
@@ -2047,8 +2081,11 @@ let moduleSwitchPromise = null;
 
 function clearViewportHost() {
   disposeScene();
-  destroyMapGlobe();
   const gl = $("glCanvas");
+  // Lose Cesium GL before wiping DOM so the next Three.js renderer can allocate cleanly.
+  forceLoseLeftoverWebgl(gl);
+  destroyMapGlobe();
+  forceLoseLeftoverWebgl(gl);
   if (gl) {
     gl.innerHTML = "";
     gl.classList.remove("cesium-ops", "is-suppressed");
@@ -2088,6 +2125,8 @@ function setExclusivePanels(mod) {
   const compare = $("compareStrip");
   if (compare && !isMap) compare.hidden = true;
   else if (isMap) updateCompareStrip();
+  const credit = $("imageryCredit");
+  if (credit) credit.hidden = !isMap;
   if (!isMap) {
     state.pickHandler = null;
     state.memoryMeshes = new Map();
@@ -2153,6 +2192,8 @@ async function showModule(mod, opts = {}) {
 
       // Tear down previous host first so canvases cannot stack / steal clicks.
       clearViewportHost();
+      await settleGlAfterTeardown();
+      if (!stillCurrent(epoch, mod)) return;
       setExclusivePanels(mod);
 
       if (mod === "chat") {
@@ -2217,12 +2258,43 @@ async function showModule(mod, opts = {}) {
           }
         }
       } else if (mod === "pipeline") {
-        $("moduleLegend").textContent = "Pipeline · 3D graph · zoomable";
-        const root = initThree(gl, { autoRotate: false, minDistance: 3, maxDistance: 22 });
-        buildPipeline(root, snap.pipeline?.nodes, snap.pipeline?.edges);
-        if (!stillCurrent(epoch, mod)) {
-          disposeScene();
-          return;
+        const nodes = snap.pipeline?.nodes || [];
+        const edges = snap.pipeline?.edges || [];
+        if (!nodes.length) {
+          $("moduleLegend").textContent = "Pipeline · nessun dato · refresh…";
+          showToast("Pipeline senza nodi · aggiorno i dati", "warn");
+          try {
+            const fresh = await api("/api/dashboard/snapshot");
+            if (!stillCurrent(epoch, mod)) return;
+            state.snapshot = fresh;
+            const n2 = fresh?.pipeline?.nodes || [];
+            const e2 = fresh?.pipeline?.edges || [];
+            if (!n2.length) {
+              $("moduleLegend").textContent = "Pipeline · vuota (nessun nodo nello snapshot)";
+              showToast("Pipeline ancora vuota dopo refresh", "warn");
+              sideForModule(mod, fresh);
+              return;
+            }
+            $("moduleLegend").textContent = "Pipeline · 3D graph · zoomable";
+            const root = initThree(gl, { autoRotate: false, minDistance: 3, maxDistance: 22 });
+            buildPipeline(root, n2, e2);
+          } catch (err) {
+            console.warn("[pipeline] snapshot refresh", err?.message || err);
+            $("moduleLegend").textContent = "Pipeline · errore caricamento dati";
+            showToast(err?.message || "Pipeline: refresh fallito", "warn");
+          }
+          if (!stillCurrent(epoch, mod)) {
+            disposeScene();
+            return;
+          }
+        } else {
+          $("moduleLegend").textContent = "Pipeline · 3D graph · zoomable";
+          const root = initThree(gl, { autoRotate: false, minDistance: 3, maxDistance: 22 });
+          buildPipeline(root, nodes, edges);
+          if (!stillCurrent(epoch, mod)) {
+            disposeScene();
+            return;
+          }
         }
       } else if (mod === "memory") {
         $("moduleLegend").textContent = "Memory · 5D rotatable graph · drag / scroll";
