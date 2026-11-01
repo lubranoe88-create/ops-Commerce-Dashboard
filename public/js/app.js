@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-5";
+} from "./mapGlobe.js?v=rail-6";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,13 +33,13 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-5";
+} from "./aiAgentUi.js?v=rail-6";
 import {
   noteAiFunctionReports,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-5";
+} from "./functionBoardUi.js?v=rail-6";
 
-const BUILD_ID = "rail-5";
+const BUILD_ID = "rail-6";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2659,7 +2659,16 @@ function setupMic(button, onText) {
   let rec = null;
   let micStream = null;
   let starting = false;
+  let startWatchTimer = null;
+  let handledByPointer = false;
   const uiButtons = new Set([button]);
+
+  const clearStartWatch = () => {
+    if (startWatchTimer) {
+      clearTimeout(startWatchTimer);
+      startWatchTimer = null;
+    }
+  };
 
   const setLiveUi = (live) => {
     state.micLive = live;
@@ -2672,10 +2681,12 @@ function setupMic(button, onText) {
 
   const stopUi = () => {
     starting = false;
+    clearStartWatch();
     setLiveUi(false);
   };
 
   const hardStop = () => {
+    clearStartWatch();
     if (rec) {
       try {
         rec.onresult = null;
@@ -2697,10 +2708,23 @@ function setupMic(button, onText) {
     stopUi();
   };
 
+  const micDiagHint = () => {
+    const parts = [
+      window.isSecureContext ? "HTTPS ok" : "contesto non sicuro",
+      navigator.mediaDevices?.getUserMedia ? "getUserMedia ok" : "getUserMedia assente",
+      window.SpeechRecognition || window.webkitSpeechRecognition
+        ? "SpeechRecognition ok"
+        : "SpeechRecognition assente",
+    ];
+    return parts.join(" · ");
+  };
+
   const bindRec = (instance) => {
     instance.onstart = () => {
+      clearStartWatch();
       starting = false;
       setLiveUi(true);
+      postChatUpdate("Ascolto attivo — parla ora…");
     };
     instance.onresult = (ev) => {
       let text = "";
@@ -2768,7 +2792,7 @@ function setupMic(button, onText) {
   };
 
   /**
-   * Start SpeechRecognition in the same user-gesture turn as the click.
+   * Start SpeechRecognition in the same user-gesture turn as pointerdown/click.
    * Awaiting getUserMedia BEFORE rec.start() drops Safari/Chrome activation
    * and makes MIC appear dead on the live HTTPS site.
    */
@@ -2784,7 +2808,7 @@ function setupMic(button, onText) {
 
     starting = true;
     setLiveUi(true);
-    postChatUpdate("Microfono attivo — parla ora…");
+    postChatUpdate("Avvio microfono…");
 
     if (rec) {
       try {
@@ -2797,23 +2821,33 @@ function setupMic(button, onText) {
     rec = createSpeechRecognizer();
     if (!rec) {
       hardStop();
-      postChatUpdate("Riconoscimento vocale non disponibile", "warn");
+      postChatUpdate(`Riconoscimento vocale non disponibile (${micDiagHint()})`, "warn");
       return;
     }
     bindRec(rec);
 
-    // CRITICAL: start() must run synchronously under the click gesture.
+    // CRITICAL: start() must run synchronously under the user gesture.
     try {
       rec.start();
-      starting = false;
     } catch (errStart) {
       hardStop();
       postChatUpdate(
-        micErrorMessage(errStart?.name) || "Impossibile avviare il riconoscimento vocale",
+        `${micErrorMessage(errStart?.name) || "Impossibile avviare il riconoscimento vocale"} (${micDiagHint()})`,
         "warn",
       );
       return;
     }
+
+    // If onstart never fires, the mic looks live but is dead — surface a clear diagnosis.
+    clearStartWatch();
+    startWatchTimer = setTimeout(() => {
+      if (!starting) return;
+      hardStop();
+      postChatUpdate(
+        `Microfono non partito entro 1s. Controlla permesso microfono del sito e riprova. (${micDiagHint()})`,
+        "warn",
+      );
+    }, 1000);
 
     // Warm the mic stream after start (does not need to own the gesture).
     acquireMicStream().then((perm) => {
@@ -2836,11 +2870,27 @@ function setupMic(button, onText) {
     startRecognition();
   };
 
-  button.addEventListener("click", (e) => {
+  const onPointerDown = (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    handledByPointer = true;
     e.preventDefault();
     e.stopPropagation();
     toggle();
-  });
+  };
+
+  const onClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // pointerdown already handled touch/mouse; click remains for keyboard activation.
+    if (handledByPointer) {
+      handledByPointer = false;
+      return;
+    }
+    toggle();
+  };
+
+  button.addEventListener("pointerdown", onPointerDown);
+  button.addEventListener("click", onClick);
 
   const control = {
     toggle,
@@ -2850,11 +2900,8 @@ function setupMic(button, onText) {
       uiButtons.add(btn);
       btn.dataset.micWired = "1";
       btn.title = "Tocca per parlare (it-IT)";
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        toggle();
-      });
+      btn.addEventListener("pointerdown", onPointerDown);
+      btn.addEventListener("click", onClick);
     },
   };
   return control;
