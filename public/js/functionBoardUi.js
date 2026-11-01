@@ -24,8 +24,16 @@ async function api(path, opts = {}) {
 
 function statusLabel(status) {
   if (status === "ok") return "funzionante";
-  if (status === "error") return "in errore";
+  // Plain wording only — never ✗ / X / barrato (looks like deleted from list).
+  if (status === "error") return "errore runtime";
   return "non verificata";
+}
+
+function formatErrorLine(fn) {
+  const type = String(fn?.errorType || "").trim();
+  const detail = String(fn?.detail || "").trim();
+  if (type && detail) return `${type} · ${detail}`;
+  return type || detail || "errore runtime";
 }
 
 function renderBoard(board) {
@@ -39,27 +47,38 @@ function renderBoard(board) {
   host.replaceChildren();
 
   for (const fn of list) {
+    const status = fn.status || "unverified";
     const cell = document.createElement("article");
-    cell.className = `fn-cell fn-cell--${fn.status || "unverified"}`;
+    cell.className = `fn-cell fn-cell--${status}`;
     cell.dataset.fnId = fn.id;
-    cell.title = [fn.detail, fn.errorType].filter(Boolean).join(" · ");
+    cell.dataset.status = status;
+    cell.title = [fn.errorType, fn.detail].filter(Boolean).join(" · ");
+
+    const head = document.createElement("div");
+    head.className = "fn-cell-head";
+
+    const mark = document.createElement("span");
+    mark.className = `fn-cell-mark fn-cell-mark--${status}`;
+    mark.setAttribute("aria-hidden", "true");
+    // Red filled dot / amber dot / green dot — never a cross glyph.
+    mark.textContent = "";
 
     const name = document.createElement("div");
     name.className = "fn-cell-name";
     name.textContent = fn.label || fn.id;
 
+    head.append(mark, name);
+
     const st = document.createElement("div");
     st.className = "fn-cell-status";
-    st.textContent = statusLabel(fn.status);
+    st.textContent = statusLabel(status);
 
-    cell.append(name, st);
+    cell.append(head, st);
 
-    if (fn.status === "error") {
+    if (status === "error") {
       const err = document.createElement("div");
       err.className = "fn-cell-error";
-      err.textContent = fn.errorType
-        ? `${fn.errorType}${fn.detail ? ` — ${fn.detail}` : ""}`
-        : fn.detail || "errore";
+      err.textContent = formatErrorLine(fn);
       cell.append(err);
     } else if (fn.detail) {
       const det = document.createElement("div");

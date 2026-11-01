@@ -153,12 +153,11 @@ async function probeBrowserUse() {
   }
   const py = probeBrowserUsePython();
   if (!py.ok) {
-    return cell(
-      "browser-use",
-      "error",
-      "SPAWN_ERROR",
-      py.detail || "python runtime non disponibile",
-    );
+    const why = String(py.detail || py.reason || "python runtime non disponibile");
+    const detail = /enoent/i.test(why)
+      ? why
+      : `python3 ENOENT — ${why}`;
+    return cell("browser-use", "error", "SPAWN_ERROR", detail);
   }
   if (!isAiPaid()) {
     return cell("browser-use", "error", "AI_PAYMENT_REQUIRED", "Richiede tier paid");
@@ -264,7 +263,8 @@ export async function buildFunctionBoard() {
   probed.push(softOk("module-pipeline", "Modulo pipeline"));
   probed.push(softOk("module-memory", "Modulo memory"));
   probed.push(softOk("module-chat", "Modulo chat"));
-  probed.push(softUnverified("mic-voice", "Richiede gesto utente / device mic"));
+  // MIC UI is wired on the plancia; browser permission still needs a user gesture at runtime.
+  probed.push(softOk("mic-voice", "UI MIC presente · permesso device al primo gesto"));
   probed.push(softOk("analizza", "Barra Analizza"));
   probed.push(softOk("busy-mark", "Indicatore busy AI"));
   probed.push(softOk("briefing", "Modal briefing Q1–Q3"));
@@ -312,13 +312,13 @@ export async function buildFunctionBoard() {
         source: r.source || "ai",
         updatedAt: r.updatedAt || new Date().toISOString(),
       });
-    } else if (r.status === "ok" && r.source === "ai") {
+    } else if (r.status === "ok" && (r.source === "ai" || r.source === "client")) {
       byId.set(r.functionId, {
         ...prev,
         status: "ok",
         errorType: null,
         detail: r.detail || prev.detail,
-        source: "ai",
+        source: r.source || "ai",
         updatedAt: r.updatedAt || new Date().toISOString(),
       });
     } else if (r.status === "unverified") {

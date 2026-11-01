@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=fn-board-3";
+} from "./mapGlobe.js?v=fn-board-4";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,14 +33,14 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=fn-board-3";
+} from "./aiAgentUi.js?v=fn-board-4";
 import {
   noteAiFunctionReports,
   startFunctionBoardPolling,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=fn-board-3";
+} from "./functionBoardUi.js?v=fn-board-4";
 
-const BUILD_ID = "fn-board-3";
+const BUILD_ID = "fn-board-4";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";

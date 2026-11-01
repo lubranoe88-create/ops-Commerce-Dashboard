@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     rootDir: backend
-    buildCommand: npm ci --omit=dev
+    buildCommand: npm ci --omit=dev && npm run install:browser-use
     startCommand: node src/server.js
     healthCheckPath: /health
     envVars:
