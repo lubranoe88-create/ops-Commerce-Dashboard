@@ -36,11 +36,13 @@ import { config } from "../config.js";
 export const aiRouter = Router();
 
 /** Entitlement probe — readable without paid gate so free clients see paid:false. */
-aiRouter.get("/status", (_req, res) => {
+aiRouter.get("/status", (req, res) => {
+  const bu = browserUseStatus();
+  bu.allowOrigin = resolveAllowOrigin(req);
   res.json({
     ...aiEntitlementPayload(),
     budget: getBudgetStatus(),
-    browserUse: browserUseStatus(),
+    browserUse: bu,
     proactiveTts: config.aiProactiveTts,
     models: isAiPaid()
       ? {

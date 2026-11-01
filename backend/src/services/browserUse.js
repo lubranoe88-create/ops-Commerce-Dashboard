@@ -8,11 +8,17 @@ import { fileURLToPath } from "node:url";
 import { config } from "../config.js";
 import { canUseBrowserAutomation, getBudgetStatus } from "./aiBudget.js";
 import { isAiPaid } from "../middleware/aiPaidGate.js";
+import {
+  applyBrowserUseRuntimeEnv,
+  probeBrowserUsePython,
+  resolveBrowserUsePython,
+} from "./browserUseRuntime.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKER = path.resolve(__dirname, "../../workers/browser_use_worker.py");
 
 const hits = [];
+applyBrowserUseRuntimeEnv();
 
 function rateLimitOk() {
   const now = Date.now();
@@ -22,25 +28,33 @@ function rateLimitOk() {
   return true;
 }
 
-export function browserUseStatus() {
+export function browserUseStatus(req = null) {
   const paid = isAiPaid();
   const budgetGate = canUseBrowserAutomation();
   const workerPresent = fs.existsSync(WORKER);
+  const py = probeBrowserUsePython();
   const available =
     paid &&
     config.browserUseEnabled &&
     budgetGate.ok &&
-    workerPresent;
+    workerPresent &&
+    py.ok;
   let reason = "ok";
   if (!paid) reason = "free_tier";
   else if (!config.browserUseEnabled) reason = "disabled";
   else if (!budgetGate.ok) reason = budgetGate.reason;
   else if (!workerPresent) reason = "worker_missing";
+  else if (!py.ok) reason = "python_missing";
+  const allowOrigin = req
+    ? // lazy import avoided — caller may pass resolved origin string via req._buOrigin
+      req._buOrigin || config.browserUseAllowOrigin
+    : config.browserUseAllowOrigin;
   return {
     available,
     reason,
+    python: py,
     minRemainingEur: config.aiBrowserUseMinRemainingEur,
-    allowOrigin: config.browserUseAllowOrigin,
+    allowOrigin,
     rateLimitPerMin: config.browserUseRateLimitPerMin,
     budget: getBudgetStatus(),
     worker: WORKER,
@@ -49,7 +63,8 @@ export function browserUseStatus() {
 
 function runPython(payload, timeoutMs = 55000) {
   return new Promise((resolve) => {
-    const child = spawn("python3", [WORKER], {
+    const pythonBin = resolveBrowserUsePython();
+    const child = spawn(pythonBin, [WORKER], {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
@@ -156,6 +171,13 @@ export async function runBrowserUse({
     const err = new Error("browser-use worker missing");
     err.status = 501;
     err.code = "BROWSER_USE_UNAVAILABLE";
+    throw err;
+  }
+  const py = probeBrowserUsePython();
+  if (!py.ok) {
+    const err = new Error(py.detail || "python runtime missing for browser-use");
+    err.status = 501;
+    err.code = "SPAWN_ERROR";
     throw err;
   }
 

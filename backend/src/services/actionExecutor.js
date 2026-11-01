@@ -128,6 +128,19 @@ export function executeWriteAction(action, { confirmed = false } = {}) {
       });
       return { ok: true, type, ...result };
     }
+    case "browser_use": {
+      // Executed client-side so the session cookie reaches the worker.
+      return {
+        ok: true,
+        type,
+        clientAction: {
+          type: "browser_use",
+          goal: String(payload.goal || payload.message || "").slice(0, 500),
+          path: String(payload.path || "/").slice(0, 200),
+          selector: String(payload.selector || "").slice(0, 200),
+        },
+      };
+    }
     default: {
       const err = new Error(`Unhandled write action: ${type}`);
       err.status = 400;

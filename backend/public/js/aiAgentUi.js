@@ -321,7 +321,8 @@ export async function applyAiActions(actions, { runUi } = {}) {
       type === "set-goals" ||
       type === "set-pref" ||
       type === "chat-send" ||
-      type === "report-function"
+      type === "report-function" ||
+      type === "browser_use"
     ) {
       try {
         const res = await api("/api/ai/actions/execute", {
@@ -338,6 +339,62 @@ export async function applyAiActions(actions, { runUi } = {}) {
           window.dispatchEvent(
             new CustomEvent("ops:function-board-report", { detail: res }),
           );
+        }
+        if (type === "browser_use") {
+          const goal = res?.clientAction?.goal || (typeof raw === "object" ? raw.goal : "") || "";
+          const pagePath = res?.clientAction?.path || (typeof raw === "object" ? raw.path : "/") || "/";
+          const selector = res?.clientAction?.selector || (typeof raw === "object" ? raw.selector : "") || "";
+          try {
+            const bu = await api("/api/ai/browser-use", {
+              method: "POST",
+              body: JSON.stringify({ goal, path: pagePath, selector }),
+            });
+            window.dispatchEvent(
+              new CustomEvent("ops:function-board-report", {
+                detail: {
+                  functionId: "browser-use",
+                  status: bu?.ok ? "ok" : "error",
+                  errorType: bu?.ok ? "" : bu?.code || "BROWSER_USE_FAIL",
+                  detail: bu?.ok ? bu.text || "ok" : bu?.error || "browser-use failed",
+                },
+              }),
+            );
+            if (!bu?.ok) {
+              // Persist error on board
+              await api("/api/ai/function-board/report", {
+                method: "POST",
+                body: JSON.stringify({
+                  functionId: "browser-use",
+                  status: "error",
+                  errorType: bu?.code || "BROWSER_USE_FAIL",
+                  detail: bu?.error || "browser-use failed",
+                  source: "client",
+                }),
+              }).catch(() => {});
+            } else {
+              await api("/api/ai/function-board/report", {
+                method: "POST",
+                body: JSON.stringify({
+                  functionId: "browser-use",
+                  status: "ok",
+                  detail: bu.text || "ok",
+                  source: "client",
+                }),
+              }).catch(() => {});
+            }
+          } catch (buErr) {
+            console.warn("[ai] browser_use", buErr);
+            await api("/api/ai/function-board/report", {
+              method: "POST",
+              body: JSON.stringify({
+                functionId: "browser-use",
+                status: "error",
+                errorType: buErr?.data?.code || "BROWSER_USE_FAIL",
+                detail: buErr?.message || "browser-use failed",
+                source: "client",
+              }),
+            }).catch(() => {});
+          }
         }
       } catch (err) {
         console.warn("[ai] write action", type, err);

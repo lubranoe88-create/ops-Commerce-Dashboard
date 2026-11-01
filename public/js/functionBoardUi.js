@@ -119,11 +119,34 @@ async function pushClientDomProbes() {
   }
 }
 
+function renderBoardError(message) {
+  renderBoard({
+    updatedAt: new Date().toISOString(),
+    summary: { ok: 0, error: 1, unverified: 0, total: 1 },
+    functions: [
+      {
+        id: "board-fetch",
+        label: "Quadro live",
+        group: "meta",
+        status: "error",
+        errorType: "FETCH",
+        detail: message || "Impossibile aggiornare il quadro",
+        source: "client",
+      },
+    ],
+  });
+}
+
 export async function refreshFunctionBoard({ withDomProbes = false } = {}) {
-  if (withDomProbes) await pushClientDomProbes().catch(() => {});
-  const board = await api("/api/ai/function-board");
-  renderBoard(board);
-  return board;
+  try {
+    if (withDomProbes) await pushClientDomProbes().catch(() => {});
+    const board = await api("/api/ai/function-board");
+    renderBoard(board);
+    return board;
+  } catch (err) {
+    renderBoardError(err?.message || "fetch failed");
+    throw err;
+  }
 }
 
 export function startFunctionBoardPolling(intervalMs = POLL_MS) {

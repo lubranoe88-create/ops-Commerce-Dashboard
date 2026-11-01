@@ -6,11 +6,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
 import { config } from "../config.js";
 import { isAiPaid } from "../middleware/aiPaidGate.js";
 import { getBudgetStatus } from "./aiBudget.js";
 import { browserUseStatus } from "./browserUse.js";
+import { probeBrowserUsePython } from "./browserUseRuntime.js";
 import { isTotpEnabled } from "./totp.js";
 import { pollProactive } from "./proactive.js";
 import {
@@ -144,49 +144,6 @@ function probeAutoRouter() {
   );
 }
 
-function probePython3() {
-  return new Promise((resolve) => {
-    let out = "";
-    let err = "";
-    let settled = false;
-    const child = spawn("python3", ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
-      resolve({ ok: false, detail: "python3 timeout" });
-    }, 3000);
-    child.stdout.on("data", (d) => {
-      out += d;
-    });
-    child.stderr.on("data", (d) => {
-      err += d;
-    });
-    child.on("error", (e) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({
-        ok: false,
-        detail: e.code === "ENOENT" ? "spawn python3 ENOENT" : e.message,
-      });
-    });
-    child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({
-        ok: code === 0,
-        detail: (out || err || `exit ${code}`).trim(),
-      });
-    });
-  });
-}
-
 async function probeBrowserUse() {
   if (!config.browserUseEnabled) {
     return cell("browser-use", "error", "BROWSER_USE_DISABLED", "Disabilitato da env");
@@ -194,23 +151,23 @@ async function probeBrowserUse() {
   if (!fs.existsSync(WORKER)) {
     return cell("browser-use", "error", "WORKER_MISSING", "browser_use_worker.py assente");
   }
-  const py = await probePython3();
+  const py = probeBrowserUsePython();
   if (!py.ok) {
     return cell(
       "browser-use",
       "error",
       "SPAWN_ERROR",
-      py.detail || "python3 non disponibile sul runtime",
+      py.detail || "python runtime non disponibile",
     );
   }
   if (!isAiPaid()) {
     return cell("browser-use", "error", "AI_PAYMENT_REQUIRED", "Richiede tier paid");
   }
   const st = browserUseStatus();
-  if (!st.available && st.reason && !["ok", "worker_missing"].includes(st.reason)) {
+  if (!st.available && st.reason && !["ok", "worker_missing", "python_missing"].includes(st.reason)) {
     return cell("browser-use", "error", String(st.reason).toUpperCase(), `Gate: ${st.reason}`);
   }
-  return cell("browser-use", "ok", null, `python3 OK (${py.detail})`);
+  return cell("browser-use", "ok", null, `python OK (${py.detail}) @ ${py.bin}`);
 }
 
 function probe2fa() {

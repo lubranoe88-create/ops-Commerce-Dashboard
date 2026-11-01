@@ -12,10 +12,13 @@ services:
         value: 0.0.0.0
       - key: PORT
         value: 8787
+      # Do not overwrite dashboard secrets on blueprint sync
       - key: SITE_PASSWORD
-        value: CHANGE_ME_SITE_PASSWORD
+        sync: false
       - key: OPENROUTER_API_KEY
-        value: CHANGE_ME_OPENROUTER_KEY
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
       - key: OPENROUTER_MODEL
         value: deepseek/deepseek-v4.1-flash
       - key: MEMORY_DB_PATH
@@ -24,3 +27,9 @@ services:
         value: "true"
       - key: VERIFICATION_THRESHOLD
         value: "0.72"
+      - key: BROWSER_USE_ENABLED
+        value: "true"
+      - key: BROWSER_USE_ALLOW_ORIGIN
+        value: https://ops-commerce-dashboard.onrender.com
+      - key: AI_ENTITLEMENT
+        value: paid

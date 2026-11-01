@@ -87,6 +87,11 @@ export const WRITE_ACTIONS = {
     paid: true,
     desc: "Segnala stato funzione sul quadro 2D (ok|error|unverified)",
   },
+  browser_use: {
+    confirm: false,
+    paid: true,
+    desc: "Fallback browser-use (Playwright) sulla plancia",
+  },
 };
 
 export const ACTION_ALLOWLIST = new Set([

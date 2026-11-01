@@ -17,6 +17,9 @@ import { initDashboardStore } from "./memory/store.js";
 import { ensureAiSchema } from "./memory/aiStore.js";
 import { getDb } from "./memory/db.js";
 import { refreshWorldNews } from "./services/newsIngest.js";
+import { applyBrowserUseRuntimeEnv } from "./services/browserUseRuntime.js";
+
+applyBrowserUseRuntimeEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicCandidates = [
@@ -100,7 +103,12 @@ app.use("/api", (_req, res, next) => {
   next();
 });
 app.use("/api/chat", chatLimiter, chatRouter);
-app.use("/api/ai", chatLimiter, aiRouter);
+// Function board polls every ~20s; keep it off the tight chat limiter so the
+// 2D grid does not stay empty under interactive QA / multi-tab use.
+app.use("/api/ai", (req, res, next) => {
+  if (String(req.path || "").startsWith("/function-board")) return next();
+  return chatLimiter(req, res, next);
+}, aiRouter);
 app.use("/api", chatLimiter, dashboardRouter);
 
 app.use(

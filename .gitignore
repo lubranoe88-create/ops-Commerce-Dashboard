@@ -8,3 +8,4 @@ backend/data/
 *.sqlite
 
 backend/data/browser-use-audit/
+backend/.browser-use-runtime/

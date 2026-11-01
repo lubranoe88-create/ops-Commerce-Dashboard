@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=fn-board-1";
+} from "./mapGlobe.js?v=fn-board-2";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,14 +33,14 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=fn-board-1";
+} from "./aiAgentUi.js?v=fn-board-2";
 import {
   noteAiFunctionReports,
   startFunctionBoardPolling,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=fn-board-1";
+} from "./functionBoardUi.js?v=fn-board-2";
 
-const BUILD_ID = "fn-board-1";
+const BUILD_ID = "fn-board-2";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2866,6 +2866,12 @@ async function initPaidAi() {
     },
     speak: (text) => speak(text, { force: true }),
   });
+  // Quadro 2D: always mount (even if paid status fails) so the bottom grid is visible.
+  wireFunctionBoardUi();
+  startFunctionBoardPolling(20000);
+  window.addEventListener("ops:function-board-report", () => {
+    noteAiFunctionReports([{ type: "report-function" }]);
+  });
   try {
     state.aiStatus = await fetchAiStatus();
     state.aiPaid = Boolean(state.aiStatus?.paid);
@@ -2874,11 +2880,6 @@ async function initPaidAi() {
       await loadAiNewsPins();
       await syncClientMemoryToServer().catch(() => {});
       startProactivePolling(45000);
-      wireFunctionBoardUi();
-      startFunctionBoardPolling(20000);
-      window.addEventListener("ops:function-board-report", () => {
-        noteAiFunctionReports([{ type: "report-function" }]);
-      });
       if (shouldPromptBriefing(state.aiStatus)) openBriefingModal();
     }
   } catch (err) {
@@ -3203,6 +3204,12 @@ async function boot() {
   }
 
   wireUi();
+  // Mount quadro 2D immediately (do not wait for paid-AI status / briefing).
+  wireFunctionBoardUi();
+  startFunctionBoardPolling(20000);
+  window.addEventListener("ops:function-board-report", () => {
+    noteAiFunctionReports([{ type: "report-function" }]);
+  });
 
   // Restore last view when present; otherwise map
   const last = readLastView();
