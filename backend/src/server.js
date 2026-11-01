@@ -69,7 +69,8 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json({ limit: "64kb" }));
+// 5mb allows short mic recordings (Safari/iOS MediaRecorder → /api/ai/transcribe)
+app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: false, limit: "16kb" }));
 
 loginHandlers(app);

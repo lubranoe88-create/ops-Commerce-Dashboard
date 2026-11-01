@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-6";
+} from "./mapGlobe.js?v=rail-7";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,13 +33,13 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-6";
+} from "./aiAgentUi.js?v=rail-7";
 import {
   noteAiFunctionReports,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-6";
+} from "./functionBoardUi.js?v=rail-7";
 
-const BUILD_ID = "rail-6";
+const BUILD_ID = "rail-7";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1393,9 +1393,81 @@ function syncHoloActive(actionOrModule) {
   });
 }
 
-/** TTS is opt-in only. System/status updates never speak — they go to chat/toast. */
+/** Pending onboarding lines to speak after the first user gesture unlocks audio (required on iOS). */
+let pendingVoiceLines = [];
+
+/**
+ * Unlock outgoing voice (speechSynthesis + AudioContext).
+ * iPad Safari blocks TTS until a user gesture; also flips dataset.tts so speak() is allowed.
+ */
+function unlockVoiceOutput({ speakPending = true } = {}) {
+  document.documentElement.dataset.tts = "1";
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (Ctx) {
+      if (!state._audioCtx) state._audioCtx = new Ctx();
+      state._audioCtx.resume?.();
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const synth = window.speechSynthesis;
+    if (synth) {
+      // Warm voices list (Safari often populates only after getVoices / voiceschanged).
+      synth.getVoices?.();
+      const warm = new SpeechSynthesisUtterance(" ");
+      warm.volume = 0;
+      warm.lang = "it-IT";
+      synth.speak(warm);
+      synth.cancel();
+    }
+  } catch {
+    /* ignore */
+  }
+  if (speakPending && pendingVoiceLines.length) {
+    const lines = pendingVoiceLines.slice();
+    pendingVoiceLines = [];
+    let i = 0;
+    const step = () => {
+      if (i >= lines.length) return;
+      speak(lines[i], { force: true });
+      i += 1;
+      setTimeout(step, 2200);
+    };
+    step();
+  }
+  // Opt-in proactive TTS when the user has unlocked voice on device.
+  try {
+    if (state.aiPaid) {
+      api("/api/ai/proactive/tts", {
+        method: "POST",
+        body: JSON.stringify({ enabled: true }),
+      }).catch(() => {});
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function pickItalianVoice(synth) {
+  try {
+    const voices = synth.getVoices?.() || [];
+    return (
+      voices.find((v) => /it[-_]?IT/i.test(v.lang) && /sara|alice|federica|italian/i.test(v.name)) ||
+      voices.find((v) => /it[-_]?IT/i.test(v.lang)) ||
+      voices.find((v) => /^it/i.test(v.lang)) ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Speak when TTS unlocked (or force after unlockVoiceOutput). */
 function speak(text, { force = false } = {}) {
-  if (!force || document.documentElement.dataset.tts !== "1") return;
+  if (!force && document.documentElement.dataset.tts !== "1") return;
+  if (force) document.documentElement.dataset.tts = "1";
   const synth = window.speechSynthesis;
   const line = String(text || "").trim();
   if (!synth || !line) return;
@@ -1404,7 +1476,9 @@ function speak(text, { force = false } = {}) {
     const utter = new SpeechSynthesisUtterance(line.slice(0, 420));
     utter.lang = "it-IT";
     utter.rate = 1.02;
-    utter.volume = 0.9;
+    utter.volume = 0.95;
+    const voice = pickItalianVoice(synth);
+    if (voice) utter.voice = voice;
     synth.speak(utter);
   } catch {
     /* TTS unavailable */
@@ -1497,7 +1571,6 @@ function applyAccentTheme(name) {
 }
 
 function maybeVoiceOnboarding() {
-  silenceVoice();
   try {
     if (localStorage.getItem(ONBOARD_KEY)) return;
     localStorage.setItem(ONBOARD_KEY, "1");
@@ -1505,12 +1578,13 @@ function maybeVoiceOnboarding() {
     return;
   }
   document.body.dataset.voiceOnboard = "shown";
-  // Entry: never speak. Guidance only in chat + toast.
   const lines = [
     "Benvenuto nella plancia. Di’ MAPPA, PIPELINE, MEMORY o CHAT.",
-    "Di’ CHAT per aprire la chat. Usa la rotella o i tasti +/− per lo zoom mappa.",
-    "Di’ AGGIORNA per i dati freschi. Di’ FILTRO o COVERAGE per i controlli mappa.",
+    "Di’ CHAT per aprire la chat. Usa la rotella o i tasti più e meno per lo zoom mappa.",
+    "Di’ AGGIORNA per i dati freschi. Tocca MIC per parlare; la voce si attiva al primo tocco.",
   ];
+  // Chat/toast always. Queue TTS until first user gesture (iOS Safari requirement).
+  pendingVoiceLines = lines.slice();
   let i = 0;
   const step = () => {
     if (i >= lines.length) return;
@@ -1519,6 +1593,11 @@ function maybeVoiceOnboarding() {
     setTimeout(step, 900);
   };
   setTimeout(step, 400);
+  if (document.documentElement.dataset.tts === "1") {
+    unlockVoiceOutput({ speakPending: true });
+  } else {
+    postChatUpdate("Tocca un comando o MIC per attivare la voce dell’agente.", "ok");
+  }
 }
 
 function markUserInput() {
@@ -2529,13 +2608,23 @@ async function sendChat(text, { voice = false } = {}) {
             : "";
         showToast(`AI ${result.tier}${rem}`);
       }
-      if (voice) postChatUpdate("Risposta vocale ricevuta in chat", "ok");
+      if (voice) {
+        unlockVoiceOutput({ speakPending: false });
+        speak(reply, { force: true });
+        postChatUpdate("Risposta vocale ricevuta · in lettura", "ok");
+      }
       return;
     }
     $("chatInput").value = "";
     await loadChat();
     if (voice) {
-      postChatUpdate("Risposta vocale ricevuta in chat", "ok");
+      const lastAssistant = [...($("messageList")?.querySelectorAll(".bubble") || [])]
+        .reverse()
+        .find((n) => n.classList.contains("assistant") || n.dataset?.role === "assistant");
+      const replyText = (lastAssistant?.textContent || "").trim();
+      unlockVoiceOutput({ speakPending: false });
+      if (replyText) speak(replyText, { force: true });
+      postChatUpdate("Risposta vocale ricevuta · in lettura", "ok");
     }
   } catch (err) {
     showToast(err.message || "Chat fallita", "bad");
@@ -2634,39 +2723,68 @@ function createSpeechRecognizer() {
 /** Shared MIC controller so left-rail + Analizza bar use the same session (no synthetic clicks). */
 let globalMicControl = null;
 
+function pickRecorderMime() {
+  if (typeof MediaRecorder === "undefined") return "";
+  const candidates = [
+    "audio/mp4",
+    "audio/aac",
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+  ];
+  return candidates.find((t) => MediaRecorder.isTypeSupported?.(t)) || "";
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const s = String(reader.result || "");
+      const i = s.indexOf(",");
+      resolve(i >= 0 ? s.slice(i + 1) : s);
+    };
+    reader.onerror = () => reject(reader.error || new Error("read failed"));
+    reader.readAsDataURL(blob);
+  });
+}
+
 function setupMic(button, onText) {
   if (!button) return null;
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    button.title = "Riconoscimento vocale non supportato in questo browser";
-    button.setAttribute("aria-disabled", "true");
-    button.addEventListener("click", (e) => {
-      e.preventDefault();
-      postChatUpdate(
-        "Questo browser non supporta il riconoscimento vocale. Aggiorna Safari oppure usa Chrome.",
-        "warn",
-      );
-    });
-    return null;
-  }
   if (button.dataset.micWired) {
     return globalMicControl;
   }
   button.dataset.micWired = "1";
-  button.title = "Tocca per parlare (it-IT)";
+  const hasSR = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const hasRec = typeof MediaRecorder !== "undefined" && Boolean(pickRecorderMime() || true);
+  button.title = hasSR
+    ? "Tocca per parlare (it-IT)"
+    : "Tocca per registrare (fallback iPad · Whisper)";
   button.setAttribute("aria-pressed", "false");
+  button.removeAttribute("aria-disabled");
 
   let rec = null;
   let micStream = null;
   let starting = false;
   let startWatchTimer = null;
   let handledByPointer = false;
+  let mediaRecorder = null;
+  let recordChunks = [];
+  let recordMime = "";
+  let recordTimer = null;
+  let mode = null; // "sr" | "rec"
   const uiButtons = new Set([button]);
 
   const clearStartWatch = () => {
     if (startWatchTimer) {
       clearTimeout(startWatchTimer);
       startWatchTimer = null;
+    }
+  };
+
+  const clearRecordTimer = () => {
+    if (recordTimer) {
+      clearTimeout(recordTimer);
+      recordTimer = null;
     }
   };
 
@@ -2681,12 +2799,25 @@ function setupMic(button, onText) {
 
   const stopUi = () => {
     starting = false;
+    mode = null;
     clearStartWatch();
+    clearRecordTimer();
     setLiveUi(false);
   };
 
-  const hardStop = () => {
+  const hardStop = ({ skipUpload = false } = {}) => {
     clearStartWatch();
+    clearRecordTimer();
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      try {
+        if (skipUpload) mediaRecorder.onstop = null;
+        mediaRecorder.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    mediaRecorder = null;
+    recordChunks = [];
     if (rec) {
       try {
         rec.onresult = null;
@@ -2712,11 +2843,125 @@ function setupMic(button, onText) {
     const parts = [
       window.isSecureContext ? "HTTPS ok" : "contesto non sicuro",
       navigator.mediaDevices?.getUserMedia ? "getUserMedia ok" : "getUserMedia assente",
-      window.SpeechRecognition || window.webkitSpeechRecognition
-        ? "SpeechRecognition ok"
-        : "SpeechRecognition assente",
+      hasSR ? "SpeechRecognition ok" : "SpeechRecognition assente",
+      typeof MediaRecorder !== "undefined" ? "MediaRecorder ok" : "MediaRecorder assente",
     ];
     return parts.join(" · ");
+  };
+
+  const finishRecordingUpload = async (blob) => {
+    if (!blob || blob.size < 64) {
+      postChatUpdate(micErrorMessage("no-speech"), "warn");
+      return;
+    }
+    postChatUpdate("Trascrizione in corso…");
+    try {
+      const audioBase64 = await blobToBase64(blob);
+      const data = await api("/api/ai/transcribe", {
+        method: "POST",
+        body: JSON.stringify({
+          audioBase64,
+          mimeType: blob.type || recordMime || "audio/webm",
+          filename: (blob.type || recordMime || "").includes("mp4") ? "mic.mp4" : "mic.webm",
+          language: "it",
+        }),
+      });
+      const heard = String(data?.text || "").trim();
+      if (!heard) {
+        postChatUpdate(micErrorMessage("no-speech"), "warn");
+        return;
+      }
+      postChatUpdate(`Ascoltato: ${heard}`);
+      onText(heard);
+    } catch (err) {
+      postChatUpdate(err?.message || "Trascrizione fallita", "warn");
+    }
+  };
+
+  const startMediaRecorderFallback = async () => {
+    unlockVoiceOutput({ speakPending: true });
+    silenceVoice();
+    markUserInput?.();
+    if (state.micLive || starting) {
+      // Second tap while recording: stop and upload.
+      if (mode === "rec" && mediaRecorder && mediaRecorder.state === "recording") {
+        try {
+          mediaRecorder.stop();
+        } catch {
+          hardStop({ skipUpload: true });
+        }
+        return;
+      }
+      hardStop({ skipUpload: true });
+      postChatUpdate("Ascolto interrotto");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      postChatUpdate(
+        `Microfono non disponibile su questo browser (${micDiagHint()}). Su iPad serve Safari aggiornato.`,
+        "warn",
+      );
+      return;
+    }
+
+    starting = true;
+    mode = "rec";
+    setLiveUi(true);
+    postChatUpdate("Registrazione iPad — parla, poi ritocca MIC per inviare…");
+
+    const perm = await acquireMicStream();
+    if (!perm.ok) {
+      hardStop({ skipUpload: true });
+      postChatUpdate(micErrorMessage(perm.code), "warn");
+      return;
+    }
+    micStream = perm.stream;
+    recordMime = pickRecorderMime();
+    try {
+      mediaRecorder = recordMime
+        ? new MediaRecorder(micStream, { mimeType: recordMime })
+        : new MediaRecorder(micStream);
+    } catch (err) {
+      hardStop({ skipUpload: true });
+      postChatUpdate(`MediaRecorder non avviabile: ${err?.name || err}`, "warn");
+      return;
+    }
+    recordChunks = [];
+    mediaRecorder.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size) recordChunks.push(ev.data);
+    };
+    mediaRecorder.onerror = () => {
+      hardStop({ skipUpload: true });
+      postChatUpdate("Errore registrazione microfono", "warn");
+    };
+    mediaRecorder.onstop = async () => {
+      const blob = new Blob(recordChunks, { type: recordMime || recordChunks[0]?.type || "audio/webm" });
+      recordChunks = [];
+      mediaRecorder = null;
+      releaseMicStream(micStream);
+      micStream = null;
+      stopUi();
+      await finishRecordingUpload(blob);
+    };
+    try {
+      mediaRecorder.start(250);
+      starting = false;
+    } catch (err) {
+      hardStop({ skipUpload: true });
+      postChatUpdate(`Impossibile registrare: ${err?.name || err}`, "warn");
+      return;
+    }
+    // Auto-stop after 8s so a single tap still yields audio on iPad.
+    clearRecordTimer();
+    recordTimer = setTimeout(() => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        try {
+          mediaRecorder.stop();
+        } catch {
+          hardStop({ skipUpload: true });
+        }
+      }
+    }, 8000);
   };
 
   const bindRec = (instance) => {
@@ -2729,7 +2974,6 @@ function setupMic(button, onText) {
     instance.onresult = (ev) => {
       let text = "";
       try {
-        // Prefer a final transcript; on Safari interim results keep the session alive.
         for (let i = ev.results.length - 1; i >= 0; i -= 1) {
           const res = ev.results[i];
           const piece = res?.[0]?.transcript || "";
@@ -2738,7 +2982,6 @@ function setupMic(button, onText) {
             text = piece;
             break;
           }
-          // Keep last interim so a sudden onend still has something to dispatch.
           if (!text) text = piece;
         }
       } catch {
@@ -2753,11 +2996,10 @@ function setupMic(button, onText) {
         }
       })();
       if (!finalish && isAppleWebKit()) {
-        // Wait for final result on Safari continuous sessions.
         instance._opsLastInterim = text;
         return;
       }
-      hardStop();
+      hardStop({ skipUpload: true });
       const heard = (text || instance._opsLastInterim || "").trim();
       if (heard) {
         postChatUpdate(`Ascoltato: ${heard}`);
@@ -2768,17 +3010,22 @@ function setupMic(button, onText) {
     };
     instance.onerror = (ev) => {
       const code = ev?.error || "mic";
-      hardStop();
+      hardStop({ skipUpload: true });
       if (code === "aborted") return;
+      // If SR fails hard on WebKit, fall back to MediaRecorder once.
+      if (isAppleWebKit() || code === "service-not-allowed" || code === "network") {
+        postChatUpdate("Riconoscimento web non disponibile — passo a registrazione…", "warn");
+        startMediaRecorderFallback();
+        return;
+      }
       const msg = micErrorMessage(code);
       if (msg) postChatUpdate(msg, "warn");
     };
     instance.onend = () => {
       const pending = String(instance._opsLastInterim || "").trim();
       if (pending && (state.micLive || starting)) {
-        // Safari sometimes ends the session after interim only — still dispatch the command.
         const heard = pending;
-        hardStop();
+        hardStop({ skipUpload: true });
         postChatUpdate(`Ascoltato: ${heard}`);
         onText(heard);
         return;
@@ -2791,22 +3038,33 @@ function setupMic(button, onText) {
     };
   };
 
-  /**
-   * Start SpeechRecognition in the same user-gesture turn as pointerdown/click.
-   * Awaiting getUserMedia BEFORE rec.start() drops Safari/Chrome activation
-   * and makes MIC appear dead on the live HTTPS site.
-   */
   const startRecognition = () => {
+    unlockVoiceOutput({ speakPending: true });
     silenceVoice();
     markUserInput?.();
 
     if (state.micLive || starting) {
-      hardStop();
+      if (mode === "rec" && mediaRecorder && mediaRecorder.state === "recording") {
+        try {
+          mediaRecorder.stop();
+        } catch {
+          hardStop({ skipUpload: true });
+        }
+        return;
+      }
+      hardStop({ skipUpload: true });
       postChatUpdate("Ascolto interrotto");
       return;
     }
 
+    // iPad Safari: Web SpeechRecognition is typically absent — go straight to recorder.
+    if (!hasSR) {
+      startMediaRecorderFallback();
+      return;
+    }
+
     starting = true;
+    mode = "sr";
     setLiveUi(true);
     postChatUpdate("Avvio microfono…");
 
@@ -2820,39 +3078,31 @@ function setupMic(button, onText) {
     }
     rec = createSpeechRecognizer();
     if (!rec) {
-      hardStop();
-      postChatUpdate(`Riconoscimento vocale non disponibile (${micDiagHint()})`, "warn");
+      hardStop({ skipUpload: true });
+      startMediaRecorderFallback();
       return;
     }
     bindRec(rec);
 
-    // CRITICAL: start() must run synchronously under the user gesture.
     try {
       rec.start();
     } catch (errStart) {
-      hardStop();
-      postChatUpdate(
-        `${micErrorMessage(errStart?.name) || "Impossibile avviare il riconoscimento vocale"} (${micDiagHint()})`,
-        "warn",
-      );
+      hardStop({ skipUpload: true });
+      postChatUpdate("SpeechRecognition fallito — registrazione alternativa…", "warn");
+      startMediaRecorderFallback();
       return;
     }
 
-    // If onstart never fires, the mic looks live but is dead — surface a clear diagnosis.
     clearStartWatch();
     startWatchTimer = setTimeout(() => {
       if (!starting) return;
-      hardStop();
-      postChatUpdate(
-        `Microfono non partito entro 1s. Controlla permesso microfono del sito e riprova. (${micDiagHint()})`,
-        "warn",
-      );
+      hardStop({ skipUpload: true });
+      postChatUpdate("Microfono web non partito — passo a registrazione…", "warn");
+      startMediaRecorderFallback();
     }, 1000);
 
-    // Warm the mic stream after start (does not need to own the gesture).
     acquireMicStream().then((perm) => {
       if (!perm.ok) {
-        // Recognition may still work via the browser speech service; surface warn only.
         postChatUpdate(micErrorMessage(perm.code), "warn");
         return;
       }
@@ -2862,11 +3112,6 @@ function setupMic(button, onText) {
   };
 
   const toggle = () => {
-    if (state.micLive || starting) {
-      hardStop();
-      postChatUpdate("Ascolto interrotto");
-      return;
-    }
     startRecognition();
   };
 
@@ -2881,7 +3126,6 @@ function setupMic(button, onText) {
   const onClick = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    // pointerdown already handled touch/mouse; click remains for keyboard activation.
     if (handledByPointer) {
       handledByPointer = false;
       return;
@@ -2894,12 +3138,12 @@ function setupMic(button, onText) {
 
   const control = {
     toggle,
-    stop: hardStop,
+    stop: () => hardStop({ skipUpload: true }),
     attachButton(btn) {
       if (!btn || uiButtons.has(btn)) return;
       uiButtons.add(btn);
       btn.dataset.micWired = "1";
-      btn.title = "Tocca per parlare (it-IT)";
+      btn.title = button.title;
       btn.addEventListener("pointerdown", onPointerDown);
       btn.addEventListener("click", onClick);
     },
@@ -3328,6 +3572,17 @@ function wireModuleZoom() {
 async function boot() {
   silenceVoice();
   document.documentElement.dataset.tts = "0";
+  // iOS/iPad: unlock TTS + AudioContext on the first real user gesture.
+  const unlockOnce = () => {
+    unlockVoiceOutput({ speakPending: true });
+    window.removeEventListener("pointerdown", unlockOnce, true);
+    window.removeEventListener("touchend", unlockOnce, true);
+    window.removeEventListener("keydown", unlockOnce, true);
+  };
+  window.addEventListener("pointerdown", unlockOnce, true);
+  window.addEventListener("touchend", unlockOnce, true);
+  window.addEventListener("keydown", unlockOnce, true);
+
   // Auto low-GPU profile + accent restore
   try {
     if (detectLowGpu()) document.documentElement.dataset.lowGpu = "1";
