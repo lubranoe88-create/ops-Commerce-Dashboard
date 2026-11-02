@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-18";
+} from "./mapGlobe.js?v=rail-19";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,16 +33,16 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-18";
+} from "./aiAgentUi.js?v=rail-19";
 import {
   noteAiFunctionReports,
   openFunctionBoardPanel,
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-18";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-18";
+} from "./functionBoardUi.js?v=rail-19";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-19";
 
-const BUILD_ID = "rail-18";
+const BUILD_ID = "rail-19";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1611,6 +1611,7 @@ async function speakViaServerAudio(line) {
   } catch {
     /* ignore */
   }
+  let decodeError = null;
   if (ctx) {
     try {
       ensureAudioSessionPlayAndRecord();
@@ -1649,16 +1650,30 @@ async function speakViaServerAudio(line) {
       state._ttsSource = source;
       source.start(0);
       return true;
-    } catch {
-      /* fall through to HTMLAudioElement */
+    } catch (err) {
+      decodeError = err;
     }
+  } else {
+    decodeError = new Error("AudioContext assente");
   }
-  const audio = new Audio(`data:${mime};base64,${b64}`);
-  audio.setAttribute("playsinline", "true");
-  audio.preload = "auto";
-  state._ttsAudio = audio;
-  await audio.play();
-  return true;
+  try {
+    primeHtmlAudioElement();
+    const audio = state._ttsAudio || new Audio();
+    try {
+      audio.pause?.();
+    } catch {
+      /* ignore */
+    }
+    audio.setAttribute("playsinline", "true");
+    audio.preload = "auto";
+    audio.src = `data:${mime};base64,${b64}`;
+    state._ttsAudio = audio;
+    await audio.play();
+    return true;
+  } catch (err) {
+    const decodeMsg = decodeError?.message || String(decodeError || "decode saltato");
+    throw new Error(`decode: ${decodeMsg} · audio: ${err?.message || err}`);
+  }
 }
 
 /**

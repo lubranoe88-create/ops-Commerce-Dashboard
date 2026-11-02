@@ -107,7 +107,7 @@ export async function transcribeAudio({
   }
 
   const primary = sttFormat(mimeType, filename);
-  const formats = primary === "m4a" ? ["m4a", "aac", "mp4"] : [primary];
+  const formats = [primary];
   const models = [
     "openai/whisper-1",
     "openai/whisper-large-v3",
@@ -154,10 +154,65 @@ export async function transcribeAudio({
       lastErr.upstream = true;
     }
     if (modelMissing) continue;
-    if (lastErr?.status === 422) break;
+  }
+
+  try {
+    const multipart = await postMultipartTranscription({
+      key,
+      model: "openai/whisper-1",
+      buffer,
+      mimeType,
+      filename,
+      language,
+    });
+    if (multipart.text) return multipart;
+    lastErr = new Error(
+      `Whisper multipart testo vuoto (${buffer.length} byte, ${mimeType || "mime?"})`,
+    );
+    lastErr.status = 422;
+    lastErr.upstream = true;
+  } catch (err) {
+    if (!lastErr) lastErr = err;
   }
 
   throw lastErr || new Error("Trascrizione non riuscita");
+}
+
+async function postMultipartTranscription({
+  key,
+  model,
+  buffer,
+  mimeType,
+  filename,
+  language,
+}) {
+  const form = new FormData();
+  const blob = new Blob([buffer], { type: mimeType || "application/octet-stream" });
+  form.append("file", blob, filename || "mic.webm");
+  form.append("model", model);
+  if (language) form.append("language", language);
+  const response = await fetch(OPENROUTER_TRANSCRIBE_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "HTTP-Referer": config.openRouterHttpReferer,
+      "X-Title": config.openRouterAppTitle,
+    },
+    body: form,
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail =
+      payload?.error?.message ||
+      payload?.message ||
+      `OpenRouter transcribe HTTP ${response.status}`;
+    const err = new Error(`${detail} (multipart ${model}, ${buffer.length} byte)`);
+    err.status = response.status >= 400 && response.status < 600 ? response.status : 502;
+    err.upstream = true;
+    throw err;
+  }
+  const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+  return { text, model: payload?.model || model, format: "multipart" };
 }
 
 function sttFormat(mimeType = "", filename = "") {
