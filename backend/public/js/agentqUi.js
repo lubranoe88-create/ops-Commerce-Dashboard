@@ -126,7 +126,10 @@ export async function runOnDemandSearch(query, { postChatUpdate, openDoc } = {})
   postChatUpdate?.(`Agent Q · ricerca on-demand: ${q}`);
   const data = await api("/api/ai/agentq/search", {
     method: "POST",
-    body: JSON.stringify({ query: q, sources: ["filesystem", "database", "api", "web_hint"] }),
+    body: JSON.stringify({
+      query: q,
+      sources: ["filesystem", "database", "memory", "api", "web_hint"],
+    }),
   });
   const hits = data.hits || [];
   if (!hits.length) {

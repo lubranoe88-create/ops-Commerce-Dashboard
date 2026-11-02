@@ -41,6 +41,8 @@ import {
   readSandboxDocument,
   planHandActions,
   AGENTQ_HAND_ACTIONS,
+  listExpandableMemory,
+  appendExpandableMemory,
 } from "../services/agentqBridge.js";
 
 export const aiRouter = Router();
@@ -56,7 +58,7 @@ aiRouter.get("/agentq/status", requireAiPaid, async (_req, res) => {
 
 /**
  * Ricerca Agent Q — SOLO su richiesta esplicita del client.
- * Body: { query, sources?: ["filesystem","database","api","web_hint"] }
+ * Body: { query, sources?: ["filesystem","database","memory","api","web_hint"] }
  * Filesystem limitato alla sandbox backend/data/agentq-sandbox.
  * Database: solo SELECT su allowlist (concepts, coverage, errors, tops).
  */
@@ -66,7 +68,7 @@ aiRouter.post("/agentq/search", requireAiPaid, async (req, res) => {
       return res.status(400).json({ error: "query richiesta (ricerca solo on-demand)" });
     }
     const result = await runAgentqSearch(req.body.query || req.body.q, {
-      sources: req.body.sources || ["filesystem", "database", "api", "web_hint"],
+      sources: req.body.sources || ["filesystem", "database", "memory", "api", "web_hint"],
     });
     res.json(result);
   } catch (err) {
@@ -115,6 +117,28 @@ aiRouter.post("/agentq/hands", requireAiPaid, async (req, res) => {
 
 aiRouter.get("/agentq/hands/catalog", requireAiPaid, (_req, res) => {
   res.json({ ok: true, actions: AGENTQ_HAND_ACTIONS });
+});
+
+/** Memoria espandibile Agent Q — lista / append nel tempo. */
+aiRouter.get("/agentq/memory", requireAiPaid, (req, res) => {
+  res.json(
+    listExpandableMemory({
+      limit: Number(req.query?.limit) || 40,
+      query: String(req.query?.q || req.query?.query || ""),
+    }),
+  );
+});
+
+aiRouter.post("/agentq/memory", requireAiPaid, (req, res) => {
+  const text = String(req.body?.text || req.body?.note || "").trim();
+  if (!text) return res.status(400).json({ error: "text richiesto" });
+  res.json(
+    appendExpandableMemory({
+      title: req.body?.title,
+      text,
+      tags: req.body?.tags,
+    }),
+  );
 });
 
 /** Entitlement probe — readable without paid gate so free clients see paid:false. */

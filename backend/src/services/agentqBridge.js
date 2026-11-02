@@ -284,11 +284,11 @@ export async function searchApiWikipedia(query, { limit = 5 } = {}) {
 
 /**
  * Ricerca multi-fonte — SOLO se esplicitamente richiesta (il route caller lo impone).
- * sources: filesystem | database | api | web_hint | all
+ * sources: filesystem | database | memory | api | web_hint | all
  */
 export async function runAgentqSearch(
   query,
-  { sources = ["filesystem", "database", "api", "web_hint"] } = {},
+  { sources = ["filesystem", "database", "memory", "api", "web_hint"] } = {},
 ) {
   const q = String(query || "").trim();
   if (!q) {
@@ -303,7 +303,7 @@ export async function runAgentqSearch(
   );
   if (wanted.has("all")) {
     wanted.clear();
-    ["filesystem", "database", "api", "web_hint"].forEach((s) => wanted.add(s));
+    ["filesystem", "database", "memory", "api", "web_hint"].forEach((s) => wanted.add(s));
   }
 
   const hits = [];
@@ -320,6 +320,13 @@ export async function runAgentqSearch(
       hits.push(...searchDatabase(q));
     } catch (e) {
       errors.push(`database: ${e.message}`);
+    }
+  }
+  if (wanted.has("memory") || wanted.has("memoria")) {
+    try {
+      hits.push(...searchExpandableMemory(q));
+    } catch (e) {
+      errors.push(`memory: ${e.message}`);
     }
   }
   if (wanted.has("api")) {
@@ -342,6 +349,97 @@ export async function runAgentqSearch(
     dbAllowlist: Object.keys(DB_SEARCH_ALLOWLIST),
     onDemand: true,
   };
+}
+
+function ensureMemoryExpand() {
+  fs.mkdirSync(path.dirname(MEMORY_EXPAND_PATH), { recursive: true });
+  if (!fs.existsSync(MEMORY_EXPAND_PATH)) {
+    fs.writeFileSync(
+      MEMORY_EXPAND_PATH,
+      JSON.stringify(
+        {
+          version: 1,
+          entries: [
+            {
+              id: "seed-1",
+              at: new Date().toISOString(),
+              title: "Agent Q memoria",
+              text: "Memoria espandibile avviata: nuove note si accumulano nel tempo.",
+              tags: ["agentq", "seed"],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+  }
+}
+
+/** Memoria espandibile Agent Q (append-only JSON sotto data/). */
+export function listExpandableMemory({ limit = 40, query = "" } = {}) {
+  ensureMemoryExpand();
+  let data = { entries: [] };
+  try {
+    data = JSON.parse(fs.readFileSync(MEMORY_EXPAND_PATH, "utf8"));
+  } catch {
+    data = { entries: [] };
+  }
+  let entries = Array.isArray(data.entries) ? data.entries : [];
+  const q = String(query || "").trim().toLowerCase();
+  if (q) {
+    entries = entries.filter((e) =>
+      `${e.title || ""} ${e.text || ""} ${(e.tags || []).join(" ")}`.toLowerCase().includes(q),
+    );
+  }
+  return {
+    ok: true,
+    expandable: true,
+    count: entries.length,
+    entries: entries.slice(0, limit),
+    path: "backend/data/agentq-memory/expandable.json",
+  };
+}
+
+export function appendExpandableMemory({ title, text, tags } = {}) {
+  ensureMemoryExpand();
+  let data = { version: 1, entries: [] };
+  try {
+    data = JSON.parse(fs.readFileSync(MEMORY_EXPAND_PATH, "utf8"));
+  } catch {
+    /* fresh */
+  }
+  if (!Array.isArray(data.entries)) data.entries = [];
+  const entry = {
+    id: `m-${Date.now().toString(36)}`,
+    at: new Date().toISOString(),
+    title: String(title || "Nota Agent Q").slice(0, 160),
+    text: String(text || "").slice(0, 4000),
+    tags: Array.isArray(tags)
+      ? tags.map((t) => String(t).slice(0, 40)).slice(0, 12)
+      : String(tags || "")
+          .split(/[,\s]+/)
+          .filter(Boolean)
+          .slice(0, 12),
+  };
+  data.entries.unshift(entry);
+  data.entries = data.entries.slice(0, 500);
+  data.version = 1;
+  fs.writeFileSync(MEMORY_EXPAND_PATH, JSON.stringify(data, null, 2), "utf8");
+  return { ok: true, entry, count: data.entries.length };
+}
+
+export function searchExpandableMemory(query, { limit = 8 } = {}) {
+  const listed = listExpandableMemory({ limit: 200, query });
+  return (listed.entries || []).slice(0, limit).map((e) => ({
+    source: "memory",
+    title: e.title,
+    snippet: String(e.text || "").replace(/\s+/g, " ").slice(0, 220),
+    uri: `memory://expandable/${e.id}`,
+    score: scoreText(`${e.title} ${e.text}`, tokensOf(query)) + 1,
+    meta: { at: e.at, tags: e.tags },
+  }));
 }
 
 export function getEntryUpdates({ limit = 12 } = {}) {
@@ -449,12 +547,14 @@ export async function planHandActions(objective) {
 
 export async function agentqStatus() {
   ensureDirs();
+  ensureMemoryExpand();
   let board = null;
   try {
     board = await buildFunctionBoard();
   } catch (e) {
     board = { error: e.message };
   }
+  const mem = listExpandableMemory({ limit: 1 });
   return {
     ok: true,
     name: "Agent Q",
@@ -467,6 +567,11 @@ export async function agentqStatus() {
       root: "backend/data/agentq-sandbox",
       writableByAgent: false,
       searchOnDemandOnly: true,
+    },
+    memory: {
+      expandable: true,
+      count: mem.count,
+      path: mem.path,
     },
     hands: AGENTQ_HAND_ACTIONS.length,
     functionBoard: board?.summary || board,
