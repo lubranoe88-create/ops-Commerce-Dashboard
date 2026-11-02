@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-16";
+} from "./mapGlobe.js?v=rail-17";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,16 +33,16 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-16";
+} from "./aiAgentUi.js?v=rail-17";
 import {
   noteAiFunctionReports,
   openFunctionBoardPanel,
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-16";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-16";
+} from "./functionBoardUi.js?v=rail-17";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-17";
 
-const BUILD_ID = "rail-16";
+const BUILD_ID = "rail-17";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2959,8 +2959,12 @@ function setupMic(button, onText) {
   let recordChunks = [];
   let recordMime = "";
   let recordTimer = null;
+  let recordStartedAt = 0;
   let mode = null; // "sr" | "rec"
+  /** getUserMedia promise started inside pointerdown (Safari requires gesture). */
+  let gestureMicPromise = null;
   const uiButtons = new Set([button]);
+  const MIN_RECORD_MS = 1500;
 
   const clearStartWatch = () => {
     if (startWatchTimer) {
@@ -3069,7 +3073,10 @@ function setupMic(button, onText) {
         );
         return;
       }
-      postChatUpdate(`Ascoltato: ${heard}`);
+      postChatUpdate(`Voce rilevata: ${heard}`);
+      showToast(`Voce rilevata`, "ok");
+      // Speak confirmation through server TTS (HTMLAudio / AudioContext) after mic is closed.
+      speak(`Voce rilevata. ${heard}`, { force: true });
       onText(heard);
     } catch (err) {
       // Never collapse upstream errors into generic "nessuna voce".
@@ -3078,24 +3085,48 @@ function setupMic(button, onText) {
     }
   };
 
+  const stopRecordingForUpload = () => {
+    if (!(mediaRecorder && mediaRecorder.state === "recording")) return false;
+    const elapsed = Date.now() - (recordStartedAt || 0);
+    if (elapsed < MIN_RECORD_MS) {
+      postChatUpdate(`Ancora in ascolto… parla ancora ${Math.ceil((MIN_RECORD_MS - elapsed) / 1000)}s`, "ok");
+      // Defer stop until minimum duration so Safari has real samples.
+      clearRecordTimer();
+      recordTimer = setTimeout(() => {
+        try {
+          mediaRecorder.requestData?.();
+        } catch {
+          /* ignore */
+        }
+        try {
+          mediaRecorder.stop();
+        } catch {
+          hardStop({ skipUpload: true });
+        }
+      }, MIN_RECORD_MS - elapsed);
+      return true;
+    }
+    try {
+      mediaRecorder.requestData?.();
+    } catch {
+      /* ignore */
+    }
+    try {
+      mediaRecorder.stop();
+    } catch {
+      hardStop({ skipUpload: true });
+    }
+    return true;
+  };
+
   const startMediaRecorderFallback = async () => {
     // Unlock must already have run synchronously in pointerdown — do not re-unlock after awaits.
-    silenceVoice();
     markUserInput?.();
     ensureAudioSessionPlayAndRecord();
     if (state.micLive || starting) {
       // Second tap while recording: flush + stop and upload.
       if (mode === "rec" && mediaRecorder && mediaRecorder.state === "recording") {
-        try {
-          try {
-            mediaRecorder.requestData?.();
-          } catch {
-            /* ignore */
-          }
-          mediaRecorder.stop();
-        } catch {
-          hardStop({ skipUpload: true });
-        }
+        stopRecordingForUpload();
         return;
       }
       hardStop({ skipUpload: true });
@@ -3119,8 +3150,20 @@ function setupMic(button, onText) {
     setLiveUi(true);
     postChatUpdate("Registrazione iPad — parla 2–8 secondi, poi ritocca MIC per inviare…");
 
-    // getUserMedia must stay in the gesture turn when possible; if already mid-await, still try.
-    const perm = await acquireMicStream();
+    // Prefer getUserMedia started inside pointerdown gesture (Safari iPad requirement).
+    let perm;
+    if (gestureMicPromise) {
+      try {
+        const stream = await gestureMicPromise;
+        perm = { ok: true, stream };
+      } catch (err) {
+        perm = { ok: false, code: err?.name || "not-allowed" };
+      } finally {
+        gestureMicPromise = null;
+      }
+    } else {
+      perm = await acquireMicStream();
+    }
     if (!perm.ok) {
       hardStop({ skipUpload: true });
       postChatUpdate(micErrorMessage(perm.code), "warn");
@@ -3159,6 +3202,7 @@ function setupMic(button, onText) {
       // Safari iPad: timeslice can yield empty/fragmented blobs — start without timeslice.
       if (isIpadLike() || isAppleWebKit()) mediaRecorder.start();
       else mediaRecorder.start(250);
+      recordStartedAt = Date.now();
       starting = false;
     } catch (err) {
       hardStop({ skipUpload: true });
@@ -3169,17 +3213,7 @@ function setupMic(button, onText) {
     clearRecordTimer();
     recordTimer = setTimeout(() => {
       if (mediaRecorder && mediaRecorder.state === "recording") {
-        try {
-          // Flush remaining data before stop (critical on WebKit).
-          try {
-            mediaRecorder.requestData?.();
-          } catch {
-            /* ignore */
-          }
-          mediaRecorder.stop();
-        } catch {
-          hardStop({ skipUpload: true });
-        }
+        stopRecordingForUpload();
       }
     }, 10000);
   };
@@ -3336,15 +3370,35 @@ function setupMic(button, onText) {
     startRecognition();
   };
 
+  const beginGestureMicCapture = () => {
+    // CRITICAL (Safari iPad): unlock TTS + start getUserMedia inside the same user gesture.
+    unlockVoiceOutput({ speakPending: true });
+    ensureAudioSessionPlayAndRecord();
+    getPrimedAudioContext();
+    if (
+      !gestureMicPromise &&
+      window.isSecureContext &&
+      navigator.mediaDevices?.getUserMedia &&
+      !(state.micLive || starting || (mediaRecorder && mediaRecorder.state === "recording"))
+    ) {
+      gestureMicPromise = navigator.mediaDevices
+        .getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false,
+        })
+        .catch((err) => {
+          gestureMicPromise = null;
+          throw err;
+        });
+    }
+  };
+
   const onPointerDown = (e) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     handledByPointer = true;
     e.preventDefault();
     e.stopPropagation();
-    // CRITICAL (Safari iPad): unlock TTS + AudioContext + audioSession synchronously in the gesture.
-    unlockVoiceOutput({ speakPending: true });
-    ensureAudioSessionPlayAndRecord();
-    getPrimedAudioContext();
+    beginGestureMicCapture();
     toggle();
   };
 
@@ -3355,10 +3409,7 @@ function setupMic(button, onText) {
       handledByPointer = false;
       return;
     }
-    // Keyboard / accessibility click still counts as a user gesture.
-    unlockVoiceOutput({ speakPending: true });
-    ensureAudioSessionPlayAndRecord();
-    getPrimedAudioContext();
+    beginGestureMicCapture();
     toggle();
   };
 
