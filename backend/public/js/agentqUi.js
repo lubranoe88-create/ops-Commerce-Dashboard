@@ -97,9 +97,13 @@ export async function showEntryUpdates({ postChatUpdate, showToast } = {}) {
       const msg = `Aggiornamenti recenti Agent Q\n${lines.join("\n")}`;
       postChatUpdate?.(msg, "ok");
       showToast?.(`Agent Q · ${updates.length} aggiornamenti`, "ok");
+    } else {
+      showToast?.("Agent Q · nessun aggiornamento nuovo", "ok");
     }
   } catch (err) {
     console.warn("[agentq] updates", err?.message || err);
+    showToast?.(`Aggiornamenti non caricati: ${err?.message || err}`, "warn");
+    postChatUpdate?.(`Aggiornamenti ingresso falliti: ${err?.message || err}`, "warn");
   }
   try {
     const probs = await api("/api/ai/agentq/problems");
@@ -251,6 +255,14 @@ export async function wireAgentqUi(ctx) {
         postChatUpdate: ctx.postChatUpdate,
         openDoc: true,
       });
+      return true;
+    }
+    if (/^(problemi|errori|monitoraggio|cosa\s+da\s+sistemare)\b/i.test(text)) {
+      try {
+        await showProblems({ postChatUpdate: ctx.postChatUpdate });
+      } catch (err) {
+        ctx.postChatUpdate?.(err?.message || "Monitoraggio non disponibile", "warn");
+      }
       return true;
     }
     if (/^(memorizza|ricorda|salva\s+in\s+memoria)\b/i.test(text)) {

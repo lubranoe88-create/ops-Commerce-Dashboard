@@ -97,9 +97,13 @@ export async function showEntryUpdates({ postChatUpdate, showToast } = {}) {
       const msg = `Aggiornamenti recenti Agent Q\n${lines.join("\n")}`;
       postChatUpdate?.(msg, "ok");
       showToast?.(`Agent Q · ${updates.length} aggiornamenti`, "ok");
+    } else {
+      showToast?.("Agent Q · nessun aggiornamento nuovo", "ok");
     }
   } catch (err) {
     console.warn("[agentq] updates", err?.message || err);
+    showToast?.(`Aggiornamenti non caricati: ${err?.message || err}`, "warn");
+    postChatUpdate?.(`Aggiornamenti ingresso falliti: ${err?.message || err}`, "warn");
   }
   try {
     const probs = await api("/api/ai/agentq/problems");
