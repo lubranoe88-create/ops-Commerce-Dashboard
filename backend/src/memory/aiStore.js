@@ -429,7 +429,15 @@ export function upsertNewsItems(items, db = getDb()) {
       it.lon ?? null,
       it.published_at || null,
     );
-    if (isChanged) changed.push({ ...it, summary, change: isNew ? "inserted" : "updated" });
+    if (isChanged) {
+      changed.push({
+        ...it,
+        summary,
+        change: isNew ? "inserted" : "updated",
+        previousTitle: isNew ? "" : prev?.title || "",
+        previousSummary: isNew ? "" : prev?.summary || "",
+      });
+    }
   }
   if (changed.length) {
     noteResidentIngress({
@@ -442,6 +450,8 @@ export function upsertNewsItems(items, db = getDb()) {
         source: n.source || "",
         url: n.url || "",
         change: n.change,
+        previousTitle: n.previousTitle || "",
+        previousSummary: String(n.previousSummary || "").slice(0, 240),
       })),
     });
   }

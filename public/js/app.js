@@ -40,9 +40,15 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-29-resident";
+import { openSandboxDoc, wireAgentqUi } from "./agentqUi.js?v=rail-30-actuate";
+import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-30-actuate";
+import {
+  dispatchAtlasHand,
+  ZOOM_IN_FACTOR,
+  ZOOM_OUT_FACTOR,
+} from "./atlasHoloDispatch.js?v=rail-30-actuate";
 
-const BUILD_ID = "rail-29-resident";
+const BUILD_ID = "rail-30-actuate";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1865,7 +1871,8 @@ function chatExportRole(role) {
 function postChatUpdate(text, kind = "ok") {
   const line = presentChatText(text, "system").trim();
   if (!line) return;
-  showToast(line, kind);
+  const toast = line.length > 180 ? `${line.slice(0, 176).replace(/\s+\S*$/, "")}…` : line;
+  showToast(toast, kind);
   const msgs = $("messageList");
   if (!msgs) return;
   const d = document.createElement("div");
@@ -2046,7 +2053,8 @@ window.__opsVoice = (text) => handleVoiceCommand(text);
 window.__opsRun = (action) => runHoloAction(action, { fromVoice: false });
 
 /** Dual control: same actions for voice keywords and holographic touch targets. */
-function runHoloAction(action, { fromVoice = false } = {}) {
+function runHoloAction(action, opts = {}) {
+  const fromVoice = Boolean(opts.fromVoice);
   const t0 = state.focusedTopId
     ? findTop(state.focusedTopId)
     : state.snapshot?.tops?.[0];
@@ -2060,57 +2068,24 @@ function runHoloAction(action, { fromVoice = false } = {}) {
     postChatUpdate(`${(label?.textContent || String(action)).trim()} · ${src}`);
   }
 
+  const dispatched = dispatchAtlasHand(action, {
+    lon,
+    lat,
+    cityHeight: CITY_FLY_HEIGHT,
+    showModule,
+    zoomByFactor,
+    zoomToHeight,
+    flyToTop,
+    showToast,
+    syncHoloActive,
+    saveLastView,
+    openBriefingModal,
+    openDocument: (rel) => openSandboxDoc(String(rel || "").replace(/^sandbox:\/\//, ""), { postChatUpdate }),
+    refreshNews: () => loadAiNewsPins(),
+  }, { ...opts, fromVoice });
+  if (dispatched) return dispatched;
+
   switch (action) {
-    case "map":
-      syncHoloActive("map");
-      return showModule("map").then(() => {
-        saveLastView("map");
-        showToast(`MAPPA · ${src}`);
-      });
-    case "pipeline":
-      syncHoloActive("pipeline");
-      return showModule("pipeline").then(() => {
-        saveLastView("pipeline");
-        showToast(`PIPELINE · ${src}`);
-      });
-    case "memory":
-      syncHoloActive("memory");
-      return showModule("memory").then(() => {
-        saveLastView("memory");
-        showToast(`MEMORY · ${src}`);
-      });
-    case "chat":
-      syncHoloActive("chat");
-      return showModule("chat").then(() => {
-        saveLastView("chat");
-        showToast(`CHAT · ${src}`);
-      });
-    // Left-rail ZOOM/MIC entries removed. Globe still zooms via keys/wheel; MIC lives on Analizza bar.
-    case "zoom-citta":
-      return showModule("map").then(() => {
-        flyToTop(lon, lat, CITY_FLY_HEIGHT);
-        showToast(`ZOOM CITTÀ · ${src}`);
-      });
-    case "zoom-in":
-      return showModule("map").then(() => {
-        const h = zoomByFactor(0.55);
-        showToast(`ZOOM IN · ${src}${h ? ` · ${formatAlt(h)}` : ""}`);
-      });
-    case "zoom-out":
-      return showModule("map").then(() => {
-        const h = zoomByFactor(1.85);
-        showToast(`ZOOM OUT · ${src}${h ? ` · ${formatAlt(h)}` : ""}`);
-      });
-    case "zoom-paese":
-      return showModule("map").then(() => {
-        flyToTop(lon, lat, 1_500_000);
-        showToast(`ZOOM PAESE · ${src}`);
-      });
-    case "zoom-continente":
-      return showModule("map").then(() => {
-        flyToTop(lon, lat, 12_000_000);
-        showToast(`ZOOM CONTINENTE · ${src}`);
-      });
     case "refresh":
       return refresh().then(() => showToast(`AGGIORNA · ${src}`));
     case "filtro-score":
@@ -2193,23 +2168,15 @@ function handleVoiceCommand(text) {
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .trim();
-  // More-specific zoom phrases first so bare "zoom" does not steal "zoom paese".
+  // Zoom, modules, documents, and briefing go through the Atlas hand plan
+  // (voiceDefers → __opsAgentqHandle → runHoloAction), not this shortcut table.
+  if (voiceDefersToAtlasHands(text)) return false;
   const rules = [
-    [/aggiorna|refresh|ricalcola/, "refresh"],
     [/filtro\s*(score|punti)|score\s*75|filtro alto/, "filtro-score"],
     [/filtri?\s*(off|reset|tutti)|reset filtri/, "filtro-reset"],
     [/coverage|copertura|scrub/, "coverage-next"],
     [/confronta|compare/, "confronta"],
     [/fly|vola|vai l[iì]/, "fly"],
-    [/zoom\s*paese|zoom\s*country/, "zoom-paese"],
-    [/zoom\s*continente/, "zoom-continente"],
-    [/zoom\s*out|allontana|riduci|piu\s*lontano/, "zoom-out"],
-    [/zoom\s*in|avvicina|ingrandisci|piu\s*vicino/, "zoom-in"],
-    [/\bzoom\b|citta|city/, "zoom-citta"],
-    [/\bmappa\b|\bmap\b|globo|cartina/, "map"],
-    [/pipeline/, "pipeline"],
-    [/memory|memoria/, "memory"],
-    [/\bchat\b|assistente/, "chat"],
     [/funzionamento|controlli\s*plancia|pagina\s*controllo|\bcontrolli\b/, "controlli"],
     [/strumenti|tools/, "strumenti"],
     [/tema\s*(cyan|ciano)/, "tema-cyan"],
@@ -4226,7 +4193,7 @@ function wireUi() {
       e.preventDefault();
       const runZoom = () => {
         if (getViewer()) {
-          const h = zoomByFactor(zoomInKey ? 0.55 : 1.85);
+          const h = zoomByFactor(zoomInKey ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR);
           showToast(`${zoomInKey ? "ZOOM +" : "ZOOM −"}${h ? ` · ${formatAlt(h)}` : ""}`);
           return;
         }
@@ -4318,7 +4285,7 @@ function wireUi() {
   globalMicControl = setupMic($("globalMic"), (text) => {
     if (handleVoiceCommand(text)) return;
     // The call resumes when speak() reports playback ended, not on a fixed timer.
-    return Promise.resolve(window.__opsAgentqHandle?.(text)).then((handled) => {
+        return Promise.resolve(window.__opsAgentqHandle?.(text, { fromVoice: true })).then((handled) => {
       if (handled) return;
       // Do NOT auto-switch to chat module: that reloaded the whole thread (concordato +
       // first old user line like «Riassumi i top di oggi») over the plancia. Persist in

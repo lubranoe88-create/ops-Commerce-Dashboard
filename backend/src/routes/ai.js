@@ -52,6 +52,7 @@ import {
   subscribeResidentStream,
   wakeResident,
 } from "../services/atlasResident.js";
+import { readIntegrityReport } from "../services/atlasIntegrityStore.js";
 
 installAtlasResident();
 
@@ -75,6 +76,11 @@ aiRouter.get("/agentq/status", requireAiPaid, async (_req, res) => {
  */
 aiRouter.get("/agentq/resident", (_req, res) => {
   res.json(residentStatus());
+});
+
+aiRouter.get("/agentq/integrity", (_req, res) => {
+  const report = readIntegrityReport();
+  res.json({ ok: true, report });
 });
 
 aiRouter.post("/agentq/resident/wake", async (req, res) => {

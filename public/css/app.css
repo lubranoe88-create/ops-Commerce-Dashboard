@@ -1441,6 +1441,7 @@ body[data-module="chat"] .analizza-bar { z-index: 50; }
   color: rgba(220, 230, 240, 0.9);
   font-size: 12px;
   letter-spacing: 0.02em;
+  white-space: pre-wrap;
 }
 .bubble.assistant::before,
 .bubble.system:not([data-history-trim]):not([data-atlas-greet])::before {

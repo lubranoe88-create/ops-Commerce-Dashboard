@@ -17,6 +17,8 @@ import { getDashboardSnapshot } from "../memory/store.js";
 import { ATLAS_NAME, withAtlasPersona } from "./atlasPersonality.js";
 import { describePolicy, gateHandActions } from "./atlasAutonomyPolicy.js";
 import { noteResidentIngress } from "./atlasResidentBus.js";
+import { planHandsFromUtterance } from "./atlasHandsPlan.js";
+import { problemsFromIntegrityReport, readIntegrityReport } from "./atlasIntegrityStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(__dirname, "../../data");
@@ -91,9 +93,21 @@ export const AGENTQ_HAND_ACTIONS = [
   { id: "zoom-citta", label: "Zoom città", group: "zoom" },
   { id: "zoom-paese", label: "Zoom paese", group: "zoom" },
   { id: "zoom-continente", label: "Zoom continente", group: "zoom" },
+  { id: "zoom-world", label: "Zoom mondo sul globo", group: "zoom" },
   { id: "refresh", label: "Aggiorna dati", group: "sistema" },
+  { id: "news", label: "Aggiorna pin news", group: "sistema" },
   { id: "strumenti", label: "Apri strumenti", group: "sistema" },
+  { id: "briefing", label: "Apri briefing", group: "popup" },
+  { id: "document", label: "Apri documento sandbox", group: "popup" },
 ];
+
+export function sandboxDirectoryExists() {
+  try {
+    return fs.existsSync(SANDBOX_ROOT) && fs.statSync(SANDBOX_ROOT).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 function replaceAgentDisplayName(text) {
   return String(text ?? "").replace(/\bAgente Q\b|\bAgent Q\b|\bAgentQ\b/g, ATLAS_NAME);
@@ -562,6 +576,9 @@ export async function getAgentqProblems({ limit = 24 } = {}) {
       status: "error",
     });
   }
+  for (const problem of problemsFromIntegrityReport(readIntegrityReport())) {
+    problems.push(problem);
+  }
   problems.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "high" ? -1 : 1));
   return {
     ok: true,
@@ -651,12 +668,38 @@ export function readSandboxDocument(relPath) {
  * Piano mani: dato un obiettivo in linguaggio naturale, propone azioni plancia
  * usando il modello già configurato (OpenRouter env).
  */
+function handsResult(gated, extra = {}) {
+  return {
+    ok: true,
+    actions: gated.actions,
+    ask: gated.ask,
+    tagged: gated.tagged,
+    speak: extra.speak || "",
+    document: extra.document || "",
+    briefing: Boolean(extra.briefing),
+    model: extra.model || null,
+    engine: extra.engine || "agentq-hands",
+  };
+}
+
 export async function planHandActions(objective) {
+  const local = planHandsFromUtterance(objective);
+  if (local.matched) {
+    // Known zoom / module / document / briefing commands do not need a model.
+    // L3 still gates the ids before the client runs them.
+    const gated = gateHandActions(local.actions);
+    return handsResult(gated, {
+      speak: local.speak,
+      document: local.document,
+      briefing: local.briefing,
+      engine: "atlas-hands-plan",
+    });
+  }
   const catalog = AGENTQ_HAND_ACTIONS.map((a) => `${a.id}: ${a.label}`).join("\n");
   const result = await completeChat({
     model: config.openRouterModel,
     system: withAtlasPersona(
-      `Sei ${ATLAS_NAME} sulla plancia OPS. Rispondi SOLO JSON: {"actions":["id",...],"speak":"breve conferma in italiano"}. Preferisci gli id del catalogo (autonomi: zoom, moduli, refresh). Se l'obiettivo chiede un altro id, includilo: scrittura, browser-use, credenziali, export e spesa oltre la fascia soft non partono da soli, la plancia chiede conferma.`,
+      `Sei ${ATLAS_NAME} sulla plancia OPS. Rispondi SOLO JSON: {"actions":["id",...],"speak":"breve conferma in italiano"}. Preferisci gli id del catalogo (autonomi: zoom, moduli, refresh, briefing, document). Se l'obiettivo chiede un altro id, includilo: scrittura, browser-use, credenziali, export e spesa oltre la fascia soft non partono da soli, la plancia chiede conferma.`,
     ),
     prompt: `Obiettivo: ${objective}\nCatalogo:\n${catalog}`,
     maxTokens: 200,
@@ -672,15 +715,7 @@ export async function planHandActions(objective) {
   // L3: only AUTO ids are returned in `actions` (safe to run).
   // ASK is flagged on `ask` / `tagged` and is not executed here.
   const gated = gateHandActions(parsed.actions);
-  return {
-    ok: true,
-    actions: gated.actions,
-    ask: gated.ask,
-    tagged: gated.tagged,
-    speak: parsed.speak || "",
-    model: result.model,
-    engine: "agentq-hands",
-  };
+  return handsResult(gated, { speak: parsed.speak || "", model: result.model, engine: "agentq-hands" });
 }
 
 export async function agentqStatus() {

@@ -70,7 +70,7 @@ describe("Atlas resident, L1 wake, L2 ingress", { concurrency: false }, () => {
           summary: "Tutto calmo sul modulo.",
           actions: ["zoom-in", "mic", "delete"],
           ask: ["export"],
-          newsLiteracy: "",
+          newsLiteracy: "Fonte bbc, non è un fatto della plancia.",
         }),
         model: "resident-test",
       };
@@ -97,6 +97,19 @@ describe("Atlas resident, L1 wake, L2 ingress", { concurrency: false }, () => {
     assert.ok(wake.ask.some((step) => step.id === "export" && step.mode === "ask"));
     assert.match(wake.newsLiteracy, /non sono fatti verificati/);
     assert.match(wake.newsLiteracy, /bbc-world-rss/);
+    assert.match(wake.newsLiteracy, /Cosa è cambiato/);
+    assert.match(wake.newsLiteracy, /Perché conta sulla plancia/);
+    assert.match(wake.newsLiteracy, /In sintesi/);
+    assert.match(wake.newsLiteracy, /Markets open/);
+    assert.notEqual(wake.newsLiteracy, "Fonte bbc, non è un fatto della plancia.");
+    assert.equal(wake.literacy.items[0].source, "bbc-world-rss");
+    assert.match(wake.literacy.items[0].whyItMatters, /pipeline/);
+    assert.match(wake.literacy.items[0].whyItMatters, /Northwind/);
+    assert.match(wake.literacy.items[0].whyItMatters, /browser-use/);
+    assert.match(wake.literacy.items[0].summary, /shares/);
+    assert.deepEqual(wake.literacy.auto, ["news"]);
+    assert.equal(wake.actions.includes("news"), false);
+    assert.equal(wake.integrity.wakeGated, false);
     assert.equal(wake.state.module, "pipeline");
   });
 
@@ -175,6 +188,90 @@ describe("Atlas resident, L1 wake, L2 ingress", { concurrency: false }, () => {
     assert.deepEqual(wake.actions, ["refresh"]);
     assert.equal(resident.residentStatus().pending, 0);
     assert.equal(resident.residentStatus().awake, true);
+  });
+
+  test("L2 news reaction explains the item and acts only under L3", async () => {
+    resident.setResidentAwakeForTests(true);
+    let body = "";
+    resident.subscribeResidentStream(
+      { setTimeout() {}, on() {} },
+      {
+        write(chunk) {
+          body += chunk;
+          return true;
+        },
+        on() {},
+        setTimeout() {},
+        writeHead() {},
+      },
+      { after: 0 },
+    );
+    resident.setResidentCompleterForTests(async () => ({
+      content: JSON.stringify({
+        summary: "Titolo esterno.",
+        actions: ["zoom-in", "delete"],
+        ask: ["export"],
+        newsLiteracy: "Fonte bbc, non è un fatto della plancia.",
+      }),
+      model: "test-model",
+    }));
+    const item = {
+      external_id: "rss:literacy-path",
+      title: "Port strike spreads",
+      summary: "ships wait outside",
+      url: "https://example.test/port",
+      source: "bbc-world-rss",
+      lat: 51.5,
+      lon: -0.1,
+    };
+    aiStore.upsertNewsItems([item]);
+    await resident.residentIdle();
+    aiStore.upsertNewsItems([{ ...item, title: "Port strike widens" }]);
+    await resident.residentIdle();
+    assert.match(body, /Fonte: bbc-world-rss/);
+    assert.match(body, /Cosa è cambiato/);
+    assert.match(body, /Perché conta sulla plancia/);
+    assert.match(body, /In sintesi/);
+    assert.match(body, /ships wait outside/);
+    assert.match(body, /non sono fatti verificati/);
+    assert.match(body, /cambiato da «Port strike spreads» a «Port strike widens»/);
+    const rows = [...body.matchAll(/^data: (\{.*\})$/gm)].map((match) => JSON.parse(match[1]));
+    const last = rows[rows.length - 1];
+    assert.equal(last.kind, "ingress");
+    assert.ok(last.actions.includes("news"));
+    assert.ok(last.actions.includes("zoom-in"));
+    assert.equal(last.actions.includes("delete"), false);
+    assert.ok(last.ask.some((step) => step.id === "delete" && step.mode === "ask"));
+    assert.equal(last.ask.some((step) => step.id === "export" && step.mode === "ask"), true);
+    assert.equal(last.newsLiteracy.includes("non è un fatto della plancia"), false);
+  });
+
+  test("a hard integrity failure gates the wake and runs no hands", async () => {
+    let calls = 0;
+    resident.setResidentCompleterForTests(async () => {
+      calls += 1;
+      return {
+        content: JSON.stringify({ summary: "non devo partire", actions: ["zoom-in"], ask: [], newsLiteracy: "" }),
+        model: "should-not-run",
+      };
+    });
+    resident.setResidentIntegrityCheckForTests(async () => ({
+      ok: false,
+      hardFail: true,
+      at: "2026-11-02T00:00:00.000Z",
+      failures: [{ id: "sandbox-path", detail: "sandbox assente" }],
+    }));
+    const wake = await resident.wakeResident({ module: "map" });
+    assert.equal(calls, 0);
+    assert.equal(wake.fallback, "integrity");
+    assert.equal(wake.integrity.wakeGated, true);
+    assert.equal(wake.integrity.ok, false);
+    assert.deepEqual(wake.actions, []);
+    assert.deepEqual(wake.ask, []);
+    assert.match(wake.summary, /Integrità di avvio non superata/);
+    assert.match(wake.summary, /sandbox-path/);
+    assert.match(wake.newsLiteracy, /Markets open/);
+    assert.match(wake.newsLiteracy, /Perché conta sulla plancia/);
   });
 
   test("awake resident forwards a new update when the plancia stream is open", async () => {
@@ -422,9 +519,11 @@ describe("Atlas resident, L1 wake, L2 ingress", { concurrency: false }, () => {
     assert.equal(storeSrc.includes('kind: "proactive"'), true);
     assert.equal(routes.includes('"/agentq/resident/wake"'), true);
     assert.equal(routes.includes('"/agentq/resident/events"'), true);
-    assert.equal(service.includes("Not a full literacy module"), true);
-    assert.equal(service.includes("c10Done"), false);
+    assert.equal(service.includes("Not a full literacy module"), false);
+    assert.equal(service.includes("explainNewsForOperator"), true);
     assert.equal(service.includes('"c10": "done"'), false);
+    assert.equal(read("backend/src/services/atlasNewsLiteracy.js").includes("Cosa è cambiato"), true);
+    assert.equal(read("backend/src/services/atlasNewsLiteracy.js").includes("Perché conta sulla plancia"), true);
 
     assert.equal(ui.includes("new EventSource"), true);
     assert.equal(ui.includes("/api/ai/agentq/resident/events?after="), true);
@@ -442,11 +541,12 @@ describe("Atlas resident, L1 wake, L2 ingress", { concurrency: false }, () => {
     const unlockAt = appJs.indexOf("opts.ifUnlocked", speakAt);
     const releaseAt = appJs.indexOf("releaseForTts", speakAt);
     assert.ok(speakAt > 0 && yieldAt > speakAt && unlockAt > yieldAt && releaseAt > unlockAt);
-    assert.equal(appJs.includes('const BUILD_ID = "rail-29-resident"'), true);
+    assert.equal(appJs.includes('const BUILD_ID = "rail-30-actuate"'), true);
     assert.equal(appJs.includes("module: () => state.module"), true);
-    assert.equal(read("backend/src/server.js").includes('build: "rail-29-resident"'), true);
+    assert.equal(read("backend/src/server.js").includes('build: "rail-30-actuate"'), true);
     assert.equal(read("public/index.html").includes("rail-28-c1"), false);
-    assert.equal(read("backend/public/index.html").includes("rail-29-resident"), true);
+    assert.equal(read("public/index.html").includes("rail-29-resident"), false);
+    assert.equal(read("backend/public/index.html").includes("rail-30-actuate"), true);
     assert.match(read("public/css/app.css"), /data-atlas-resident/);
   });
 });

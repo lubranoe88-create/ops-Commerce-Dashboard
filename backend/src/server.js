@@ -18,6 +18,8 @@ import { ensureAiSchema } from "./memory/aiStore.js";
 import { getDb } from "./memory/db.js";
 import { refreshWorldNews } from "./services/newsIngest.js";
 import { installAtlasResident } from "./services/atlasResident.js";
+import { readIntegrityReport } from "./services/atlasIntegrityStore.js";
+import { runStartupIntegrity } from "./services/atlasStartupIntegrity.js";
 import { applyBrowserUseRuntimeEnv } from "./services/browserUseRuntime.js";
 
 applyBrowserUseRuntimeEnv();
@@ -90,7 +92,12 @@ const chatLimiter = rateLimit({
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    build: "rail-29-resident",
+    build: "rail-30-actuate",
+    integrity: (() => {
+      const report = readIntegrityReport();
+      if (!report) return null;
+      return { ok: report.ok === true, at: report.at || null, failures: report.failures || [] };
+    })(),
     browserProbe: "example-1",
     model: config.openRouterModel,
     routerModel: config.aiRouterModel,
@@ -163,7 +170,16 @@ app.use((err, _req, res, _next) => {
   return res.status(500).json({ error: "Internal server error" });
 });
 
-app.listen(config.port, config.host, () => {
-  console.log(`Dashboard listening on http://${config.host}:${config.port}`);
-  console.log(`Static UI: ${publicDir}`);
-});
+// M5: integrity finishes before the port opens. A hard failure is persisted
+// and surfaced; it does not stop the process. The resident wake reads the
+// same report and withholds hand actions while it is red.
+runStartupIntegrity({ reason: "boot" })
+  .catch((err) => {
+    console.warn("[integrity] boot", err?.message || err);
+  })
+  .finally(() => {
+    app.listen(config.port, config.host, () => {
+      console.log(`Dashboard listening on http://${config.host}:${config.port}`);
+      console.log(`Static UI: ${publicDir}`);
+    });
+  });

@@ -3,8 +3,9 @@
  * - Aggiornamenti all'ingresso
  * - Ricerca on-demand (sandbox + API + web hint)
  * - Pop-up documenti
- * - Mani: esegue azioni plancia via runHoloAction
+ * - Mani: piano Atlas → runHoloAction (zoom, moduli, briefing, documenti)
  */
+import { payloadFromLocalPlan, planHandsFromUtterance } from "./atlasHandsPlan.js";
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -231,6 +232,7 @@ const AUTO_HANDS = new Set([
   "status", "agentq-status", "function-board", "budget-status", "health",
   "controlli", "funzionamento",
   "refresh", "updates", "news", "entry-updates", "updates-read",
+  "briefing",
 ]);
 
 function handId(item) {
@@ -353,7 +355,10 @@ export async function executeHandPlan(data, ctx = {}, { respectCall = false, qui
     } else {
       postChatUpdate?.(`Mani · ${step.id}`);
     }
-    await runHoloAction?.(step.id, { fromVoice: false });
+    await runHoloAction?.(step.id, {
+      fromVoice: Boolean(ctx.fromVoice),
+      hand: { path: data?.document || data?.path || "", briefing: Boolean(data?.briefing) },
+    });
   }
   return data;
 }
@@ -375,10 +380,11 @@ let residentStarted = false;
 let residentSource = null;
 
 function residentBubble(data) {
-  return [data?.summary, data?.newsLiteracy]
+  const literacy = data?.literacy?.text || data?.newsLiteracy || "";
+  return [data?.summary, literacy]
     .map((part) => String(part || "").trim())
     .filter(Boolean)
-    .join(" — ");
+    .join("\n\n");
 }
 
 function withoutMic(data) {
@@ -447,12 +453,101 @@ export async function startAtlasResident(ctx = {}) {
 }
 
 export function isHandsRequest(text) {
-  const t = String(text || "").toLowerCase();
-  return /\b(apri|vai|mostra|zoom|mani|controlla modulo|agent\s*q)\b/.test(t);
+  return planHandsFromUtterance(text).matched || /^(?:agent\s*q|mani)\b/i.test(String(text || "").trim());
+}
+
+async function fetchHandPlan(objective) {
+  return api("/api/ai/agentq/hands", {
+    method: "POST",
+    body: JSON.stringify({ objective }),
+  });
+}
+
+/**
+ * Chat and voice commands. A matched plan (zoom, module, document, briefing)
+ * runs through the server Atlas plan when it answers, and through the same
+ * local plan into runHoloAction when it does not.
+ */
+export async function handleAtlasCommand(raw, ctx = {}) {
+  const text = String(raw || "").trim();
+  if (!text) return false;
+  if (isSearchRequest(text)) {
+    const q = extractSearchQuery(text);
+    await runOnDemandSearch(q, {
+      postChatUpdate: ctx.postChatUpdate,
+      openDoc: true,
+    });
+    return true;
+  }
+  if (/^(problemi|errori|monitoraggio|cosa\s+da\s+sistemare)\b/i.test(text)) {
+    try {
+      await showProblems({ postChatUpdate: ctx.postChatUpdate });
+    } catch (err) {
+      ctx.postChatUpdate?.(err?.message || "Monitoraggio non disponibile", "warn");
+    }
+    return true;
+  }
+  if (/^(memorizza|ricorda|salva\s+in\s+memoria)\b/i.test(text)) {
+    const note = text.replace(/^(memorizza|ricorda|salva\s+in\s+memoria)\s*/i, "").trim();
+    if (!note) {
+      ctx.postChatUpdate?.("Per espandere la memoria indica cosa salvare (es. «memorizza budget Q4»).", "warn");
+      return true;
+    }
+    try {
+      const data = await api("/api/ai/agentq/memory", {
+        method: "POST",
+        body: JSON.stringify({ title: note.slice(0, 80), text: note, tags: ["voice"] }),
+      });
+      ctx.postChatUpdate?.(
+        `Memoria Atlas aggiornata (${data.count} note). Id: ${data.entry?.id || "—"}`,
+        "ok",
+      );
+      ctx.speak?.(`Memoria aggiornata. Ora ho ${data.count} note.`);
+    } catch (err) {
+      ctx.postChatUpdate?.(err?.message || "Memoria non aggiornata", "warn");
+    }
+    return true;
+  }
+
+  const local = planHandsFromUtterance(text);
+  const handsPrefix = /^(?:agent\s*q|mani)\b/i.test(text);
+  if (!local.matched && !handsPrefix) return false;
+
+  let data = null;
+  try {
+    data = ctx.resolveHands ? await ctx.resolveHands(text, local) : await fetchHandPlan(text);
+  } catch (err) {
+    data = null;
+    if (local.matched) {
+      ctx.postChatUpdate?.(`Mani Atlas in locale: ${err?.message || "piano server non raggiunto"}.`, "warn");
+    } else {
+      ctx.postChatUpdate?.(err?.message || "Atlas: piano mani non disponibile.", "warn");
+      return true;
+    }
+  }
+  if (data && local.document && !data.document) data = { ...data, document: local.document };
+  if (data && local.briefing) data = { ...data, briefing: true };
+  const hasSteps = data && (data.actions?.length || data.ask?.length || data.tagged?.length);
+  if (!hasSteps) {
+    if (local.matched) data = payloadFromLocalPlan(local);
+    else {
+      ctx.postChatUpdate?.("Atlas: nessuna azione plancia per questo comando.", "warn");
+      return true;
+    }
+  }
+  if (data.speak) {
+    ctx.postChatUpdate?.(`Atlas: ${data.speak}`);
+    ctx.speak?.(data.speak);
+  }
+  await executeHandPlan(data, ctx, { quietIfEmpty: true });
+  return true;
 }
 
 export async function wireAgentqUi(ctx) {
   ensurePopup();
+  const handleAgentqCommand = (raw, opts = {}) => handleAtlasCommand(raw, { ...ctx, ...opts });
+  window.__opsOpenDoc = (rel) => openSandboxDoc(rel, ctx);
+  window.__opsAgentqHandle = handleAgentqCommand;
   // Resident wake once per boot. Raw ingress dump only if that one shot fails.
   try {
     await startAtlasResident(ctx);
@@ -461,66 +556,11 @@ export async function wireAgentqUi(ctx) {
     await showEntryUpdates(ctx);
   }
 
-  // Comandi dalla barra Analizza: intercept search / hands before normal chat when prefixed
+  // Comandi dalla barra Analizza e dal microfono: stesso piano mani.
   const input = $("chatInput");
   const send = $("sendChat");
   if (!input || input.dataset.agentqWired) return;
   input.dataset.agentqWired = "1";
-
-  const handleAgentqCommand = async (raw) => {
-    const text = String(raw || "").trim();
-    if (!text) return false;
-    if (isSearchRequest(text)) {
-      const q = extractSearchQuery(text);
-      await runOnDemandSearch(q, {
-        postChatUpdate: ctx.postChatUpdate,
-        openDoc: true,
-      });
-      return true;
-    }
-    if (/^(problemi|errori|monitoraggio|cosa\s+da\s+sistemare)\b/i.test(text)) {
-      try {
-        await showProblems({ postChatUpdate: ctx.postChatUpdate });
-      } catch (err) {
-        ctx.postChatUpdate?.(err?.message || "Monitoraggio non disponibile", "warn");
-      }
-      return true;
-    }
-    if (/^(memorizza|ricorda|salva\s+in\s+memoria)\b/i.test(text)) {
-      const note = text.replace(/^(memorizza|ricorda|salva\s+in\s+memoria)\s*/i, "").trim();
-      if (!note) {
-        ctx.postChatUpdate?.("Per espandere la memoria indica cosa salvare (es. «memorizza budget Q4»).", "warn");
-        return true;
-      }
-      try {
-        const data = await api("/api/ai/agentq/memory", {
-          method: "POST",
-          body: JSON.stringify({ title: note.slice(0, 80), text: note, tags: ["voice"] }),
-        });
-        ctx.postChatUpdate?.(
-          `Memoria Atlas aggiornata (${data.count} note). Id: ${data.entry?.id || "—"}`,
-          "ok",
-        );
-        ctx.speak?.(`Memoria aggiornata. Ora ho ${data.count} note.`);
-      } catch (err) {
-        ctx.postChatUpdate?.(err?.message || "Memoria non aggiornata", "warn");
-      }
-      return true;
-    }
-    if (/^apri\s+documento\s+/i.test(text)) {
-      const rel = text.replace(/^apri\s+documento\s+/i, "").trim();
-      await openSandboxDoc(rel.startsWith("sandbox://") ? rel : `sandbox://${rel}`, ctx);
-      return true;
-    }
-    if (/^(agent\s*q|mani)\b/i.test(text) || /^(apri|zoom)\s+(mappa|pipeline|memory|chat|globo)/i.test(text)) {
-      await runHands(text, ctx);
-      return true;
-    }
-    return false;
-  };
-
-  // Expose for mic/voice path
-  window.__opsAgentqHandle = handleAgentqCommand;
 
   const origClick = send?.onclick;
   send?.addEventListener(

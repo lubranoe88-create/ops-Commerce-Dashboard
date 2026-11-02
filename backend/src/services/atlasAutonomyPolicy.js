@@ -66,6 +66,7 @@ const AUTO_MATRIX = Object.freeze({
     "tema-cyan",
     "tema-amber",
     "tema-mint",
+    "briefing",
   ]),
   read: Object.freeze([
     "read",

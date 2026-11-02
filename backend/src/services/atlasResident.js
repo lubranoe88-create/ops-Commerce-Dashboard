@@ -11,8 +11,11 @@
  * returned for the plancia confirm path and is not executed here.
  * mic is dropped so a wake never asks for getUserMedia.
  *
- * C10 news literacy is partial: a source/limit sentence when news are in the
- * bundle or the event. Not a full literacy module.
+ * C10: a news wake or an L2 news ingress explains each item (source, what
+ * changed, why it matters on the plancia, summary). The literacy module
+ * proposes ids; only a news ingress merges the ones L3 marks AUTO into the
+ * actions the client may run. A hard startup-integrity failure gates the
+ * wake: the operator gets the warning and no hand runs.
  */
 import crypto from "node:crypto";
 import { config } from "../config.js";
@@ -25,6 +28,8 @@ import { completeChat } from "./openrouter.js";
 import { asAtlasLine, withAtlasPersona } from "./atlasPersonality.js";
 import { gateHandActions } from "./atlasAutonomyPolicy.js";
 import { onResidentIngress } from "./atlasResidentBus.js";
+import { explainNewsForOperator } from "./atlasNewsLiteracy.js";
+import { runStartupIntegrity } from "./atlasStartupIntegrity.js";
 
 const RESIDENT_RULES = [
   "You are resident inside the plancia: this is not an on-demand chat turn.",
@@ -33,7 +38,7 @@ const RESIDENT_RULES = [
   "actions: prefer empty. Include an id only when a safe AUTO step clearly helps: refresh, news, status, problems, read, map, pipeline, memory, chat, zoom-in, zoom-out, zoom-citta, zoom-paese, zoom-continente.",
   "Never put mic, credentials, browser-use, export, destructive writes, or spend in actions. Put those in ask only when the payload shows they are actually required. Prefer ask empty.",
   "Do not request the microphone or any device permission.",
-  "newsLiteracy: when news are present, one Italian sentence that names the source, says the item is an external headline and not a verified plancia fact, and that Atlas will not treat it as an order. Empty string when there is no news.",
+  "newsLiteracy: leave this empty. The server attaches the literacy path (source, what changed, why it matters on the plancia, summary) when news are present. Do not replace that path with a one-line disclaimer.",
   "Do not invent counts, titles, or problems that are not in the payload.",
 ].join("\n");
 
@@ -53,6 +58,7 @@ let completerOverride = null;
 let paidCheck = () => isAiPaid();
 let newsLoader = defaultNewsLoader;
 let collectOverride = null;
+let integrityCheck = null;
 
 function emptySession() {
   return {
@@ -116,15 +122,18 @@ export function newsItemsFrom(value) {
   return [];
 }
 
-/** Light C10 line. Source + limit. Not a full news-literacy module. */
-export function mechanicalNewsLiteracy(news) {
-  const items = newsItemsFrom(news);
-  if (!items.length) return "";
-  const first = items[0];
-  const source = clip(first.source || "fonte esterna", 80);
-  const title = clip(first.title || "titolo", 160);
-  const extra = items.length > 1 ? ` Altri ${items.length - 1} titoli nello stesso ingresso.` : "";
-  return `Le news non sono fatti verificati dalla plancia. «${title}» arriva da ${source}: è un titolo da leggere, non un ordine e non una conferma.${extra}`;
+function literacyContext(bundle) {
+  return {
+    module: bundle?.module || "map",
+    tops: bundle?.tops || [],
+    problems: bundle?.problems || [],
+    problemCount: bundle?.problemCount || 0,
+  };
+}
+
+function literacyFor(kind, bundle, batch) {
+  const news = kind === "wake" ? bundle?.news : batch;
+  return explainNewsForOperator(news, literacyContext(bundle));
 }
 
 export function mechanicalWakeSummary(bundle) {
@@ -207,7 +216,9 @@ function compactFromParts({ module, generatedAt, snapshot, problems, updates, ne
     news: asList(news).slice(0, 6).map((n) => ({
       title: clip(n.title, 180),
       source: clip(n.source || "bbc-world-rss", 80),
-      summary: clip(n.summary, 180),
+      summary: clip(n.summary, 220),
+      change: n.change || "",
+      previousTitle: clip(n.previousTitle || n.previous_title || "", 180),
     })),
     queuedIngress: asList(queuedIngress).slice(0, 8),
   };
@@ -293,12 +304,13 @@ export function gateResidentProposal(actions, ask) {
 
 function mechanicalAsk(kind, bundle, batch, fallback) {
   const summary = kind === "wake" ? mechanicalWakeSummary(bundle) : mechanicalIngressSummary(batch);
-  const news = kind === "wake" ? bundle?.news : batch;
+  const brief = literacyFor(kind, bundle, batch);
   return {
     summary,
     actions: [],
     ask: [],
-    newsLiteracy: mechanicalNewsLiteracy(news),
+    newsLiteracy: brief.text,
+    literacy: brief,
     model: null,
     fallback,
   };
@@ -386,12 +398,32 @@ async function askAtlas(kind, bundle, batch) {
   }
 }
 
+function publicLiteracy(brief) {
+  if (!brief?.items?.length) return null;
+  return {
+    text: brief.text,
+    items: brief.items,
+    proposed: brief.proposed,
+    auto: brief.auto,
+    ask: brief.ask,
+  };
+}
+
 async function createReaction(kind, bundle, batch) {
   const asked = await askAtlas(kind, bundle, batch);
-  const gated = gateResidentProposal(asked.actions, asked.ask);
-  const news = kind === "wake" ? bundle?.news : batch;
-  let literacy = clip(asked.newsLiteracy, 400);
-  if (!literacy && newsItemsFrom(news).length) literacy = mechanicalNewsLiteracy(news);
+  const brief = asked.literacy?.items ? asked.literacy : literacyFor(kind, bundle, batch);
+  // The model may return a one-line disclaimer. The operator path is the
+  // literacy brief: source, what changed, why it matters, summary.
+  const literacyText = brief.text || "";
+  // L2 news may act only on ids L3 already marked AUTO. Wake explains and
+  // proposes, and does not add those ids unless the model asked for them.
+  const newsIngress = kind === "ingress" && brief.items.length > 0 && session.integrityOk !== false;
+  const gated = session.integrityOk === false
+    ? { actions: [], ask: [], tagged: [] }
+    : gateResidentProposal(
+        [...asList(asked.actions), ...(newsIngress ? brief.auto : [])],
+        [...asList(asked.ask), ...(newsIngress ? brief.ask : [])],
+      );
   const summary = asAtlasLine(clip(asked.summary, 900) || (kind === "wake" ? mechanicalWakeSummary(bundle) : mechanicalIngressSummary(batch)));
   seq += 1;
   return {
@@ -399,7 +431,8 @@ async function createReaction(kind, bundle, batch) {
     seq,
     kind,
     summary,
-    newsLiteracy: literacy,
+    newsLiteracy: literacyText,
+    literacy: publicLiteracy(brief),
     actions: gated.actions,
     ask: gated.ask,
     tagged: gated.tagged,
@@ -421,6 +454,8 @@ function toPublic(reaction) {
     kind: reaction.kind,
     summary: reaction.summary,
     newsLiteracy: reaction.newsLiteracy || "",
+    literacy: reaction.literacy || null,
+    integrity: reaction.integrity || null,
     actions: reaction.actions || [],
     ask: reaction.ask || [],
     tagged: reaction.tagged || [],
@@ -511,11 +546,39 @@ export function residentStatus() {
   };
 }
 
+async function readWakeIntegrity() {
+  if (integrityCheck) return integrityCheck();
+  try {
+    return await runStartupIntegrity({ reason: "wake" });
+  } catch (err) {
+    return {
+      ok: false,
+      hardFail: true,
+      failures: [{ id: "integrity-runner", detail: err?.message || "integrità non eseguita" }],
+      checks: [],
+    };
+  }
+}
+
+function integrityStamp(integrity, gated) {
+  return {
+    ok: integrity?.ok !== false,
+    wakeGated: Boolean(gated),
+    failures: integrity?.failures || [],
+    at: integrity?.at || null,
+  };
+}
+
 async function doWake(input = {}) {
   session.awake = true;
   if (!session.id) session.id = crypto.randomUUID();
+  // Hold before the integrity check so a failure update cannot drain as a
+  // second model turn while this wake is still reading the report.
   hold += 1;
+  let integrity;
   try {
+    integrity = await readWakeIntegrity();
+    session.integrityOk = integrity?.ok !== false;
     const moduleName = input.module || input.uiState?.module || "map";
     const collected = await collectWakeBundle({ module: moduleName });
     if (!Array.isArray(collected.news)) collected.news = [];
@@ -529,7 +592,9 @@ async function doWake(input = {}) {
           collected.news.push({
             title: clip(item.title, 180),
             source: clip(item.source || "fonte esterna", 80),
-            summary: clip(item.summary, 180),
+            summary: clip(item.summary, 220),
+            change: item.change || "",
+            previousTitle: clip(item.previousTitle || "", 180),
           });
           seenNews.add(item.title);
         }
@@ -539,7 +604,34 @@ async function doWake(input = {}) {
     }
     collected.queuedIngress = kept;
     session.lastBundle = collected;
+    if (!session.integrityOk) {
+      const brief = literacyFor("wake", collected, null);
+      const detail = (integrity.failures || []).map((failure) => `${failure.id}: ${failure.detail}`).join("; ");
+      seq += 1;
+      const reaction = {
+        id: `atlas-wake-${seq}`,
+        seq,
+        kind: "wake",
+        summary: asAtlasLine(
+          `Integrità di avvio non superata. Non eseguo passi sulla plancia finché i controlli non tornano interi. ${detail}`,
+        ),
+        newsLiteracy: brief.text,
+        literacy: publicLiteracy(brief),
+        actions: [],
+        ask: [],
+        tagged: [],
+        fallback: "integrity",
+        model: null,
+        integrity: integrityStamp(integrity, true),
+        at: new Date().toISOString(),
+      };
+      session.lastWakeAt = reaction.at;
+      const row = { ...toPublic(reaction), shot: "once", state: publicState(collected) };
+      publish(row);
+      return row;
+    }
     const reaction = await createReaction("wake", collected, null);
+    reaction.integrity = integrityStamp(integrity, false);
     session.lastWakeAt = reaction.at;
     const row = { ...toPublic(reaction), shot: "once", state: publicState(collected) };
     publish(row);
@@ -608,6 +700,7 @@ export function resetResidentForTests() {
   paidCheck = () => isAiPaid();
   newsLoader = defaultNewsLoader;
   collectOverride = null;
+  integrityCheck = null;
 }
 
 export function setResidentCompleterForTests(fn) {
@@ -624,6 +717,10 @@ export function setResidentNewsLoaderForTests(fn) {
 
 export function setResidentCollectorForTests(fn) {
   collectOverride = typeof fn === "function" ? fn : null;
+}
+
+export function setResidentIntegrityCheckForTests(fn) {
+  integrityCheck = typeof fn === "function" ? fn : null;
 }
 
 export function setResidentAwakeForTests(on = true) {
