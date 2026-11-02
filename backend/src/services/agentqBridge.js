@@ -15,7 +15,6 @@ import { buildFunctionBoard } from "./functionBoard.js";
 import { getDb } from "../memory/db.js";
 import { getDashboardSnapshot } from "../memory/store.js";
 import { ATLAS_NAME, withAtlasPersona } from "./atlasPersonality.js";
-import { describePolicy, gateHandActions } from "./atlasAutonomyPolicy.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(__dirname, "../../data");
@@ -645,7 +644,7 @@ export async function planHandActions(objective) {
   const result = await completeChat({
     model: config.openRouterModel,
     system: withAtlasPersona(
-      `Sei ${ATLAS_NAME} sulla plancia OPS. Rispondi SOLO JSON: {"actions":["id",...],"speak":"breve conferma in italiano"}. Usa solo id del catalogo (autonomi: zoom, moduli, refresh). Non promettere azioni distruttive, browser-use, credenziali, export o spesa oltre la fascia soft: quelle richiedono conferma e non partono da sole.`,
+      `Sei ${ATLAS_NAME} sulla plancia OPS. Rispondi SOLO JSON: {"actions":["id",...],"speak":"breve conferma in italiano"}. Usa solo id del catalogo.`,
     ),
     prompt: `Obiettivo: ${objective}\nCatalogo:\n${catalog}`,
     maxTokens: 200,
@@ -658,14 +657,11 @@ export async function planHandActions(objective) {
   } catch {
     /* keep raw */
   }
-  // L3: only AUTO ids are returned in `actions` (safe to run).
-  // ASK is flagged on `ask` / `tagged` and is not executed here.
-  const gated = gateHandActions(parsed.actions);
+  const allowed = new Set(AGENTQ_HAND_ACTIONS.map((a) => a.id));
+  const actions = (parsed.actions || []).filter((id) => allowed.has(id));
   return {
     ok: true,
-    actions: gated.actions,
-    ask: gated.ask,
-    tagged: gated.tagged,
+    actions,
     speak: parsed.speak || "",
     model: result.model,
     engine: "agentq-hands",
@@ -701,7 +697,6 @@ export async function agentqStatus() {
       path: mem.path,
     },
     hands: AGENTQ_HAND_ACTIONS.length,
-    autonomy: describePolicy(),
     functionBoard: board?.summary || board,
     voice: {
       browserTts: true,
