@@ -12,6 +12,7 @@ import { config } from "../config.js";
 import { completeChat } from "./openrouter.js";
 import { buildFunctionBoard } from "./functionBoard.js";
 import { getDb } from "../memory/db.js";
+import { getDashboardSnapshot } from "../memory/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(__dirname, "../../data");
@@ -440,6 +441,70 @@ export function searchExpandableMemory(query, { limit = 8 } = {}) {
     score: scoreText(`${e.title} ${e.text}`, tokensOf(query)) + 1,
     meta: { at: e.at, tags: e.tags },
   }));
+}
+
+/**
+ * Monitoraggio errori/problemi plancia: function-board + pipeline_errors open.
+ */
+export async function getAgentqProblems({ limit = 24 } = {}) {
+  const problems = [];
+  let boardSummary = null;
+  try {
+    const board = await buildFunctionBoard();
+    boardSummary = board?.summary || null;
+    for (const fn of board?.functions || []) {
+      if (fn.status && fn.status !== "ok") {
+        problems.push({
+          kind: "function",
+          severity: fn.status === "error" ? "high" : "medium",
+          id: fn.id,
+          title: fn.label || fn.id,
+          detail: fn.detail || fn.errorType || fn.status,
+          status: fn.status,
+        });
+      }
+    }
+  } catch (e) {
+    problems.push({
+      kind: "function-board",
+      severity: "high",
+      id: "function-board",
+      title: "Function board unavailable",
+      detail: e.message,
+      status: "error",
+    });
+  }
+  try {
+    const snap = getDashboardSnapshot();
+    for (const err of snap?.errors || []) {
+      if (err.status !== "open") continue;
+      problems.push({
+        kind: "pipeline",
+        severity: err.severity === "failed" ? "high" : "medium",
+        id: `pipe-${err.id}`,
+        title: `${err.source_key || "pipeline"} · ${err.cause_code || err.severity}`,
+        detail: err.cause_text || err.impact || "",
+        status: err.status,
+      });
+    }
+  } catch (e) {
+    problems.push({
+      kind: "pipeline",
+      severity: "medium",
+      id: "pipeline-snapshot",
+      title: "Pipeline errors unavailable",
+      detail: e.message,
+      status: "error",
+    });
+  }
+  problems.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "high" ? -1 : 1));
+  return {
+    ok: true,
+    count: problems.length,
+    problems: problems.slice(0, limit),
+    functionBoard: boardSummary,
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 export function getEntryUpdates({ limit = 12 } = {}) {

@@ -87,19 +87,52 @@ export function openDocPopup({ title, kind, text, base64, mime, uri }) {
   }
 }
 
-/** Mostra ultimi aggiornamenti all'ingresso plancia (chat + toast). */
+/** Mostra ultimi aggiornamenti + problemi aperti all'ingresso plancia. */
 export async function showEntryUpdates({ postChatUpdate, showToast } = {}) {
   try {
     const data = await api("/api/ai/agentq/updates");
     const updates = data.updates || [];
-    if (!updates.length) return;
-    const lines = updates.slice(0, 5).map((u, i) => `${i + 1}. ${u.title}: ${u.detail || ""}`);
-    const msg = `Aggiornamenti recenti Agent Q\n${lines.join("\n")}`;
-    postChatUpdate?.(msg, "ok");
-    showToast?.(`Agent Q · ${updates.length} aggiornamenti`, "ok");
+    if (updates.length) {
+      const lines = updates.slice(0, 5).map((u, i) => `${i + 1}. ${u.title}: ${u.detail || ""}`);
+      const msg = `Aggiornamenti recenti Agent Q\n${lines.join("\n")}`;
+      postChatUpdate?.(msg, "ok");
+      showToast?.(`Agent Q · ${updates.length} aggiornamenti`, "ok");
+    }
   } catch (err) {
     console.warn("[agentq] updates", err?.message || err);
   }
+  try {
+    const probs = await api("/api/ai/agentq/problems");
+    const n = probs.count || 0;
+    if (n > 0) {
+      const lines = (probs.problems || [])
+        .slice(0, 5)
+        .map((p, i) => `${i + 1}. [${p.severity}] ${p.title}: ${p.detail || ""}`);
+      postChatUpdate?.(
+        `Monitoraggio Agent Q · ${n} problemi da sistemare\n${lines.join("\n")}`,
+        "warn",
+      );
+      showToast?.(`Agent Q · ${n} problemi`, "warn");
+    } else {
+      postChatUpdate?.("Monitoraggio Agent Q · nessun problema aperto.", "ok");
+    }
+  } catch (err) {
+    console.warn("[agentq] problems", err?.message || err);
+  }
+}
+
+export async function showProblems({ postChatUpdate } = {}) {
+  const probs = await api("/api/ai/agentq/problems");
+  const list = probs.problems || [];
+  if (!list.length) {
+    postChatUpdate?.("Nessun errore o problema aperto sulla plancia.", "ok");
+    return probs;
+  }
+  const lines = list.map(
+    (p, i) => `${i + 1}. [${p.kind}/${p.severity}] ${p.title} — ${p.detail || p.status}`,
+  );
+  postChatUpdate?.(`Problemi plancia (${list.length})\n${lines.join("\n")}`, "warn");
+  return probs;
 }
 
 /**
@@ -218,6 +251,35 @@ export async function wireAgentqUi(ctx) {
         postChatUpdate: ctx.postChatUpdate,
         openDoc: true,
       });
+      return true;
+    }
+    if (/^(problemi|errori|monitoraggio|cosa\s+da\s+sistemare)\b/i.test(text)) {
+      try {
+        await showProblems({ postChatUpdate: ctx.postChatUpdate });
+      } catch (err) {
+        ctx.postChatUpdate?.(err?.message || "Monitoraggio non disponibile", "warn");
+      }
+      return true;
+    }
+    if (/^(memorizza|ricorda|salva\s+in\s+memoria)\b/i.test(text)) {
+      const note = text.replace(/^(memorizza|ricorda|salva\s+in\s+memoria)\s*/i, "").trim();
+      if (!note) {
+        ctx.postChatUpdate?.("Per espandere la memoria indica cosa salvare (es. «memorizza budget Q4»).", "warn");
+        return true;
+      }
+      try {
+        const data = await api("/api/ai/agentq/memory", {
+          method: "POST",
+          body: JSON.stringify({ title: note.slice(0, 80), text: note, tags: ["voice"] }),
+        });
+        ctx.postChatUpdate?.(
+          `Memoria Agent Q aggiornata (${data.count} note). Id: ${data.entry?.id || "—"}`,
+          "ok",
+        );
+        ctx.speak?.(`Memoria aggiornata. Ora ho ${data.count} note.`, { force: true });
+      } catch (err) {
+        ctx.postChatUpdate?.(err?.message || "Memoria non aggiornata", "warn");
+      }
       return true;
     }
     if (/^apri\s+documento\s+/i.test(text)) {

@@ -43,6 +43,7 @@ import {
   AGENTQ_HAND_ACTIONS,
   listExpandableMemory,
   appendExpandableMemory,
+  getAgentqProblems,
 } from "../services/agentqBridge.js";
 
 export const aiRouter = Router();
@@ -139,6 +140,15 @@ aiRouter.post("/agentq/memory", requireAiPaid, (req, res) => {
       tags: req.body?.tags,
     }),
   );
+});
+
+/** Monitoraggio errori/problemi da sistemare (function-board + pipeline open). */
+aiRouter.get("/agentq/problems", requireAiPaid, async (req, res) => {
+  try {
+    res.json(await getAgentqProblems({ limit: Number(req.query?.limit) || 24 }));
+  } catch (err) {
+    res.status(500).json({ error: err.message || "problems failed" });
+  }
 });
 
 /** Entitlement probe — readable without paid gate so free clients see paid:false. */
