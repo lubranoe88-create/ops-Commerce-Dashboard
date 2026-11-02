@@ -26,6 +26,7 @@ import { getBudgetStatus } from "./aiBudget.js";
 import { decisionSnippet, decisionStatus, recordDecision } from "./atlasDecisionLog.js";
 import { MODULE_IDS, noteHabit } from "./atlasHabits.js";
 import { providerStatus } from "./atlasReliability.js";
+import { VOICE_DUPLEX, VOICE_DUPLEX_NOTE, wakeWordStatus } from "../../public/js/atlasCall.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(__dirname, "../../data");
@@ -893,8 +894,13 @@ export async function agentqStatus() {
       serverTts: true,
       whisperStt: true,
       nativeAgentqTts: false,
+      duplex: VOICE_DUPLEX,
+      duplexNote: VOICE_DUPLEX_NOTE,
+      primaryTts: config.openRouterTtsModel,
+      fallbackTts: ["cartesia", "deepgram/aura-2", "microsoft/mai-voice-2.1-flash"],
+      wakeWord: wakeWordStatus(config.voiceAlwaysOn),
       note:
-        "iPad: unlock TTS su pointerdown MIC; server TTS→AudioContext; MediaRecorder+Whisper; no SpeechRecognition",
+        "iPad: unlock TTS su pointerdown MIC; server TTS→AudioContext; MediaRecorder+Whisper; no SpeechRecognition. Barge-in cancella HTMLAudio/AudioContext; WebRTC duplex non è usato.",
     },
   };
 }

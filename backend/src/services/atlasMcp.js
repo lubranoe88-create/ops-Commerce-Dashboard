@@ -241,7 +241,7 @@ export async function handleMcpMessage(message) {
         return rpcResult(id, {
           protocolVersion: PROTOCOL,
           capabilities: { tools: { listChanged: true } },
-          serverInfo: { name: "Atlas", version: "rail-34-jarvis" },
+          serverInfo: { name: "Atlas", version: "rail-35-voice" },
           instructions: "Atlas è il nome verso l'operatore. I tool sono le mani e i playbook della plancia.",
         });
       case "notifications/initialized":

@@ -93,7 +93,13 @@ const chatLimiter = rateLimit({
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    build: "rail-34-jarvis",
+    build: "rail-35-voice",
+    voice: {
+      duplex: "barge-cancel",
+      alwaysOn: config.voiceAlwaysOn,
+      wakeWord: "deferred",
+      primaryTts: config.openRouterTtsModel,
+    },
     integrity: (() => {
       const report = readIntegrityReport();
       if (!report) return null;

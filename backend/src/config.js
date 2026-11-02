@@ -22,6 +22,12 @@ function floatEnv(name, fallback) {
   return n;
 }
 
+function usableSecret(value) {
+  const secret = String(value || "").trim();
+  if (!secret || /CHANGE_ME|PLACEHOLDER|your-key/i.test(secret)) return "";
+  return secret;
+}
+
 /** Placeholders allowed so the site boots before the user fills secrets. */
 function secretOrPlaceholder(name, placeholder) {
   const value = process.env[name]?.trim();
@@ -50,11 +56,30 @@ export const config = {
   rateLimitWindowMs: intEnv("RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
   /** Dashboard + Agent Q voice poll many endpoints; 60 was too tight (429 on iPad QA). */
   rateLimitMax: intEnv("RATE_LIMIT_MAX", 300),
-  /** OpenRouter TTS model for iPad AudioContext playback fallback. */
-  openRouterTtsModel:
-    process.env.OPENROUTER_TTS_MODEL?.trim() || "microsoft/mai-voice-2.1-flash",
-  openRouterTtsVoice:
-    process.env.OPENROUTER_TTS_VOICE?.trim() || "it-IT-Rosa:MAI-Voice-2.1-Flash",
+  /**
+   * Primary TTS is ElevenLabs Flash. OPENROUTER_TTS_MODEL overrides only when it
+   * is an eleven-flash slug; other values stay on the fallback chain.
+   */
+  openRouterTtsModel: /^elevenlabs\/eleven-flash/i.test(process.env.OPENROUTER_TTS_MODEL?.trim() || "")
+    ? process.env.OPENROUTER_TTS_MODEL.trim()
+    : "elevenlabs/eleven-flash-v2.5",
+  openRouterTtsVoice: (() => {
+    const raw = process.env.OPENROUTER_TTS_VOICE?.trim() || "";
+    if (raw && !/MAI-Voice|aura-2|it-IT-/i.test(raw)) return raw;
+    return "sarah";
+  })(),
+  /** Direct ElevenLabs Flash when ELEVENLABS_API_KEY is set; otherwise OpenRouter. */
+  elevenLabsApiKey: usableSecret(process.env.ELEVENLABS_API_KEY),
+  elevenLabsModel: process.env.ELEVENLABS_MODEL?.trim() || "eleven_flash_v2_5",
+  elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID?.trim() || "EXAVITQu4vr4xnSDxMaL",
+  /** Cartesia is direct-only: it is not on the OpenRouter speech catalog. */
+  cartesiaApiKey: usableSecret(process.env.CARTESIA_API_KEY),
+  cartesiaModel: process.env.CARTESIA_MODEL?.trim() || "sonic-3.6",
+  cartesiaVoiceId:
+    process.env.CARTESIA_VOICE_ID?.trim() || "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+  cartesiaVersion: process.env.CARTESIA_VERSION?.trim() || "2026-08-14",
+  /** Stub only. X6 wake-word stays off even when this is true. */
+  voiceAlwaysOn: /^(1|true|on|yes)$/i.test(String(process.env.VOICE_ALWAYS_ON || "").trim()),
   maxPromptChars: intEnv("MAX_PROMPT_CHARS", 8000),
   maxSystemChars: intEnv("MAX_SYSTEM_CHARS", 2000),
   maxTokens: intEnv("MAX_TOKENS", 1024),

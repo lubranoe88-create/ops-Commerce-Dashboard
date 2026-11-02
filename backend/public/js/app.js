@@ -40,17 +40,19 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-34-jarvis";
-import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-34-jarvis";
+import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-35-voice";
+import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-35-voice";
 import {
   dispatchAtlasHand,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
-} from "./atlasHoloDispatch.js?v=rail-34-jarvis";
-import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-34-jarvis";
-import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-34-jarvis";
+} from "./atlasHoloDispatch.js?v=rail-35-voice";
+import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-35-voice";
+import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-35-voice";
+import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-35-voice";
+import { VOICE_DUPLEX, reduceCall, shouldYieldToCall } from "./atlasCall.js?v=rail-35-voice";
 
-const BUILD_ID = "rail-34-jarvis";
+const BUILD_ID = "rail-35-voice";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1084,6 +1086,10 @@ async function refreshSecretsStatus() {
   try {
     const h = await fetch("/health", { credentials: "same-origin" }).then((r) => r.json());
     state.secrets = h.secrets_configured || null;
+    // X6 wake-word stays deferred. The env stub is recorded and does not start listening.
+    document.documentElement.dataset.voiceAlwaysOn = h.voice?.alwaysOn ? "1" : "0";
+    document.documentElement.dataset.wakeWord = h.voice?.wakeWord || "deferred";
+    document.documentElement.dataset.voiceDuplex = h.voice?.duplex || VOICE_DUPLEX;
   } catch {
     state.secrets = null;
   }
@@ -1616,8 +1622,31 @@ function speakViaSpeechSynthesis(line) {
 }
 
 
+function playbackStale(token) {
+  return token !== state._ttsToken;
+}
+
+/** New TTS generation. Cancels any HTMLAudio / AudioContext playback already running. */
+function armPlayback() {
+  try { state._ttsAbort?.abort(); } catch { /* ignore */ }
+  silenceVoice();
+  state._ttsToken = (state._ttsToken || 0) + 1;
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  state._ttsAbort = ctrl;
+  state._ttsPlaying = true;
+  return { token: state._ttsToken, signal: ctrl?.signal };
+}
+
+/** Barge-in and hangup: stop Web Audio and HTMLAudio without starting a new clip. */
+function cancelPlayback() {
+  state._ttsToken = (state._ttsToken || 0) + 1;
+  state._ttsPlaying = false;
+  try { state._ttsAbort?.abort(); } catch { /* ignore */ }
+  silenceVoice();
+}
+
 /** Resolves when HTMLAudio or an AudioBufferSourceNode finishes, with a duration cap. */
-function waitForPlaybackEnd(target, durationSec) {
+function waitForPlaybackEnd(target, durationSec, token) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = () => {
@@ -1642,18 +1671,33 @@ function waitForPlaybackEnd(target, durationSec) {
     const cap = Number.isFinite(dur) && dur > 0 && dur < 180
       ? Math.min(dur * 1000 + 700, 60000)
       : 45000;
-    setTimeout(finish, cap);
+    const started = Date.now();
+    const poll = () => {
+      if (playbackStale(token) || Date.now() - started >= cap) finish();
+      else setTimeout(poll, 80);
+    };
+    setTimeout(poll, 80);
   });
 }
 
 /** Play server MP3 on the MIC-primed AudioContext, then HTMLAudio if decode fails. */
-async function speakViaServerAudio(line) {
+async function speakViaServerAudio(line, playback) {
+  const token = playback?.token;
+  const signal = playback?.signal;
   ensureAudioSessionPlayAndRecord();
   const ctx = getPrimedAudioContext();
-  const data = await api("/api/ai/speak", {
-    method: "POST",
-    body: JSON.stringify({ text: line }),
-  });
+  let data;
+  try {
+    data = await api("/api/ai/speak", {
+      method: "POST",
+      body: JSON.stringify({ text: line }),
+      signal,
+    });
+  } catch (err) {
+    if (playbackStale(token) || err?.name === "AbortError") return false;
+    throw err;
+  }
+  if (playbackStale(token)) return false;
   const b64 = data?.audioBase64;
   const mime = data?.mime || "audio/mpeg";
   if (!b64) throw new Error(data?.reply || "TTS server senza audio");
@@ -1664,6 +1708,7 @@ async function speakViaServerAudio(line) {
   }
 
   const playHtml = async () => {
+    if (playbackStale(token)) return false;
     primeHtmlAudioElement?.();
     const audio = state._ttsAudio || new Audio();
     try {
@@ -1676,6 +1721,10 @@ async function speakViaServerAudio(line) {
     audio.src = `data:${mime};base64,${b64}`;
     state._ttsAudio = audio;
     await audio.play();
+    if (playbackStale(token)) {
+      try { audio.pause(); } catch { /* ignore */ }
+      return false;
+    }
     let dur = audio.duration;
     if (!Number.isFinite(dur) || dur <= 0) {
       await new Promise((resolve) => {
@@ -1685,14 +1734,16 @@ async function speakViaServerAudio(line) {
       });
       dur = audio.duration;
     }
-    await waitForPlaybackEnd(audio, dur);
-    return true;
+    await waitForPlaybackEnd(audio, dur, token);
+    return !playbackStale(token);
   };
 
   const playCtx = async () => {
+    if (playbackStale(token)) return false;
     if (!ctx) throw new Error("AudioContext assente");
     ensureAudioSessionPlayAndRecord();
     await ctx.resume?.();
+    if (playbackStale(token)) return false;
     if (ctx.state && ctx.state !== "running") {
       throw new Error(`AudioContext ${ctx.state}`);
     }
@@ -1719,6 +1770,7 @@ async function speakViaServerAudio(line) {
         bad(err);
       }
     });
+    if (playbackStale(token)) return false;
     try {
       state._ttsSource?.stop?.();
     } catch {
@@ -1729,21 +1781,27 @@ async function speakViaServerAudio(line) {
     source.connect(ctx.destination);
     state._ttsSource = source;
     source.start(0);
-    await waitForPlaybackEnd(source, audioBuf.duration);
-    return true;
+    await waitForPlaybackEnd(source, audioBuf.duration, token);
+    return !playbackStale(token);
   };
 
   // AudioContext first (resumed inside the MIC gesture). HTMLAudio is the fallback
   // when Safari cannot decode the MP3 or the context is left suspended.
   let ctxErr = null;
   try {
-    return await playCtx();
+    const played = await playCtx();
+    if (played === false) return false;
+    return played;
   } catch (err) {
+    if (playbackStale(token)) return false;
     ctxErr = err;
   }
   try {
-    return await playHtml();
+    const played = await playHtml();
+    if (played === false) return false;
+    return played;
   } catch (err) {
+    if (playbackStale(token)) return false;
     const decodeMsg = ctxErr?.message || String(ctxErr || "decode saltato");
     throw new Error(`decode: ${decodeMsg} · audio: ${err?.message || err}`);
   }
@@ -1756,7 +1814,10 @@ async function speakViaServerAudio(line) {
 function speak(text, opts = {}) {
   // Resident summaries yield the MIC call and stay silent until a real unlock.
   // They must not call getUserMedia and must not take the call's playback slot.
-  if (opts.yieldToCall && document.documentElement.dataset.voiceCall === "1") return;
+  if (shouldYieldToCall({
+    yieldToCall: opts.yieldToCall,
+    callOpen: document.documentElement.dataset.voiceCall === "1",
+  })) return;
   const unlocked = voiceUnlocked || document.documentElement.dataset.tts === "1";
   if (!unlocked) {
     if (opts.ifUnlocked) return;
@@ -1767,7 +1828,8 @@ function speak(text, opts = {}) {
     }
     return;
   }
-  const line = sanitizeTtsText(text);
+  const prepared = normalizeSpeakText(String(text || "").replace(/[<>]/g, " "));
+  const line = String(prepared.text || "").slice(0, 1500);
   if (!line) return;
 
   ensureAudioSessionPlayAndRecord();
@@ -1785,42 +1847,53 @@ function speak(text, opts = {}) {
 
   const preferServer = inCall || isIpadLike() || opts.force === "server" || opts.via === "server";
   const failSpeak = (err) => {
+    if (err?.name === "AbortError") return;
     const msg = err?.message || String(err || "TTS fallita");
     postChatUpdate?.(`Voce non riprodotta: ${msg}`, "warn");
     showToast?.(`TTS: ${msg}`, "warn");
   };
   const finish = () => {
+    state._ttsPlaying = false;
     try { globalMicControl?.resumeAfterTts?.(epoch); } catch { /* ignore */ }
   };
   const run = async () => {
+    const playback = armPlayback();
     if (preferServer) {
       try {
-        await speakViaServerAudio(line);
+        const played = await speakViaServerAudio(line, playback);
+        if (played === false) return;
         return;
       } catch (err) {
+        if (playbackStale(playback.token) || err?.name === "AbortError") return;
         if (isIpadLike()) throw err;
         const ok = speakViaSpeechSynthesis(line);
         if (!ok) throw err;
-        await waitForSpeechSynthesis();
+        await waitForSpeechSynthesis(playback.token);
         return;
       }
     }
     const ok = speakViaSpeechSynthesis(line);
     if (!ok) {
-      await speakViaServerAudio(line);
+      const played = await speakViaServerAudio(line, playback);
+      if (played === false) return;
       return;
     }
-    await waitForSpeechSynthesis();
+    await waitForSpeechSynthesis(playback.token);
   };
   run().catch(failSpeak).finally(finish);
 }
 
-function waitForSpeechSynthesis() {
+function waitForSpeechSynthesis(token) {
   const synth = window.speechSynthesis;
   if (!synth) return Promise.resolve();
   return new Promise((resolve) => {
     const started = Date.now();
     const tick = () => {
+      if (token !== undefined && playbackStale(token)) {
+        try { synth.cancel(); } catch { /* ignore */ }
+        resolve();
+        return;
+      }
       const speaking = Boolean(synth.speaking || synth.pending);
       if (!speaking && Date.now() - started > 280) resolve();
       else if (Date.now() - started > 22000) resolve();
@@ -3525,6 +3598,7 @@ function setupMic(button, onText) {
   let segmentDiscard = false;
   let wakeSegment = null;
   let finishCollect = null;
+  let bargeWatch = null;
   const uiButtons = new Set([button]);
   const CALL_SEGMENT_MS = 3200;
 
@@ -3559,6 +3633,7 @@ function setupMic(button, onText) {
     document.body.classList.toggle("mic-live", state.micLive);
     document.body.classList.toggle("voice-call", open);
     document.documentElement.dataset.voiceCall = open ? "1" : "0";
+    document.documentElement.dataset.voiceDuplex = VOICE_DUPLEX;
     if (!open) document.documentElement.dataset.voicePhase = "idle";
     for (const btn of uiButtons) {
       btn.classList.toggle("live", state.micLive);
@@ -3588,6 +3663,12 @@ function setupMic(button, onText) {
     return tap;
   };
 
+  const stopBargeWatch = () => {
+    const watch = bargeWatch;
+    bargeWatch = null;
+    try { watch?.stop?.(); } catch { /* ignore */ }
+  };
+
   const dropGestureCapture = () => {
     const leftover = gestureMicPromise;
     gestureMicPromise = null;
@@ -3598,6 +3679,7 @@ function setupMic(button, onText) {
   };
 
   const hardStop = () => {
+    stopBargeWatch();
     callLive = false;
     callGen += 1;
     ttsEpoch += 1;
@@ -3635,9 +3717,11 @@ function setupMic(button, onText) {
   };
 
   const endVoiceCall = (msg = "Chiamata chiusa") => {
+    const decision = reduceCall({ open: true, phase: "listen" }, "hangup");
     const was = callOpen() || starting || state.micLive;
-    silenceVoice();
+    cancelPlayback();
     hardStop();
+    document.documentElement.dataset.voicePhase = decision.phase;
     if (was && msg) {
       postChatUpdate(msg);
       showToast(msg, "ok");
@@ -3792,7 +3876,11 @@ function setupMic(button, onText) {
       if (!callLive || gen !== callGen) return;
       if (ttsHolding || !captured) continue;
       const { blob, snap } = captured;
-      if (segmentIsSilent(blob, snap)) continue;
+      if (segmentIsSilent(blob, snap)) {
+        const stay = reduceCall({ open: true, phase: "listen" }, "segment-silence");
+        if (!stay.open || stay.action !== "listen") return;
+        continue;
+      }
       let heard = "";
       try {
         heard = await transcribeSegment(blob);
@@ -3805,13 +3893,15 @@ function setupMic(button, onText) {
       }
       if (!callLive || gen !== callGen || ttsHolding) continue;
       if (!heard || isIgnorableTranscript(heard)) continue;
+      const reply = reduceCall({ open: true, phase: "listen" }, "segment-heard");
+      if (reply.action !== "reply") continue;
       postChatUpdate(`Voce rilevata: ${heard}`);
       showToast("Voce rilevata", "ok");
       ttsHolding = true;
       segmentDiscard = true;
       setMicTracksEnabled(false);
       stopPcmTap();
-      document.documentElement.dataset.voicePhase = "reply";
+      document.documentElement.dataset.voicePhase = reply.phase;
       const epoch = ttsEpoch;
       try {
         await Promise.resolve(onText(heard));
@@ -3827,8 +3917,10 @@ function setupMic(button, onText) {
         ttsHolding = false;
         segmentDiscard = false;
         setMicTracksEnabled(true);
-        document.documentElement.dataset.voicePhase = "listen";
       }
+      const back = reduceCall({ open: true, phase: "tts" }, "tts-end");
+      if (!back.open) return;
+      document.documentElement.dataset.voicePhase = back.phase;
     }
   };
 
@@ -4047,18 +4139,102 @@ function setupMic(button, onText) {
     if (!gestureMicPromise) gestureMicPromise = beginUserMediaCapture();
   };
 
-  const onPointerDown = (e) => {
-    if (e.pointerType === "mouse" && e.button !== 0) return;
-    handledByPointer = true;
-    beginGestureMicCapture();
-    e.preventDefault();
-    e.stopPropagation();
-    toggle();
+  const bargeIn = (reason) => {
+    const phase = ttsHolding || document.documentElement.dataset.voicePhase === "tts"
+      ? "tts"
+      : (document.documentElement.dataset.voicePhase || "listen");
+    const decision = reduceCall(
+      { open: callLive || mode === "call", phase },
+      reason === "speech" ? "speech" : "tap",
+    );
+    if (decision.action !== "barge") return false;
+    cancelPlayback();
+    stopBargeWatch();
+    ttsEpoch += 1;
+    ttsHolding = false;
+    segmentDiscard = true;
+    try { wakeSegment?.(); } catch { /* ignore */ }
+    stopPcmTap();
+    setMicTracksEnabled(true);
+    document.documentElement.dataset.voicePhase = decision.phase;
+    document.documentElement.dataset.voiceDuplex = decision.duplex || VOICE_DUPLEX;
+    postChatUpdate("Interrotto — ti ascolto.");
+    return true;
   };
 
-  const onClick = (e) => {
-    if (handledByPointer) {
+  const startBargeWatch = () => {
+    stopBargeWatch();
+    if (!callLive || !micStream) return;
+    setMicTracksEnabled(true);
+    const ctx = getPrimedAudioContext();
+    if (!ctx?.createMediaStreamSource || !ctx.createAnalyser) return;
+    let source;
+    let analyser;
+    let mute;
+    let timer = null;
+    try {
+      source = ctx.createMediaStreamSource(micStream);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      mute = ctx.createGain();
+      mute.gain.value = 0;
+      source.connect(analyser);
+      analyser.connect(mute);
+      mute.connect(ctx.destination);
+      const data = new Float32Array(analyser.fftSize);
+      const started = Date.now();
+      let hotSince = 0;
+      timer = setInterval(() => {
+        try {
+          if (!ttsHolding || !callLive) return;
+          if (Date.now() - started < 500) return;
+          if (typeof analyser.getFloatTimeDomainData !== "function") return;
+          analyser.getFloatTimeDomainData(data);
+          let acc = 0;
+          for (let i = 0; i < data.length; i += 1) acc += data[i] * data[i];
+          const rms = Math.sqrt(acc / data.length);
+          if (rms >= 0.12) {
+            if (!hotSince) hotSince = Date.now();
+            else if (Date.now() - hotSince >= 320) bargeIn("speech");
+          } else {
+            hotSince = 0;
+          }
+        } catch {
+          /* analyser can fail if the iPad context was closed */
+        }
+      }, 80);
+    } catch {
+      if (timer) clearInterval(timer);
+      try { source?.disconnect(); } catch { /* ignore */ }
+      try { analyser?.disconnect(); } catch { /* ignore */ }
+      try { mute?.disconnect(); } catch { /* ignore */ }
+      return;
+    }
+    bargeWatch = {
+      stop() {
+        if (timer) clearInterval(timer);
+        try { source?.disconnect(); } catch { /* ignore */ }
+        try { analyser?.disconnect(); } catch { /* ignore */ }
+        try { mute?.disconnect(); } catch { /* ignore */ }
+      },
+    };
+  };
+
+  const onMicGesture = (e) => {
+    if (e.type === "pointerdown" && e.pointerType === "mouse" && e.button !== 0) return;
+    if (e.type === "click" && handledByPointer) {
       handledByPointer = false;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (e.type === "pointerdown") handledByPointer = true;
+    const phase = ttsHolding || document.documentElement.dataset.voicePhase === "tts"
+      ? "tts"
+      : (document.documentElement.dataset.voicePhase || ((callOpen() || starting) ? "listen" : "idle"));
+    const decision = reduceCall({ open: callOpen() || starting, phase }, "tap");
+    if (decision.action === "barge") {
+      bargeIn("tap");
       e.preventDefault();
       e.stopPropagation();
       return;
@@ -4069,8 +4245,8 @@ function setupMic(button, onText) {
     toggle();
   };
 
-  button.addEventListener("pointerdown", onPointerDown);
-  button.addEventListener("click", onClick);
+  button.addEventListener("pointerdown", onMicGesture);
+  button.addEventListener("click", onMicGesture);
 
   const releaseForTts = () => {
     ensureAudioSessionPlayAndRecord();
@@ -4081,23 +4257,28 @@ function setupMic(button, onText) {
     const epoch = ++ttsEpoch;
     ttsHolding = true;
     segmentDiscard = true;
-    document.documentElement.dataset.voicePhase = "tts";
-    setMicTracksEnabled(false);
+    const decision = reduceCall({ open: true, phase: "reply" }, "tts-start");
+    document.documentElement.dataset.voicePhase = decision.phase;
+    document.documentElement.dataset.voiceDuplex = VOICE_DUPLEX;
+    setMicTracksEnabled(true);
     try { wakeSegment?.(); } catch { /* ignore */ }
+    startBargeWatch();
     return epoch;
   };
 
   const resumeAfterTts = (epoch) => {
     if (!epoch || epoch !== ttsEpoch) return;
+    stopBargeWatch();
     ttsHolding = false;
     segmentDiscard = false;
+    const back = reduceCall({ open: Boolean(callLive), phase: "tts" }, "tts-end");
     if (!callLive || !micStream) {
-      document.documentElement.dataset.voicePhase = callLive ? "listen" : "idle";
+      document.documentElement.dataset.voicePhase = callLive ? back.phase : "idle";
       return;
     }
     setMicTracksEnabled(true);
     ensureAudioSessionPlayAndRecord();
-    document.documentElement.dataset.voicePhase = "listen";
+    document.documentElement.dataset.voicePhase = back.phase;
   };
 
   const control = {
@@ -4114,8 +4295,8 @@ function setupMic(button, onText) {
       btn.title = callOpen()
         ? "Chiamata attiva — ritocca END per chiudere"
         : button.title;
-      btn.addEventListener("pointerdown", onPointerDown);
-      btn.addEventListener("click", onClick);
+      btn.addEventListener("pointerdown", onMicGesture);
+      btn.addEventListener("click", onMicGesture);
     },
   };
   return control;

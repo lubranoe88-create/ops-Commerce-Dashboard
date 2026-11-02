@@ -704,6 +704,13 @@ aiRouter.post("/speak", requireAiPaid, async (req, res) => {
       voice: req.body?.voice || config.openRouterTtsVoice,
       responseFormat: "mp3",
     });
+    const spoken = {
+      spokenText: result?.spokenText || text,
+      spelled: Boolean(result?.spelled),
+      voiceLocked: Boolean(result?.voiceLocked),
+      speakFallback: result?.speakFallback || null,
+      transport: result?.transport || null,
+    };
     if (!result?.buffer?.length) {
       return res.json({
         ok: true,
@@ -713,6 +720,7 @@ aiRouter.post("/speak", requireAiPaid, async (req, res) => {
         model: result?.model || "mechanical",
         voice: result?.voice || null,
         reply: result?.reply || asAtlasLine("Voce esterna non disponibile. Il testo resta in plancia."),
+        ...spoken,
       });
     }
     res.json({
@@ -722,6 +730,7 @@ aiRouter.post("/speak", requireAiPaid, async (req, res) => {
       audioBase64: result.buffer.toString("base64"),
       model: result.model,
       voice: result.voice,
+      ...spoken,
     });
   } catch (err) {
     const status = err.status && Number.isInteger(err.status) ? err.status : 502;

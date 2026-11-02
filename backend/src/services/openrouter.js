@@ -1,6 +1,7 @@
 import { config } from "../config.js";
 import { alternateChatModel, resolveChatModel } from "./chatModels.js";
 import { asAtlasLine, presentAtlasChatText, withAtlasPersona } from "./atlasPersonality.js";
+import { normalizeSpeakText } from "../../public/js/atlasSpeak.js";
 import {
   classifyProviderFailure,
   isCircuitOpen,
@@ -455,10 +456,90 @@ async function postTranscription({ key, model, format, buffer, language, signal 
 }
 
 const OPENROUTER_SPEECH_URL = "https://openrouter.ai/api/v1/audio/speech";
+const ELEVENLABS_SPEECH_URL = "https://api.elevenlabs.io/v1/text-to-speech";
+const CARTESIA_SPEECH_URL = "https://api.cartesia.ai/tts/bytes";
+
+export function usableProviderKey(value) {
+  const secret = String(value || "").trim();
+  if (!secret || /CHANGE_ME|PLACEHOLDER|your-key/i.test(secret)) return "";
+  return secret;
+}
+
+/**
+ * ElevenLabs Flash first (direct key, else OpenRouter), then Cartesia if keyed,
+ * then Deepgram Aura, then microsoft/mai-voice.
+ * Cartesia has no OpenRouter speech model, so that step exists only with CARTESIA_API_KEY.
+ */
+export function buildSpeechChain({
+  model = config.openRouterTtsModel,
+  voice = config.openRouterTtsVoice,
+  responseFormat = "mp3",
+} = {}) {
+  const elevenModel = /^elevenlabs\/eleven-flash/i.test(String(model || ""))
+    ? model
+    : config.openRouterTtsModel;
+  const elevenVoice = voice && !/MAI-Voice|aura-2|it-IT-/i.test(String(voice))
+    ? voice
+    : config.openRouterTtsVoice;
+  const format = responseFormat || "mp3";
+  const steps = [];
+  if (usableProviderKey(config.elevenLabsApiKey)) {
+    steps.push({
+      transport: "elevenlabs",
+      provider: "elevenlabs",
+      model: config.elevenLabsModel,
+      voice: config.elevenLabsVoiceId,
+      response_format: format,
+    });
+  }
+  steps.push({
+    transport: "openrouter",
+    provider: "elevenlabs",
+    model: elevenModel,
+    voice: elevenVoice,
+    response_format: format,
+  });
+  if (usableProviderKey(config.cartesiaApiKey)) {
+    steps.push({
+      transport: "cartesia",
+      provider: "cartesia",
+      model: config.cartesiaModel,
+      voice: config.cartesiaVoiceId,
+      response_format: format,
+    });
+  }
+  steps.push({
+    transport: "openrouter",
+    provider: "deepgram",
+    model: "deepgram/aura-2",
+    voice: "aura-2-cinzia-it",
+    response_format: format,
+  });
+  steps.push({
+    transport: "openrouter",
+    provider: "microsoft",
+    model: "microsoft/mai-voice-2.1-flash",
+    voice: "it-IT-Rosa:MAI-Voice-2.1-Flash",
+    response_format: format,
+  });
+  const seen = new Set();
+  const queue = [];
+  for (const step of steps) {
+    const key = `${step.transport}|${step.model}|${step.voice}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    queue.push(step);
+  }
+  return queue;
+}
+
+function openRouterReady() {
+  return Boolean(usableProviderKey(config.openRouterApiKey));
+}
 
 /**
  * Server TTS for Safari/iPad: returns raw audio bytes (mp3) for AudioContext playback.
- * Key stays server-side; used when speechSynthesis is gated or silent with mic in use.
+ * Keys stay server-side. Informational reads are spelled before any provider sees them.
  */
 export async function synthesizeSpeech({
   text,
@@ -466,83 +547,110 @@ export async function synthesizeSpeech({
   voice = config.openRouterTtsVoice,
   responseFormat = "mp3",
 } = {}) {
-  const key = config.openRouterApiKey;
-  if (!key || /CHANGE_ME|PLACEHOLDER|your-key/i.test(key)) {
-    const err = new Error("OpenRouter not configured");
-    err.code = "NO_OPENROUTER";
-    err.status = 503;
-    throw err;
-  }
-  const input = String(text || "")
-    .replace(/[<>]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 800);
+  const prepared = normalizeSpeakText(text);
+  const input = String(prepared.text || "").slice(0, 1600);
   if (!input) {
     const err = new Error("testo TTS richiesto");
     err.status = 400;
     throw err;
   }
-  if (isCircuitOpen("tts")) return mechanicalSpeech(input, "circuit");
+  const spokenMeta = {
+    spokenText: input,
+    spelled: Boolean(prepared.spelled),
+    voiceLocked: Boolean(prepared.voiceLocked),
+    speakFallback: prepared.fallback || null,
+  };
+  if (isCircuitOpen("tts")) return mechanicalSpeech(input, "circuit", spokenMeta);
 
-  const attempts = [
-    { model, voice, response_format: responseFormat || "mp3" },
-    // Fallbacks if the configured model is unavailable on the account.
-    {
-      model: "deepgram/aura-2",
-      voice: "aura-2-cinzia-it",
-      response_format: "mp3",
-    },
-    {
-      model: "microsoft/mai-voice-2.1-flash",
-      voice: "it-IT-Rosa:MAI-Voice-2.1-Flash",
-      response_format: "mp3",
-    },
-  ];
-  // Deduplicate identical attempts
-  const seen = new Set();
-  const queue = [];
-  for (const a of attempts) {
-    const k = `${a.model}|${a.voice}`;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    queue.push(a);
+  const queue = buildSpeechChain({ model, voice, responseFormat }).filter((step) =>
+    step.transport === "openrouter" ? openRouterReady() : true,
+  );
+  if (!queue.length) {
+    const err = new Error("OpenRouter not configured");
+    err.code = "NO_OPENROUTER";
+    err.status = 503;
+    throw err;
   }
 
   let lastErr = null;
+  let skipOpenRouter = false;
   const deadlineAt = reliabilityNow() + 8000;
   for (const attempt of queue) {
     if (reliabilityNow() >= deadlineAt) break;
+    if (attempt.transport === "openrouter" && skipOpenRouter) continue;
     const tried = await retryTransient(
-      ({ signal }) => requestSpeech({ key, attempt, input, signal }),
+      ({ signal }) => requestSpeech({ attempt, input, signal }),
       { provider: "tts", attempts: 2, timeoutMs: 3500, baseDelayMs: 40, deadlineAt },
     );
     if (tried.ok) {
       noteProviderSuccess("tts");
-      return tried.value;
+      return { ...tried.value, ...spokenMeta };
     }
     lastErr = tried.error || lastErr;
     if (tried.budgetExceeded) break;
-    if (lastErr?.status === 401 || lastErr?.status === 403) break;
+    if (attempt.transport === "openrouter" && (lastErr?.status === 401 || lastErr?.status === 403)) {
+      skipOpenRouter = true;
+    }
   }
 
   const row = noteProviderFailure("tts");
-  return mechanicalSpeech(input, row.state === "open" ? "circuit" : "mechanical");
+  return mechanicalSpeech(input, row.state === "open" ? "circuit" : "mechanical", spokenMeta);
 }
 
-function mechanicalSpeech(text, fallback) {
+function mechanicalSpeech(text, fallback, spokenMeta = {}) {
   return {
     buffer: null,
     mime: null,
     model: "mechanical",
     voice: null,
+    transport: null,
     fallback,
     text,
+    spokenText: spokenMeta.spokenText || text,
+    spelled: Boolean(spokenMeta.spelled),
+    voiceLocked: Boolean(spokenMeta.voiceLocked),
+    speakFallback: spokenMeta.speakFallback || null,
     reply: asAtlasLine("Voce esterna non disponibile. Il testo resta in plancia."),
   };
 }
 
-async function requestSpeech({ key, attempt, input, signal }) {
+async function requestSpeech({ attempt, input, signal }) {
+  if (attempt.transport === "elevenlabs") return requestElevenLabs({ attempt, input, signal });
+  if (attempt.transport === "cartesia") return requestCartesia({ attempt, input, signal });
+  return requestOpenRouterSpeech({ attempt, input, signal });
+}
+
+function throwHttp(response, payload, label) {
+  const detail =
+    payload?.error?.message ||
+    payload?.detail?.message ||
+    payload?.message ||
+    (typeof payload?.detail === "string" ? payload.detail : "") ||
+    `${label} HTTP ${response.status}`;
+  const err = new Error(detail);
+  err.status = response.status >= 400 && response.status < 600 ? response.status : 502;
+  err.upstream = true;
+  throw err;
+}
+
+function audioResult(buf, attempt) {
+  if (!buf.length) {
+    const err = new Error("TTS audio vuoto");
+    err.status = 502;
+    throw err;
+  }
+  return {
+    buffer: buf,
+    mime: attempt.response_format === "pcm" ? "audio/pcm" : "audio/mpeg",
+    model: attempt.model,
+    voice: attempt.voice,
+    transport: attempt.transport,
+    fallback: null,
+  };
+}
+
+async function requestOpenRouterSpeech({ attempt, input, signal }) {
+  const key = usableProviderKey(config.openRouterApiKey);
   let response;
   try {
     response = await fetchImpl(OPENROUTER_SPEECH_URL, {
@@ -570,26 +678,78 @@ async function requestSpeech({ key, attempt, input, signal }) {
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    const detail =
-      payload?.error?.message ||
-      payload?.message ||
-      `OpenRouter TTS HTTP ${response.status}`;
-    const err = new Error(detail);
-    err.status = response.status >= 400 && response.status < 600 ? response.status : 502;
-    err.upstream = true;
+    throwHttp(response, payload, "OpenRouter TTS");
+  }
+  return audioResult(Buffer.from(await response.arrayBuffer()), attempt);
+}
+
+async function requestElevenLabs({ attempt, input, signal }) {
+  const key = usableProviderKey(config.elevenLabsApiKey);
+  const url = `${ELEVENLABS_SPEECH_URL}/${encodeURIComponent(attempt.voice)}?output_format=mp3_44100_128`;
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      signal,
+      headers: {
+        "xi-api-key": key,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text: input,
+        model_id: attempt.model,
+      }),
+    });
+  } catch (err) {
+    if (err?.name === "AbortError" || err?.name === "TimeoutError") {
+      err.status = err.status || 504;
+      err.code = err.code || "TIMEOUT";
+    }
     throw err;
   }
-  const buf = Buffer.from(await response.arrayBuffer());
-  if (!buf.length) {
-    const err = new Error("TTS audio vuoto");
-    err.status = 502;
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throwHttp(response, payload, "ElevenLabs TTS");
+  }
+  return audioResult(Buffer.from(await response.arrayBuffer()), attempt);
+}
+
+async function requestCartesia({ attempt, input, signal }) {
+  const key = usableProviderKey(config.cartesiaApiKey);
+  let response;
+  try {
+    response = await fetchImpl(CARTESIA_SPEECH_URL, {
+      method: "POST",
+      signal,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "X-API-Key": key,
+        "Cartesia-Version": config.cartesiaVersion,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model_id: attempt.model,
+        transcript: input,
+        voice: attempt.voice,
+        language: "it",
+        output_format: {
+          container: "mp3",
+          sample_rate: 44100,
+          bit_rate: 128000,
+        },
+      }),
+    });
+  } catch (err) {
+    if (err?.name === "AbortError" || err?.name === "TimeoutError") {
+      err.status = err.status || 504;
+      err.code = err.code || "TIMEOUT";
+    }
     throw err;
   }
-  return {
-    buffer: buf,
-    mime: attempt.response_format === "pcm" ? "audio/pcm" : "audio/mpeg",
-    model: attempt.model,
-    voice: attempt.voice,
-    fallback: null,
-  };
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throwHttp(response, payload, "Cartesia TTS");
+  }
+  return audioResult(Buffer.from(await response.arrayBuffer()), attempt);
 }
