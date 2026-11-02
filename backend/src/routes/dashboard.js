@@ -13,6 +13,7 @@ import { completeChat } from "../services/openrouter.js";
 import { isAllowedChatModel, resolveChatModel } from "../services/chatModels.js";
 import { config } from "../config.js";
 import { asAtlasLine, presentAtlasThreadTitle } from "../services/atlasPersonality.js";
+import { injectAutomaticRecall } from "../services/atlasRecall.js";
 
 export const dashboardRouter = Router();
 
@@ -174,10 +175,14 @@ dashboardRouter.post("/chat/threads/:id/messages", async (req, res) => {
   }
 
   try {
+    const attached = injectAutomaticRecall(
+      `Contesto dashboard:\n${contextBlock}\n\nDomanda utente:\n${content}`,
+      content,
+    );
     const result = await completeChat({
       system,
       model,
-      prompt: `Contesto dashboard:\n${contextBlock}\n\nDomanda utente:\n${content}`,
+      prompt: attached.prompt,
     });
     appendChatMessage(id, { role: "assistant", content: result.content });
     return res.json({

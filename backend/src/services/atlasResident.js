@@ -34,11 +34,15 @@ import { answerFromBundle } from "./atlasStateAnswer.js";
 import { readAtlasSession, rememberWake, restoredFrom } from "./atlasSessionStore.js";
 import { assessLiveSpend } from "./atlasSpend.js";
 import { trustLineForResult } from "./atlasTrust.js";
+import { RECALL_MARKER, recallForContext, recallQueryFromBundle } from "./atlasRecall.js";
+import { decisionStatus, formatDecisionLine, recordDecision } from "./atlasDecisionLog.js";
+import { providerStatus } from "./atlasReliability.js";
 
 const RESIDENT_RULES = [
   "You are resident inside the plancia: this is not an on-demand chat turn.",
   'Reply with one JSON object only: {"summary":"...","actions":[],"ask":[],"newsLiteracy":""}.',
-  "summary: 3-6 short Italian sentences, first person as Atlas, using only counts and titles from this payload.",
+  "summary: 3-6 short Italian sentences, first person as Atlas, using only counts and titles from this payload and any recalled durable notes.",
+  "recalled: durable notes ranked for this payload by keyword and recency. The operator did not ask for a search. Use them only when they match the payload. Do not treat them as a sandbox search.",
   "actions: prefer empty. Include an id only when a safe AUTO step clearly helps: refresh, news, status, problems, read, map, pipeline, memory, chat, zoom-in, zoom-out, zoom-citta, zoom-paese, zoom-continente.",
   "Never put mic, credentials, browser-use, export, destructive writes, or spend in actions. Put those in ask only when the payload shows they are actually required. Prefer ask empty.",
   "Do not request the microphone or any device permission.",
@@ -350,15 +354,97 @@ function normalizeModel(result) {
   };
 }
 
+function safeRecall(query) {
+  try {
+    return recallForContext(query, { limit: 4 });
+  } catch {
+    return { facts: [], line: "", automatic: true, searched: false, onDemand: false };
+  }
+}
+
+function recallQueryFor(kind, bundle, batch) {
+  if (kind === "wake") return recallQueryFromBundle(bundle);
+  const events = asList(batch);
+  return recallQueryFromBundle({
+    module: bundle?.module,
+    health: bundle?.health,
+    news: events.flatMap((event) => newsItemsFrom(event)),
+    updates: events
+      .filter((event) => event?.kind === "updates")
+      .map((event) => event.update || event),
+    problems: bundle?.problems,
+  });
+}
+
+function decisionLines(entries) {
+  return entries.map((entry) => formatDecisionLine(entry)).filter(Boolean).join(" | ");
+}
+
+function logResidentDecisions(kind, gated, brief, asked) {
+  const place = kind === "wake" ? "Risveglio" : "Ingresso";
+  const tags = asList(gated?.tagged);
+  const choices = tags.length
+    ? tags.map((step) => {
+        const mode = step?.mode === "ask" ? "ask" : "auto";
+        const reason = step?.reason || "unspecified";
+        return {
+          action: step.id,
+          mode,
+          reason,
+          because:
+            mode === "auto"
+              ? `${place}: «${step.id}» è AUTO (${reason}) e può partire.`
+              : `${place}: «${step.id}» resta ASK (${reason}) e non parte da solo.`,
+        };
+      })
+    : [
+        {
+          action: "none",
+          mode: "auto",
+          reason: asked?.fallback || "empty",
+          because: asked?.fallback
+            ? `${place}: nessuna mano, la risposta è ${asked.fallback}.`
+            : `${place}: nessun passo utile, lascio le azioni vuote.`,
+        },
+      ];
+  const wakeEntry = recordDecision({ source: "wake", choices });
+  let newsEntry = null;
+  if (brief?.items?.length) {
+    const auto = asList(brief.auto).includes("news");
+    const ran = kind !== "wake" && asList(gated?.actions).includes("news");
+    newsEntry = recordDecision({
+      source: "news",
+      choices: [
+        {
+          action: "news",
+          mode: auto ? "auto" : "ask",
+          reason: kind === "wake" ? "wake-literacy" : "ingress-literacy",
+          because:
+            kind === "wake"
+              ? "Risveglio: spiego le news e non eseguo il passo news salvo che il modello lo abbia chiesto."
+              : ran
+                ? "News in ingresso e L3 marca news AUTO: lo aggiungo alle azioni."
+                : "News in ingresso: non eseguo news finché L3 non lo marca AUTO.",
+        },
+      ],
+    });
+  }
+  return decisionLines([wakeEntry, newsEntry]);
+}
+
 async function askAtlas(kind, bundle, batch) {
-  if (!paidCheck()) return mechanicalAsk(kind, bundle, batch, "free");
+  const recalled = safeRecall(recallQueryFor(kind, bundle, batch));
+  if (!paidCheck()) return { ...mechanicalAsk(kind, bundle, batch, "free"), recallLine: recalled.line };
   const system = withAtlasPersona(RESIDENT_RULES);
+  const recallNote = recalled.facts.length ? RECALL_MARKER : "";
   const prompt = JSON.stringify(
     kind === "wake"
       ? {
           kind,
           instruction: "Risveglio unico all'apertura della plancia. Un solo riepilogo.",
           bundle,
+          recalled: recalled.facts,
+          recallNote,
         }
       : {
           kind: "ingress",
@@ -369,13 +455,15 @@ async function askAtlas(kind, bundle, batch) {
             health: bundle?.health || null,
             problemCount: bundle?.problemCount || 0,
           },
+          recalled: recalled.facts,
+          recallNote,
         },
   );
   if (!completerOverride) {
     try {
       assertCanCall("router");
     } catch (err) {
-      return mechanicalAsk(kind, bundle, batch, err.code || "budget");
+      return { ...mechanicalAsk(kind, bundle, batch, err.code || "budget"), recallLine: recalled.line };
     }
   }
   try {
@@ -396,9 +484,13 @@ async function askAtlas(kind, bundle, batch) {
       }
     }
     const parsed = normalizeModel(result) || mechanicalAsk(kind, bundle, batch, "empty");
-    return { ...parsed, fallback: parsed.summary ? null : "empty" };
+    return {
+      ...parsed,
+      fallback: result?.fallback || (parsed.summary ? null : "empty"),
+      recallLine: recalled.line,
+    };
   } catch (err) {
-    return mechanicalAsk(kind, bundle, batch, err.code || "model");
+    return { ...mechanicalAsk(kind, bundle, batch, err.code || "model"), recallLine: recalled.line };
   }
 }
 
@@ -429,12 +521,15 @@ async function createReaction(kind, bundle, batch) {
         [...asList(asked.ask), ...(newsIngress ? brief.ask : [])],
       );
   const summary = asAtlasLine(clip(asked.summary, 900) || (kind === "wake" ? mechanicalWakeSummary(bundle) : mechanicalIngressSummary(batch)));
+  const decisionLine = logResidentDecisions(kind, gated, brief, asked);
   seq += 1;
   return {
     id: `atlas-${kind}-${seq}`,
     seq,
     kind,
     summary,
+    recallLine: asked.recallLine || "",
+    decisionLine,
     newsLiteracy: literacyText,
     literacy: publicLiteracy(brief),
     actions: gated.actions,
@@ -457,6 +552,8 @@ function toPublic(reaction) {
     seq: reaction.seq,
     kind: reaction.kind,
     summary: reaction.summary,
+    recallLine: reaction.recallLine || "",
+    decisionLine: reaction.decisionLine || "",
     newsLiteracy: reaction.newsLiteracy || "",
     literacy: reaction.literacy || null,
     integrity: reaction.integrity || null,
@@ -589,6 +686,8 @@ export function residentStatus() {
     listeners: listenerSet.size,
     lastWakeAt: session.lastWakeAt,
     pending: pending.length,
+    decisions: decisionStatus({ limit: 5 }),
+    providers: providerStatus(),
   };
 }
 
@@ -663,6 +762,31 @@ async function doWake(input = {}) {
     if (!session.integrityOk) {
       const brief = literacyFor("wake", collected, null);
       const detail = (integrity.failures || []).map((failure) => `${failure.id}: ${failure.detail}`).join("; ");
+      const recalled = safeRecall(recallQueryFromBundle(collected));
+      const wakeEntry = recordDecision({
+        source: "wake",
+        choices: [
+          {
+            action: "none",
+            mode: "ask",
+            reason: "integrity",
+            because: "Integrità di avvio non superata: non eseguo passi sulla plancia.",
+          },
+        ],
+      });
+      const newsEntry = brief.items?.length
+        ? recordDecision({
+            source: "news",
+            choices: [
+              {
+                action: "news",
+                mode: "ask",
+                reason: "integrity",
+                because: "Integrità non superata: spiego le news e non eseguo il passo news.",
+              },
+            ],
+          })
+        : null;
       seq += 1;
       const reaction = {
         id: `atlas-wake-${seq}`,
@@ -671,6 +795,8 @@ async function doWake(input = {}) {
         summary: asAtlasLine(
           `Integrità di avvio non superata. Non eseguo passi sulla plancia finché i controlli non tornano interi. ${detail}`,
         ),
+        recallLine: recalled.line,
+        decisionLine: decisionLines([wakeEntry, newsEntry]),
         newsLiteracy: brief.text,
         literacy: publicLiteracy(brief),
         actions: [],

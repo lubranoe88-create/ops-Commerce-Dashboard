@@ -40,15 +40,15 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { openSandboxDoc, rememberOpenModule, wireAgentqUi } from "./agentqUi.js?v=rail-31-capabilities";
-import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-31-capabilities";
+import { openSandboxDoc, rememberOpenModule, wireAgentqUi } from "./agentqUi.js?v=rail-32-reliability";
+import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-32-reliability";
 import {
   dispatchAtlasHand,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
-} from "./atlasHoloDispatch.js?v=rail-31-capabilities";
+} from "./atlasHoloDispatch.js?v=rail-32-reliability";
 
-const BUILD_ID = "rail-31-capabilities";
+const BUILD_ID = "rail-32-reliability";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1654,7 +1654,7 @@ async function speakViaServerAudio(line) {
   });
   const b64 = data?.audioBase64;
   const mime = data?.mime || "audio/mpeg";
-  if (!b64) throw new Error("TTS server senza audio");
+  if (!b64) throw new Error(data?.reply || "TTS server senza audio");
   try {
     state._ttsAudio?.pause?.();
   } catch {
@@ -3665,7 +3665,13 @@ function setupMic(button, onText) {
         language: "it",
       }),
     });
-    return String(data?.text || "").trim();
+    const heard = String(data?.text || "").trim();
+    if (!heard && data?.fallback && data?.reply) {
+      const err = new Error(data.reply);
+      err.code = data.fallback;
+      throw err;
+    }
+    return heard;
   };
 
   const recordSegment = async (gen) => {

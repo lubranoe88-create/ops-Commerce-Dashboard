@@ -42,7 +42,6 @@ import {
   planHandActions,
   AGENTQ_HAND_ACTIONS,
   listExpandableMemory,
-  appendExpandableMemory,
   getAgentqProblems,
 } from "../services/agentqBridge.js";
 import { recordAskApproval } from "../services/atlasAutonomyPolicy.js";
@@ -58,6 +57,7 @@ import { isPlanciaStateQuestion, answerPlanciaStateLive } from "../services/atla
 import { searchRefusal } from "../services/atlasSearchGate.js";
 import { patchAtlasSession, publicAtlasSession, readAtlasSession } from "../services/atlasSessionStore.js";
 import { asAtlasLine } from "../services/atlasPersonality.js";
+import { rememberDurableNote } from "../services/atlasRecall.js";
 
 installAtlasResident();
 
@@ -222,7 +222,7 @@ aiRouter.post("/agentq/memory", requireAiPaid, (req, res) => {
   const text = String(req.body?.text || req.body?.note || "").trim();
   if (!text) return res.status(400).json({ error: "text richiesto" });
   res.json(
-    appendExpandableMemory({
+    rememberDurableNote({
       title: req.body?.title,
       text,
       tags: req.body?.tags,
@@ -568,8 +568,20 @@ aiRouter.post("/speak", requireAiPaid, async (req, res) => {
       voice: req.body?.voice || config.openRouterTtsVoice,
       responseFormat: "mp3",
     });
+    if (!result?.buffer?.length) {
+      return res.json({
+        ok: true,
+        fallback: result?.fallback || "mechanical",
+        mime: null,
+        audioBase64: null,
+        model: result?.model || "mechanical",
+        voice: result?.voice || null,
+        reply: result?.reply || asAtlasLine("Voce esterna non disponibile. Il testo resta in plancia."),
+      });
+    }
     res.json({
       ok: true,
+      fallback: result.fallback || null,
       mime: result.mime,
       audioBase64: result.buffer.toString("base64"),
       model: result.model,
@@ -608,7 +620,13 @@ aiRouter.post("/transcribe", requireAiPaid, async (req, res) => {
       filename,
       language: req.body?.language || "it",
     });
-    res.json({ text: result.text, model: result.model, ok: true });
+    res.json({
+      text: result.text || "",
+      model: result.model,
+      ok: true,
+      fallback: result.fallback || null,
+      reply: result.reply || "",
+    });
   } catch (err) {
     const status = err.status && Number.isInteger(err.status) ? err.status : 502;
     res.status(status).json({

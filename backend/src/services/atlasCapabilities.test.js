@@ -41,7 +41,7 @@ const facts = {
   updateCount: 1,
 };
 
-describe("Atlas rail-31 capabilities", { concurrency: false }, () => {
+describe("Atlas rail-32 capabilities", { concurrency: false }, () => {
   beforeEach(() => {
     const sessionFile = path.join(dir, `session-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
     const memoryFile = path.join(dir, "expandable.json");
@@ -290,7 +290,7 @@ describe("Atlas rail-31 capabilities", { concurrency: false }, () => {
     assert.match(read("public/css/app.css"), /\.atlas-trust/);
     assert.match(read("public/css/app.css"), /data-trust="ask"/);
     assert.match(read("backend/src/services/atlasResident.js"), /trustLineForResult/);
-    assert.equal(read("public/js/app.js").includes('const BUILD_ID = "rail-31-capabilities"'), true);
-    assert.equal(read("backend/src/server.js").includes('build: "rail-31-capabilities"'), true);
+    assert.equal(read("public/js/app.js").includes('const BUILD_ID = "rail-32-reliability"'), true);
+    assert.equal(read("backend/src/server.js").includes('build: "rail-32-reliability"'), true);
   });
 });

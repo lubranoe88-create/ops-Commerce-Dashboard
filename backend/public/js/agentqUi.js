@@ -101,6 +101,12 @@ export async function showEntryUpdates({ postChatUpdate, showToast } = {}) {
     } else {
       showToast?.("Atlas · nessun aggiornamento nuovo", "ok");
     }
+    if (data.decisionSnippet) {
+      postChatUpdate?.(atlasLine(data.decisionSnippet), "ok", {
+        trust: "auto",
+        trustLine: trustLineFor("auto", "decisioni"),
+      });
+    }
   } catch (err) {
     console.warn("[agentq] updates", err?.message || err);
     showToast?.(`Aggiornamenti non caricati: ${err?.message || err}`, "warn");
@@ -581,7 +587,9 @@ function formatRestore(restored) {
 function residentBubble(data) {
   const literacy = data?.literacy?.text || data?.newsLiteracy || "";
   const trust = data?.trustLine || "";
-  return [data?.summary, literacy, trust]
+  const recall = data?.recallLine || "";
+  const decision = data?.decisionLine || "";
+  return [data?.summary, literacy, trust, recall, decision]
     .map((part) => String(part || "").trim())
     .filter(Boolean)
     .join("\n\n");

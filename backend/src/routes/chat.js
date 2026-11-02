@@ -2,6 +2,7 @@ import { Router } from "express";
 import { validateChat } from "../middleware/validateChat.js";
 import { completeChat } from "../services/openrouter.js";
 import { listChatModels } from "../services/chatModels.js";
+import { injectAutomaticRecall } from "../services/atlasRecall.js";
 
 export const chatRouter = Router();
 
@@ -11,7 +12,8 @@ chatRouter.get("/models", (_req, res) => {
 
 chatRouter.post("/", validateChat, async (req, res) => {
   try {
-    const result = await completeChat(req.chat);
+    const attached = injectAutomaticRecall(req.chat.prompt, req.chat.prompt);
+    const result = await completeChat({ ...req.chat, prompt: attached.prompt });
     return res.json({
       content: result.content,
       model: result.model,

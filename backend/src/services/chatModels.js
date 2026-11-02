@@ -83,6 +83,23 @@ export function resolveChatModel(requested) {
   return DEFAULT_CHAT_MODEL;
 }
 
+/** A different allow-listed model used when the requested one fails (M2). */
+export function alternateChatModel(primary) {
+  const current = resolveChatModel(primary);
+  const candidates = [
+    config.aiRouterModel,
+    config.aiMainModel,
+    DEFAULT_CHAT_MODEL,
+    "google/gemini-2.0-flash-001",
+    "meta-llama/llama-3.2-3b-instruct",
+  ];
+  for (const id of candidates) {
+    const resolved = resolveChatModel(id);
+    if (resolved && resolved !== current) return resolved;
+  }
+  return "";
+}
+
 export function listChatModels() {
   // Prefer DeepSeek V4.1 Flash as UI default unless env points at another allow-listed model.
   const envDefault = config.openRouterModel?.trim();

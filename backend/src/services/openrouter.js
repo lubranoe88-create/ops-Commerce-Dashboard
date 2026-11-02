@@ -1,6 +1,22 @@
 import { config } from "../config.js";
-import { resolveChatModel } from "./chatModels.js";
-import { presentAtlasChatText, withAtlasPersona } from "./atlasPersonality.js";
+import { alternateChatModel, resolveChatModel } from "./chatModels.js";
+import { asAtlasLine, presentAtlasChatText, withAtlasPersona } from "./atlasPersonality.js";
+import {
+  classifyProviderFailure,
+  isCircuitOpen,
+  noteProviderFailure,
+  noteProviderSuccess,
+  reliabilityNow,
+  retryTransient,
+  runProvider,
+} from "./atlasReliability.js";
+
+let fetchImpl = (...args) => globalThis.fetch(...args);
+
+/** Tests replace the network without touching global fetch. */
+export function setOpenRouterFetchForTests(fn) {
+  fetchImpl = typeof fn === "function" ? fn : (...args) => globalThis.fetch(...args);
+}
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -25,22 +41,7 @@ export function assembleChatMessages({
   return messages;
 }
 
-/**
- * Call OpenRouter chat completions. API key stays server-side.
- * Returns usage for budget metering. Every chat path gets the Atlas persona.
- */
-export async function completeChat({
-  prompt,
-  system,
-  model,
-  maxTokens,
-  temperature = 0.2,
-  messages: priorMessages,
-} = {}) {
-  // Every chat completion (dashboard chat, /api/chat, agent turns, hands) gets Atlas.
-  const messages = assembleChatMessages({ system, prompt, messages: priorMessages });
-
-  const modelId = resolveChatModel(model);
+function requireOpenRouterKey() {
   const key = config.openRouterApiKey;
   if (!key || /CHANGE_ME|PLACEHOLDER|your-key/i.test(key)) {
     const err = new Error("OpenRouter not configured");
@@ -48,25 +49,48 @@ export async function completeChat({
     err.status = 503;
     throw err;
   }
+  return key;
+}
 
-  const response = await fetch(OPENROUTER_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": config.openRouterHttpReferer,
-      "X-Title": config.openRouterAppTitle,
-    },
-    body: JSON.stringify({
-      model: modelId,
-      messages,
-      max_tokens: maxTokens || config.maxTokens,
-      temperature,
-    }),
-  });
+function mechanicalChat(reason) {
+  return {
+    content: asAtlasLine(
+      "Risposta meccanica: il modello esterno non ha risposto. Resto sui dati già in plancia.",
+    ),
+    model: "mechanical",
+    usage: null,
+    fallback: reason === "circuit" ? "circuit" : "mechanical",
+  };
+}
+
+async function postChat({ key, modelId, messages, maxTokens, temperature, signal }) {
+  let response;
+  try {
+    response = await fetchImpl(OPENROUTER_URL, {
+      method: "POST",
+      signal,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": config.openRouterHttpReferer,
+        "X-Title": config.openRouterAppTitle,
+      },
+      body: JSON.stringify({
+        model: modelId,
+        messages,
+        max_tokens: maxTokens || config.maxTokens,
+        temperature,
+      }),
+    });
+  } catch (err) {
+    if (err?.name === "AbortError" || err?.name === "TimeoutError") {
+      err.status = err.status || 504;
+      err.code = err.code || "TIMEOUT";
+    }
+    throw err;
+  }
 
   const payload = await response.json().catch(() => null);
-
   if (!response.ok) {
     const detail =
       payload?.error?.message ||
@@ -82,6 +106,7 @@ export async function completeChat({
   if (typeof content !== "string" || !content.trim()) {
     const err = new Error("Empty model response");
     err.status = 502;
+    err.code = "EMPTY_RESPONSE";
     throw err;
   }
 
@@ -89,7 +114,43 @@ export async function completeChat({
     content: presentAtlasChatText(content.trim()),
     model: payload?.model || modelId,
     usage: payload?.usage ?? null,
+    fallback: null,
   };
+}
+
+/**
+ * Call OpenRouter chat completions. API key stays server-side.
+ * Returns usage for budget metering. Every chat path gets the Atlas persona.
+ * A failed call retries transient errors, then an alternate model, then a
+ * mechanical reply. An open circuit skips the network (M2, M3, X3).
+ */
+export async function completeChat({
+  prompt,
+  system,
+  model,
+  maxTokens,
+  temperature = 0.2,
+  messages: priorMessages,
+} = {}) {
+  // Every chat completion (dashboard chat, /api/chat, agent turns, hands) gets Atlas.
+  const messages = assembleChatMessages({ system, prompt, messages: priorMessages });
+  const modelId = resolveChatModel(model);
+  const key = requireOpenRouterKey();
+  const alternateId = alternateChatModel(modelId);
+  const run = ({ signal }) => postChat({ key, modelId, messages, maxTokens, temperature, signal });
+  const alternate = alternateId
+    ? ({ signal }) => postChat({ key, modelId: alternateId, messages, maxTokens, temperature, signal })
+    : null;
+  return runProvider({
+    provider: "openrouter",
+    run,
+    alternate,
+    mechanical: ({ reason }) => mechanicalChat(reason),
+    attempts: 2,
+    timeoutMs: 4000,
+    baseDelayMs: 80,
+    budgetMs: 9000,
+  });
 }
 
 const OPENROUTER_TRANSCRIBE_URL = "https://openrouter.ai/api/v1/audio/transcriptions";
@@ -121,6 +182,7 @@ export async function transcribeAudio({
     err.status = 413;
     throw err;
   }
+  if (isCircuitOpen("stt")) return mechanicalTranscript("circuit");
 
   const sniffed = sniffAudio(buffer);
   const primary = sniffed?.format || sttFormat(mimeType, filename);
@@ -136,17 +198,21 @@ export async function transcribeAudio({
     "openai/whisper-large-v3-turbo",
   ];
   let lastErr = null;
+  const deadlineAt = reliabilityNow() + 8000;
 
   for (const model of models) {
+    if (reliabilityNow() >= deadlineAt) break;
     const tryFormats = model === models[0] ? formats : [primary];
     let modelMissing = false;
     for (const format of tryFormats) {
-      const { response, payload } = await postTranscription({
+      if (reliabilityNow() >= deadlineAt) break;
+      const { response, payload } = await postTranscriptionReliable({
         key,
         model,
         format,
         buffer,
         language,
+        deadlineAt,
       });
       if (!response.ok) {
         const detail =
@@ -156,6 +222,10 @@ export async function transcribeAudio({
         lastErr = new Error(`${detail} (model ${model}, format ${format}, ${buffer.length} byte)`);
         lastErr.status = response.status >= 400 && response.status < 600 ? response.status : 502;
         lastErr.upstream = true;
+        if (lastErr.status === 401 || lastErr.status === 403) {
+          modelMissing = true;
+          break;
+        }
         if (
           response.status === 404 ||
           /model|not found|no endpoint|unavailable|does not exist/i.test(detail)
@@ -163,41 +233,94 @@ export async function transcribeAudio({
           modelMissing = true;
           break;
         }
-        if (/format|audio|unsupported|invalid|mime/i.test(detail)) continue;
-        if (response.status >= 500) continue;
-        throw lastErr;
+        continue;
       }
       const text = typeof payload?.text === "string" ? payload.text.trim() : "";
-      if (text) return { text, model: payload?.model || model, format };
+      if (text) {
+        noteProviderSuccess("stt");
+        return { text, model: payload?.model || model, format, fallback: null };
+      }
       lastErr = new Error(
         `Whisper ${model} ha restituito testo vuoto (${buffer.length} byte, format ${format})`,
       );
       lastErr.status = 422;
       lastErr.upstream = true;
     }
+    if (lastErr?.status === 401 || lastErr?.status === 403) break;
     if (modelMissing) continue;
   }
 
-  try {
-    const multipart = await postMultipartTranscription({
-      key,
-      model: "openai/whisper-1",
-      buffer,
-      mimeType: sendMime,
-      filename: sendName,
-      language,
-    });
-    if (multipart.text) return multipart;
-    lastErr = new Error(
-      `Whisper multipart testo vuoto (${buffer.length} byte, ${sendMime || "mime?"}, format ${primary})`,
-    );
-    lastErr.status = 422;
-    lastErr.upstream = true;
-  } catch (err) {
-    if (!lastErr) lastErr = err;
+  if (reliabilityNow() < deadlineAt && lastErr?.status !== 401 && lastErr?.status !== 403) {
+    try {
+      const multipart = await postMultipartTranscription({
+        key,
+        model: "openai/whisper-1",
+        buffer,
+        mimeType: sendMime,
+        filename: sendName,
+        language,
+        deadlineAt,
+      });
+      if (multipart.text) {
+        noteProviderSuccess("stt");
+        return { ...multipart, fallback: multipart.fallback || "model" };
+      }
+      lastErr = new Error(
+        `Whisper multipart testo vuoto (${buffer.length} byte, ${sendMime || "mime?"}, format ${primary})`,
+      );
+      lastErr.status = 422;
+      lastErr.upstream = true;
+    } catch (err) {
+      if (!lastErr) lastErr = err;
+    }
   }
 
-  throw lastErr || new Error("Trascrizione non riuscita");
+  const row = noteProviderFailure("stt");
+  return mechanicalTranscript(row.state === "open" ? "circuit" : "mechanical");
+}
+
+function mechanicalTranscript(fallback) {
+  return {
+    text: "",
+    model: "mechanical",
+    format: null,
+    fallback,
+    reply: asAtlasLine("Non ho trascritto l'audio. Ripeti la frase."),
+  };
+}
+
+async function postTranscriptionReliable({ key, model, format, buffer, language, deadlineAt }) {
+  const tried = await retryTransient(
+    async ({ signal }) => {
+      const { response, payload } = await postTranscription({
+        key,
+        model,
+        format,
+        buffer,
+        language,
+        signal,
+      });
+      if (!response?.ok) {
+        const detail =
+          payload?.error?.message ||
+          payload?.message ||
+          `OpenRouter transcribe HTTP ${response?.status}`;
+        const err = new Error(detail);
+        err.status = response?.status >= 400 && response?.status < 600 ? response.status : 502;
+        err.upstream = true;
+        if (classifyProviderFailure(err).retryable) throw err;
+        return { response, payload };
+      }
+      return { response, payload };
+    },
+    { provider: "stt", attempts: 2, timeoutMs: 3500, baseDelayMs: 40, deadlineAt },
+  );
+  if (tried.ok) return tried.value;
+  const err = tried.error || new Error("transcribe failed");
+  return {
+    response: { ok: false, status: Number(err.status) || 502 },
+    payload: { error: { message: err.message || "transcribe failed" } },
+  };
 }
 
 async function postMultipartTranscription({
@@ -207,14 +330,42 @@ async function postMultipartTranscription({
   mimeType,
   filename,
   language,
+  deadlineAt,
+}) {
+  const tried = await retryTransient(
+    ({ signal }) =>
+      postMultipartOnce({
+        key,
+        model,
+        buffer,
+        mimeType,
+        filename,
+        language,
+        signal,
+      }),
+    { provider: "stt", attempts: 2, timeoutMs: 3500, baseDelayMs: 40, deadlineAt },
+  );
+  if (tried.ok) return tried.value;
+  throw tried.error || new Error("multipart transcribe failed");
+}
+
+async function postMultipartOnce({
+  key,
+  model,
+  buffer,
+  mimeType,
+  filename,
+  language,
+  signal,
 }) {
   const form = new FormData();
   const blob = new Blob([buffer], { type: mimeType || "application/octet-stream" });
   form.append("file", blob, filename || "mic.webm");
   form.append("model", model);
   if (language) form.append("language", language);
-  const response = await fetch(OPENROUTER_TRANSCRIBE_URL, {
+  const response = await fetchImpl(OPENROUTER_TRANSCRIBE_URL, {
     method: "POST",
+    signal,
     headers: {
       Authorization: `Bearer ${key}`,
       "HTTP-Referer": config.openRouterHttpReferer,
@@ -271,15 +422,18 @@ function sttFormat(mimeType = "", filename = "") {
   return "m4a";
 }
 
-async function postTranscription({ key, model, format, buffer, language }) {
-  const response = await fetch(OPENROUTER_TRANSCRIBE_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": config.openRouterHttpReferer,
-      "X-Title": config.openRouterAppTitle,
-    },
+async function postTranscription({ key, model, format, buffer, language, signal }) {
+  let response;
+  try {
+    response = await fetchImpl(OPENROUTER_TRANSCRIBE_URL, {
+      method: "POST",
+      signal,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": config.openRouterHttpReferer,
+        "X-Title": config.openRouterAppTitle,
+      },
     body: JSON.stringify({
       model,
       input_audio: {
@@ -288,7 +442,14 @@ async function postTranscription({ key, model, format, buffer, language }) {
       },
       ...(language ? { language } : {}),
     }),
-  });
+    });
+  } catch (err) {
+    if (err?.name === "AbortError" || err?.name === "TimeoutError") {
+      err.status = err.status || 504;
+      err.code = err.code || "TIMEOUT";
+    }
+    throw err;
+  }
   const payload = await response.json().catch(() => null);
   return { response, payload };
 }
@@ -322,6 +483,7 @@ export async function synthesizeSpeech({
     err.status = 400;
     throw err;
   }
+  if (isCircuitOpen("tts")) return mechanicalSpeech(input, "circuit");
 
   const attempts = [
     { model, voice, response_format: responseFormat || "mp3" },
@@ -348,9 +510,44 @@ export async function synthesizeSpeech({
   }
 
   let lastErr = null;
+  const deadlineAt = reliabilityNow() + 8000;
   for (const attempt of queue) {
-    const response = await fetch(OPENROUTER_SPEECH_URL, {
+    if (reliabilityNow() >= deadlineAt) break;
+    const tried = await retryTransient(
+      ({ signal }) => requestSpeech({ key, attempt, input, signal }),
+      { provider: "tts", attempts: 2, timeoutMs: 3500, baseDelayMs: 40, deadlineAt },
+    );
+    if (tried.ok) {
+      noteProviderSuccess("tts");
+      return tried.value;
+    }
+    lastErr = tried.error || lastErr;
+    if (tried.budgetExceeded) break;
+    if (lastErr?.status === 401 || lastErr?.status === 403) break;
+  }
+
+  const row = noteProviderFailure("tts");
+  return mechanicalSpeech(input, row.state === "open" ? "circuit" : "mechanical");
+}
+
+function mechanicalSpeech(text, fallback) {
+  return {
+    buffer: null,
+    mime: null,
+    model: "mechanical",
+    voice: null,
+    fallback,
+    text,
+    reply: asAtlasLine("Voce esterna non disponibile. Il testo resta in plancia."),
+  };
+}
+
+async function requestSpeech({ key, attempt, input, signal }) {
+  let response;
+  try {
+    response = await fetchImpl(OPENROUTER_SPEECH_URL, {
       method: "POST",
+      signal,
       headers: {
         Authorization: `Bearer ${key}`,
         "Content-Type": "application/json",
@@ -364,33 +561,35 @@ export async function synthesizeSpeech({
         response_format: attempt.response_format,
       }),
     });
-
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null);
-      const detail =
-        payload?.error?.message ||
-        payload?.message ||
-        `OpenRouter TTS HTTP ${response.status}`;
-      lastErr = new Error(detail);
-      lastErr.status =
-        response.status >= 400 && response.status < 600 ? response.status : 502;
-      lastErr.upstream = true;
-      continue;
+  } catch (err) {
+    if (err?.name === "AbortError" || err?.name === "TimeoutError") {
+      err.status = err.status || 504;
+      err.code = err.code || "TIMEOUT";
     }
-
-    const buf = Buffer.from(await response.arrayBuffer());
-    if (!buf.length) {
-      lastErr = new Error("TTS audio vuoto");
-      lastErr.status = 502;
-      continue;
-    }
-    return {
-      buffer: buf,
-      mime: attempt.response_format === "pcm" ? "audio/pcm" : "audio/mpeg",
-      model: attempt.model,
-      voice: attempt.voice,
-    };
+    throw err;
   }
-
-  throw lastErr || new Error("TTS fallita");
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const detail =
+      payload?.error?.message ||
+      payload?.message ||
+      `OpenRouter TTS HTTP ${response.status}`;
+    const err = new Error(detail);
+    err.status = response.status >= 400 && response.status < 600 ? response.status : 502;
+    err.upstream = true;
+    throw err;
+  }
+  const buf = Buffer.from(await response.arrayBuffer());
+  if (!buf.length) {
+    const err = new Error("TTS audio vuoto");
+    err.status = 502;
+    throw err;
+  }
+  return {
+    buffer: buf,
+    mime: attempt.response_format === "pcm" ? "audio/pcm" : "audio/mpeg",
+    model: attempt.model,
+    voice: attempt.voice,
+    fallback: null,
+  };
 }

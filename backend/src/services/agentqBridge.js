@@ -23,6 +23,8 @@ import { stripUnrequestedReads, searchRefusal } from "./atlasSearchGate.js";
 import { collectAutoFixes, proposeResolutions } from "./atlasProblemResolve.js";
 import { trustLineForResult } from "./atlasTrust.js";
 import { getBudgetStatus } from "./aiBudget.js";
+import { decisionSnippet, decisionStatus, recordDecision } from "./atlasDecisionLog.js";
+import { providerStatus } from "./atlasReliability.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(__dirname, "../../data");
@@ -681,6 +683,7 @@ export function getEntryUpdates({ limit = 12 } = {}) {
     ok: true,
     updates: list.slice(0, limit),
     generatedAt: new Date().toISOString(),
+    decisionSnippet: decisionSnippet({ limit: 2 }),
   };
 }
 
@@ -747,6 +750,33 @@ export function readSandboxDocument(relPath) {
  * Piano mani: dato un obiettivo in linguaggio naturale, propone azioni plancia
  * usando il modello già configurato (OpenRouter env).
  */
+function logHandsDecision(objective, gated, { local = false } = {}) {
+  const tags = Array.isArray(gated?.tagged) ? gated.tagged : [];
+  const goal = String(objective || "").replace(/\s+/g, " ").trim().slice(0, 80);
+  const choices = tags.length
+    ? tags.map((step) => ({
+        action: step.id,
+        mode: step.mode === "ask" ? "ask" : "auto",
+        reason: step.reason || "unspecified",
+        because: local
+          ? `Piano locale su «${goal}»: «${step.id}» è ${step.mode} (${step.reason}).`
+          : `Il modello ha proposto «${step.id}» per «${goal}»: policy ${step.reason}, quindi ${step.mode}.`,
+      }))
+    : [
+        {
+          action: "none",
+          mode: "auto",
+          reason: "empty",
+          because: `Nessuna mano per «${goal}».`,
+        },
+      ];
+  try {
+    recordDecision({ source: "hands", choices });
+  } catch {
+    /* the plan still returns */
+  }
+}
+
 function handsResult(gated, extra = {}) {
   const trustLine = trustLineForResult(gated.tagged || [], { empty: "mani" });
   return {
@@ -772,6 +802,7 @@ export async function planHandActions(objective) {
     const stripped = stripUnrequestedReads(local.actions, objective);
     const gated = gateHandActions(stripped.actions);
     const speak = stripped.refused ? [local.speak, searchRefusal()].filter(Boolean).join(" ") : local.speak;
+    logHandsDecision(objective, gated, { local: true });
     return handsResult(gated, {
       speak,
       document: local.document,
@@ -804,6 +835,7 @@ export async function planHandActions(objective) {
   const speak = stripped.refused
     ? [parsed.speak, searchRefusal()].filter(Boolean).join(" ")
     : parsed.speak || "";
+  logHandsDecision(objective, gated, { local: false });
   return handsResult(gated, { speak, model: result.model, engine: "agentq-hands" });
 }
 
@@ -834,7 +866,11 @@ export async function agentqStatus() {
       expandable: true,
       count: mem.count,
       path: mem.path,
+      recall: "automatic",
+      search: "on-demand",
     },
+    decisions: decisionStatus({ limit: 5 }),
+    providers: providerStatus(),
     hands: AGENTQ_HAND_ACTIONS.length,
     autonomy: describePolicy(),
     functionBoard: board?.summary || board,

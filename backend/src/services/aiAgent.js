@@ -10,6 +10,7 @@ import { asAtlasLine } from "./atlasPersonality.js";
 import { getDashboardSnapshot, searchCrossThreadMemory } from "../memory/store.js";
 import { isPlanciaStateQuestion, answerPlanciaStateLive } from "./atlasStateAnswer.js";
 import { userAskedForMemory } from "./atlasSearchGate.js";
+import { RECALL_MARKER, injectAutomaticRecall, recallForContext } from "./atlasRecall.js";
 import { assessLiveSpend, spendAskId, withBudgetLine } from "./atlasSpend.js";
 import { trustLineForResult } from "./atlasTrust.js";
 import {
@@ -46,9 +47,10 @@ async function callTier(tier, { system, prompt, maxTokens, temperature }) {
       : tier === "grok"
         ? config.aiGrokModel
         : config.aiMainModel;
+  const attached = injectAutomaticRecall(prompt, prompt);
   const result = await completeChat({
     system,
-    prompt,
+    prompt: attached.prompt,
     model,
     maxTokens,
     temperature,
@@ -342,10 +344,12 @@ export async function runAiTurn({
   const news = getCachedNews(8);
   const memoryRequested = userAskedForMemory(message);
   const crossMem = memoryRequested ? searchCrossThreadMemory(message, { limit: 8 }) : [];
+  const recall = recallForContext(`${message || ""} ${uiState?.module || ""}`.trim(), { limit: 4 });
   const mainSystem = [
     SYSTEM_CARD,
     "Rispondi in italiano, conciso. Analizza solo il contesto fornito.",
     "Non citare risultati di sandbox o memoria espandibile se memory_requested è false.",
+    "automatic_recall sono note durevoli richiamate da sole, senza una ricerca. Usale se pertinenti anche quando memory_requested è false.",
     "Puoi proporre improvements come JSON opzionale in coda:",
     '<!--SUGGESTIONS:[{"area":"...","issue":"...","evidence":"...","effort":"l|m|h","action":"refresh"|{}}]-->',
     `Escalate path: ${tier} reason: ${escalateReason}`,
@@ -362,6 +366,8 @@ export async function runAiTurn({
     consistency: (snap.consistency || []).slice(0, 6),
     memory_concepts: (snap.memory?.concepts || []).slice(0, 12),
     memory_requested: memoryRequested,
+    automatic_recall: recall.facts,
+    recall_note: recall.facts.length ? RECALL_MARKER : "",
     cross_thread_memory: crossMem.map((m) => ({
       thread: m.thread_title,
       role: m.role,
