@@ -33,8 +33,88 @@ import {
 } from "../services/functionBoard.js";
 import { config } from "../config.js";
 import { transcribeAudio } from "../services/openrouter.js";
+import {
+  agentqStatus,
+  runAgentqSearch,
+  getEntryUpdates,
+  appendEntryUpdate,
+  readSandboxDocument,
+  planHandActions,
+  AGENTQ_HAND_ACTIONS,
+} from "../services/agentqBridge.js";
 
 export const aiRouter = Router();
+
+/** Agent Q — stato integrazione (chiavi da env plancia, mai in chiaro). */
+aiRouter.get("/agentq/status", requireAiPaid, async (_req, res) => {
+  try {
+    res.json(await agentqStatus());
+  } catch (err) {
+    res.status(500).json({ error: err.message || "agentq status failed" });
+  }
+});
+
+/**
+ * Ricerca Agent Q — SOLO su richiesta esplicita del client.
+ * Body: { query, sources?: ["filesystem","api","web_hint"] }
+ * Filesystem limitato alla sandbox backend/data/agentq-sandbox.
+ */
+aiRouter.post("/agentq/search", requireAiPaid, async (req, res) => {
+  try {
+    if (!req.body?.query && !req.body?.q) {
+      return res.status(400).json({ error: "query richiesta (ricerca solo on-demand)" });
+    }
+    const result = await runAgentqSearch(req.body.query || req.body.q, {
+      sources: req.body.sources || ["filesystem", "api", "web_hint"],
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || "search failed", code: err.code });
+  }
+});
+
+/** Aggiornamenti recenti all'ingresso plancia. */
+aiRouter.get("/agentq/updates", requireAiPaid, (_req, res) => {
+  res.json(getEntryUpdates({ limit: Number(_req.query?.limit) || 12 }));
+});
+
+aiRouter.post("/agentq/updates", requireAiPaid, (req, res) => {
+  res.json(
+    appendEntryUpdate({
+      title: req.body?.title,
+      detail: req.body?.detail,
+    }),
+  );
+});
+
+/** Pop-up documento da sandbox (testo/PDF base64). */
+aiRouter.get("/agentq/document", requireAiPaid, (req, res) => {
+  try {
+    const rel = String(req.query?.path || req.query?.uri || "").replace(/^sandbox:\/\//, "");
+    res.json(readSandboxDocument(rel));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || "document failed", code: err.code });
+  }
+});
+
+/** Mani: propone azioni plancia (moduli/zoom/refresh) via modello env. */
+aiRouter.post("/agentq/hands", requireAiPaid, async (req, res) => {
+  try {
+    const objective = String(req.body?.objective || req.body?.goal || "").trim();
+    if (!objective) return res.status(400).json({ error: "objective richiesto" });
+    res.json(await planHandActions(objective));
+  } catch (err) {
+    res.status(err.status || 500).json({
+      error: err.message || "hands failed",
+      code: err.code,
+      catalog: AGENTQ_HAND_ACTIONS,
+    });
+  }
+});
+
+aiRouter.get("/agentq/hands/catalog", requireAiPaid, (_req, res) => {
+  res.json({ ok: true, actions: AGENTQ_HAND_ACTIONS });
+});
 
 /** Entitlement probe — readable without paid gate so free clients see paid:false. */
 aiRouter.get("/status", (req, res) => {

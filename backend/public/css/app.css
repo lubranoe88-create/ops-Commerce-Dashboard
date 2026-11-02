@@ -1984,3 +1984,58 @@ body[data-module="map"] #app.clear-globe-layout #glCanvas {
     border-top: 1px solid var(--photo-line);
   }
 }
+
+/* Agent Q document / live popup */
+.agentq-doc-popup {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 4, 10, 0.72);
+  padding: 4vw;
+}
+.agentq-doc-popup[hidden] { display: none !important; }
+.agentq-doc-panel {
+  width: min(920px, 96vw);
+  height: min(78vh, 820px);
+  display: flex;
+  flex-direction: column;
+  background: #071018;
+  border: 1px solid rgba(122, 215, 255, 0.35);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.agentq-doc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(122, 215, 255, 0.2);
+}
+.agentq-doc-head h2 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+.agentq-doc-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+}
+.agentq-doc-frame {
+  width: 100%;
+  height: min(60vh, 640px);
+  border: 0;
+  background: #000;
+}
+.agentq-doc-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(230, 236, 242, 0.92);
+}

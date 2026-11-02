@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-9";
+} from "./mapGlobe.js?v=rail-10";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,13 +33,14 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-9";
+} from "./aiAgentUi.js?v=rail-10";
 import {
   noteAiFunctionReports,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-9";
+} from "./functionBoardUi.js?v=rail-10";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-10";
 
-const BUILD_ID = "rail-9";
+const BUILD_ID = "rail-10";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -3256,6 +3257,18 @@ function wireUi() {
       return;
     }
     if (state.module !== "chat") await showModule("chat");
+    // Agent Q: ricerca/mani on-demand prima della chat generica
+    try {
+      if (typeof window.__opsAgentqHandle === "function") {
+        const handled = await window.__opsAgentqHandle(text);
+        if (handled) {
+          $("chatInput").value = "";
+          return;
+        }
+      }
+    } catch (err) {
+      postChatUpdate(err?.message || "Agent Q errore", "warn");
+    }
     await sendChat(text);
   };
   $("sendChat")?.addEventListener("click", submitAnalizza);
@@ -3416,8 +3429,12 @@ function wireUi() {
   wireModuleZoom();
   globalMicControl = setupMic($("globalMic"), (text) => {
     if (handleVoiceCommand(text)) return;
-    // Fallback: free-form → chat (no TTS — updates stay in the panel)
-    runHoloAction("chat", { fromVoice: true }).then(() => sendChat(text, { voice: true }));
+    // Agent Q on-demand (cerca / mani) prima della chat vocale
+    const maybeAgentq = window.__opsAgentqHandle?.(text);
+    Promise.resolve(maybeAgentq).then((handled) => {
+      if (handled) return;
+      runHoloAction("chat", { fromVoice: true }).then(() => sendChat(text, { voice: true }));
+    });
   });
   // Same controller for chat MIC — avoids a second SpeechRecognition fighting the first
   const chatMic = $("chatMic");
@@ -3644,6 +3661,13 @@ async function boot() {
     startAutoSystems();
     maybeVoiceOnboarding();
     saveLastView(state.module);
+    // Agent Q: aggiornamenti ingresso + comandi on-demand (ricerca/mani/documenti)
+    await wireAgentqUi({
+      postChatUpdate,
+      showToast,
+      runHoloAction,
+      speak,
+    });
   } catch (e) {
     $("moduleLegend").textContent = `Load failed: ${e.message}`;
   }
