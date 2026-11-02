@@ -40,15 +40,17 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-33-proactive";
-import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-33-proactive";
+import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-34-jarvis";
+import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-34-jarvis";
 import {
   dispatchAtlasHand,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
-} from "./atlasHoloDispatch.js?v=rail-33-proactive";
+} from "./atlasHoloDispatch.js?v=rail-34-jarvis";
+import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-34-jarvis";
+import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-34-jarvis";
 
-const BUILD_ID = "rail-33-proactive";
+const BUILD_ID = "rail-34-jarvis";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2162,6 +2164,17 @@ function runHoloAction(action, opts = {}) {
       showToast(`CONTROLLI PLANCIA · ${src}`);
       return Promise.resolve();
     }
+    case "cockpit": {
+      toggleCockpitPanel();
+      showToast(`COCKPIT · ${src}`);
+      return Promise.resolve();
+    }
+    case "memory-graph":
+    case "grafo": {
+      toggleMemoryGraphPanel();
+      showToast(`GRAFO MEMORIA · ${src}`);
+      return Promise.resolve();
+    }
     case "status":
     case "health":
     case "agentq-status":
@@ -2221,6 +2234,8 @@ function handleVoiceCommand(text) {
     [/confronta|compare/, "confronta"],
     [/fly|vola|vai l[iì]/, "fly"],
     [/funzionamento|controlli\s*plancia|pagina\s*controllo|\bcontrolli\b/, "controlli"],
+    [/cockpit|quadro\s*operatore/, "cockpit"],
+    [/grafo\s*(memoria|note)|memory\s*graph/, "memory-graph"],
     [/strumenti|tools/, "strumenti"],
     [/tema\s*(cyan|ciano)/, "tema-cyan"],
     [/tema\s*(ambra|amber)/, "tema-amber"],
@@ -2511,6 +2526,12 @@ function sideForModule(mod, snap) {
     hint.className = "card muted";
     hint.textContent = "Clicca un concetto 3D per centrarlo e pulsare i collegati.";
     body.appendChild(hint);
+    const graphBtn = document.createElement("button");
+    graphBtn.type = "button";
+    graphBtn.className = "pill-btn";
+    graphBtn.textContent = "Grafo note Atlas";
+    graphBtn.addEventListener("click", () => openMemoryGraphPanel());
+    body.appendChild(graphBtn);
     (snap.memory?.concepts || []).forEach((c) => {
       const el = document.createElement("div");
       el.className = "card";
@@ -4562,6 +4583,13 @@ async function boot() {
   wireUi();
   // Quadro 2D: wire panel controls only — opens from «Funzionamento plancia», not on home.
   wireFunctionBoardUi();
+  window.__opsAtlasDigest = (line) => {
+    if (!line) return;
+    postChatUpdate(line, "ok", { trust: "auto", trustLine: "Affidabilità · AUTO · digest" });
+    speak(String(line).replace(/\s+/g, " ").slice(0, 420), { ifUnlocked: true, yieldToCall: true });
+  };
+  wireCockpitUi();
+  wireMemoryGraphUi();
   window.addEventListener("ops:function-board-report", () => {
     noteAiFunctionReports([{ type: "report-function" }]);
   });

@@ -2027,6 +2027,67 @@ body[data-module="map"] #app.clear-globe-layout #glCanvas {
   }
 }
 
+/* Operator cockpit and expandable-memory graph */
+.cockpit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+}
+.cockpit-card,
+.memory-list {
+  border: 1px solid rgba(90, 210, 230, 0.35);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: rgba(0, 10, 16, 0.45);
+}
+.cockpit-card h3,
+.memory-list h3 {
+  margin: 0 0 8px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(180, 236, 245, 0.9);
+}
+.cockpit-card ul,
+.memory-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cockpit-card li,
+.memory-graph-item {
+  padding: 6px 0;
+  border-top: 1px solid rgba(90, 210, 230, 0.16);
+  font-size: 13px;
+}
+.memory-graph-item { cursor: pointer; }
+.memory-graph-item.is-selected { color: #e8fbff; }
+.memory-graph-item.is-dim { opacity: 0.38; }
+.memory-graph-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 340px) 1fr;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+.memory-graph-svg {
+  width: 100%;
+  height: 420px;
+  background: rgba(0, 8, 14, 0.35);
+  border-radius: 6px;
+}
+.memory-edge { stroke: rgba(120, 210, 230, 0.75); stroke-width: 1.2; }
+.memory-edge--recall { stroke: rgba(240, 196, 120, 0.9); stroke-dasharray: 4 3; }
+.memory-node circle { fill: rgba(8, 40, 52, 0.95); stroke: rgba(120, 220, 235, 0.9); }
+.memory-node text { fill: #d7f6ff; font-size: 11px; font-family: "IBM Plex Mono", ui-monospace, monospace; }
+.memory-node.is-selected circle { stroke: #f0d090; }
+@media (max-width: 800px) {
+  .memory-graph-body { grid-template-columns: 1fr; }
+}
+
 /* Atlas document / live popup (class names stay agentq-doc-*) */
 .agentq-doc-popup {
   position: fixed;

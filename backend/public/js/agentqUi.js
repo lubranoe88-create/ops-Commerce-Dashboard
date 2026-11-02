@@ -6,6 +6,7 @@
  * - Mani: piano Atlas → runHoloAction (zoom, moduli, briefing, documenti)
  */
 import { payloadFromLocalPlan, planHandsFromUtterance } from "./atlasHandsPlan.js";
+import { routeAtlasTurn } from "./atlasRoute.js";
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -796,21 +797,74 @@ async function recallMemory(text, ctx) {
   });
 }
 
+async function presentAtlasPayload(data, ctx, trustId) {
+  const line = data?.reply || data?.summary || "";
+  if (line) {
+    const mode = data?.ask?.length ? "ask" : "auto";
+    ctx.postChatUpdate?.(line, "ok", {
+      trust: mode,
+      trustLine: data?.trustLine || trustLineFor(mode, trustId),
+    });
+    ctx.speak?.(String(line).replace(/\s+/g, " ").slice(0, 420), { ifUnlocked: true, yieldToCall: true });
+  }
+  if (data?.actions?.length || data?.ask?.length || data?.tagged?.length) {
+    await executeHandPlan(data, ctx, { quietIfEmpty: true });
+  }
+}
+
 export async function handleAtlasCommand(raw, ctx = {}) {
   const text = String(raw || "").trim();
   if (!text) return false;
-  if (isPlanciaStateQuestion(text)) {
+  const route = routeAtlasTurn(text);
+  if (route.workflowId) {
+    try {
+      const data = await api("/api/ai/agentq/workflows/run", {
+        method: "POST",
+        body: JSON.stringify({ id: route.workflowId }),
+      });
+      await presentAtlasPayload(data, ctx, "workflow");
+    } catch (err) {
+      ctx.postChatUpdate?.(atlasLine(err?.message || "Playbook non eseguito."), "warn");
+    }
+    return true;
+  }
+  if (!route.specialist) return false;
+  if (route.specialist === "state" && route.intent === "problems") {
+    try {
+      await showProblems({
+        postChatUpdate: ctx.postChatUpdate,
+        runHoloAction: ctx.runHoloAction,
+        resolve: route.resolve === true,
+      });
+    } catch (err) {
+      ctx.postChatUpdate?.(atlasLine(err?.message || "Monitoraggio non disponibile"), "warn");
+    }
+    return true;
+  }
+  if (route.specialist === "state") {
     await answerStateCommand(text, ctx);
     return true;
   }
-  if (refusesImplicitSearch(text)) {
+  if (route.specialist === "news") {
+    try {
+      const data = await api("/api/ai/agentq/route", {
+        method: "POST",
+        body: JSON.stringify({ message: text, module: typeof ctx.module === "function" ? ctx.module() : ctx.module || "" }),
+      });
+      await presentAtlasPayload(data, ctx, "news");
+    } catch (err) {
+      ctx.postChatUpdate?.(atlasLine(err?.message || "News non lette."), "warn");
+    }
+    return true;
+  }
+  if (route.specialist === "research" && route.intent === "refused") {
     ctx.postChatUpdate?.(ATLAS_SEARCH_REFUSAL, "warn", {
       trust: "ask",
       trustLine: trustLineFor("ask", "ricerca"),
     });
     return true;
   }
-  if (isMemoryRecall(text)) {
+  if (route.specialist === "research" && route.intent === "memory-recall") {
     try {
       await recallMemory(text, ctx);
     } catch (err) {
@@ -818,27 +872,7 @@ export async function handleAtlasCommand(raw, ctx = {}) {
     }
     return true;
   }
-  if (isSearchRequest(text)) {
-    const q = extractSearchQuery(text);
-    await runOnDemandSearch(q, {
-      postChatUpdate: ctx.postChatUpdate,
-      openDoc: true,
-    });
-    return true;
-  }
-  if (isProblemsRequest(text)) {
-    try {
-      await showProblems({
-        postChatUpdate: ctx.postChatUpdate,
-        runHoloAction: ctx.runHoloAction,
-        resolve: wantsResolution(text),
-      });
-    } catch (err) {
-      ctx.postChatUpdate?.(atlasLine(err?.message || "Monitoraggio non disponibile"), "warn");
-    }
-    return true;
-  }
-  if (isMemoryWrite(text)) {
+  if (route.specialist === "research" && route.intent === "memory-write") {
     const note = text.replace(/^(memorizza|ricorda|salva\s+in\s+memoria)\s*/i, "").trim();
     if (!note) {
       ctx.postChatUpdate?.(atlasLine("Per espandere la memoria indica cosa salvare (es. «memorizza budget Q4»)."), "warn", {
@@ -863,6 +897,15 @@ export async function handleAtlasCommand(raw, ctx = {}) {
     }
     return true;
   }
+  if (route.specialist === "research") {
+    const q = extractSearchQuery(text);
+    await runOnDemandSearch(q, {
+      postChatUpdate: ctx.postChatUpdate,
+      openDoc: true,
+    });
+    return true;
+  }
+  if (route.specialist !== "hands") return false;
 
   const local = planHandsFromUtterance(text);
   const handsPrefix = /^(?:agent\s*q|mani)\b/i.test(text);

@@ -93,7 +93,7 @@ const chatLimiter = rateLimit({
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    build: "rail-33-proactive",
+    build: "rail-34-jarvis",
     integrity: (() => {
       const report = readIntegrityReport();
       if (!report) return null;

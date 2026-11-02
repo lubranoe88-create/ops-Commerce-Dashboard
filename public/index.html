@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=rail-33-proactive" />
+  <link rel="stylesheet" href="/css/app.css?v=rail-34-jarvis" />
 </head>
 <body>
   <!--
@@ -36,6 +36,14 @@
       <button type="button" class="dock-btn" data-holo-action="controlli" aria-label="CONTROLLI PLANCIA" title="Panoramica funzioni plancia">
         <span class="holo-dot" aria-hidden="true"></span>
         <span class="holo-label">CONTROLLI</span>
+      </button>
+      <button type="button" class="dock-btn" data-holo-action="cockpit" aria-label="COCKPIT ATLAS" title="Tool, ASK, decisioni, residente">
+        <span class="holo-dot" aria-hidden="true"></span>
+        <span class="holo-label">COCKPIT</span>
+      </button>
+      <button type="button" class="dock-btn" data-holo-action="memory-graph" aria-label="GRAFO MEMORIA" title="Note e legami di richiamo">
+        <span class="holo-dot" aria-hidden="true"></span>
+        <span class="holo-label">GRAFO</span>
       </button>
     </nav>
 
@@ -201,6 +209,41 @@
       </section>
     </div>
 
+    <div id="cockpitPanel" class="function-board-panel cockpit-panel" hidden aria-hidden="true">
+      <section class="function-board function-board--panel" aria-label="Cockpit operatore Atlas">
+        <header class="function-board-head">
+          <div class="function-board-title-wrap">
+            <h2 class="function-board-title">Cockpit Atlas</h2>
+            <span id="cockpitSummary" class="function-board-summary mono muted">—</span>
+          </div>
+          <div class="function-board-actions">
+            <button type="button" id="cockpitRefresh" class="pill-btn">Aggiorna</button>
+            <button type="button" id="cockpitClose" class="pill-btn">Chiudi</button>
+          </div>
+        </header>
+        <div id="cockpitBody" class="cockpit-body"></div>
+      </section>
+    </div>
+
+    <div id="memoryGraphPanel" class="function-board-panel memory-graph-panel" hidden aria-hidden="true">
+      <section class="function-board function-board--panel" aria-label="Grafo memoria Atlas">
+        <header class="function-board-head">
+          <div class="function-board-title-wrap">
+            <h2 class="function-board-title">Memoria Atlas</h2>
+            <span id="memoryGraphSummary" class="function-board-summary mono muted">—</span>
+          </div>
+          <div class="function-board-actions">
+            <button type="button" id="memoryGraphRefresh" class="pill-btn">Aggiorna</button>
+            <button type="button" id="memoryGraphClose" class="pill-btn">Chiudi</button>
+          </div>
+        </header>
+        <div class="memory-graph-body">
+          <div id="memoryGraphList" class="memory-list"></div>
+          <svg id="memoryGraphSvg" class="memory-graph-svg" role="img" aria-label="Grafo note e richiami"></svg>
+        </div>
+      </section>
+    </div>
+
     <div id="aiBriefingModal" class="ai-briefing" hidden>
       <form id="aiBriefingForm" class="ai-briefing-panel" autocomplete="off">
         <h2 class="ai-briefing-title">Briefing di sessione</h2>
@@ -233,6 +276,6 @@
     }
   }
   </script>
-  <script type="module" src="/js/app.js?v=rail-33-proactive"></script>
+  <script type="module" src="/js/app.js?v=rail-34-jarvis"></script>
 </body>
 </html>

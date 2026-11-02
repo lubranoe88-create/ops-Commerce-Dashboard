@@ -446,11 +446,11 @@ describe("Atlas rail-33 proactive", { concurrency: false }, () => {
     assert.equal(observed.kind, "news");
   });
 
-  test("rail-33-proactive is stamped and the public mirrors match", () => {
-    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-33-proactive"/);
-    assert.match(read("backend/src/server.js"), /build:\s*"rail-33-proactive"/);
-    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-33-proactive"/);
-    assert.match(read("public/index.html"), /href="\/css\/app\.css\?v=rail-33-proactive"/);
+  test("rail-34-jarvis is stamped and the public mirrors match", () => {
+    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-34-jarvis"/);
+    assert.match(read("backend/src/server.js"), /build:\s*"rail-34-jarvis"/);
+    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-34-jarvis"/);
+    assert.match(read("public/index.html"), /href="\/css\/app\.css\?v=rail-34-jarvis"/);
     assert.match(read("backend/src/server.js"), /runStartupIntegrity\(\{\s*reason:\s*"boot"\s*\}\)/);
     assert.match(read("backend/src/server.js"), /attemptSelfHeal\(/);
     assert.equal(read("public/js/app.js"), read("backend/public/js/app.js"));

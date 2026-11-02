@@ -58,8 +58,29 @@ import { searchRefusal } from "../services/atlasSearchGate.js";
 import { patchAtlasSession, publicAtlasSession, readAtlasSession } from "../services/atlasSessionStore.js";
 import { asAtlasLine } from "../services/atlasPersonality.js";
 import { rememberDurableNote } from "../services/atlasRecall.js";
+import { dispatchAtlasTurn } from "../services/atlasSpecialists.js";
+import { handleMcpBatch } from "../services/atlasMcp.js";
+import {
+  ensureDefaultSchedule,
+  installAtlasSchedule,
+  publicSchedule,
+  runScheduledJob,
+  saveJob,
+} from "../services/atlasSchedule.js";
+import { buildCockpit } from "../services/atlasCockpit.js";
+import { memoryGraph } from "../services/atlasMemoryGraph.js";
+import { listWorkflows, resumeInterruptedWorkflows, resumeWorkflowRun, runWorkflow } from "../services/atlasWorkflows.js";
+import { listOpenRuns, listRuns } from "../services/atlasRuns.js";
 
 installAtlasResident();
+try {
+  installAtlasSchedule();
+} catch (err) {
+  console.warn("[atlas-schedule]", err?.message || err);
+}
+resumeInterruptedWorkflows().catch((err) => {
+  console.warn("[atlas-runs]", err?.message || err);
+});
 
 export const aiRouter = Router();
 
@@ -233,6 +254,116 @@ aiRouter.post("/agentq/memory", requireAiPaid, (req, res) => {
       tags: req.body?.tags,
     }),
   );
+});
+
+/** X4: expandable memory as a graph of notes and recall links. */
+aiRouter.get("/agentq/memory/graph", (req, res) => {
+  try {
+    res.json(
+      memoryGraph({
+        limit: Number(req.query?.limit) || 40,
+        query: String(req.query?.q || req.query?.query || ""),
+      }),
+    );
+  } catch (err) {
+    res.status(500).json({ ok: false, name: "Atlas", error: err.message || "memory graph failed" });
+  }
+});
+
+/**
+ * J1: one specialist per turn. The user-facing name stays Atlas.
+ */
+aiRouter.post("/agentq/route", async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const message = String(body.message || body.text || "").trim();
+    if (!message) return res.status(400).json({ ok: false, name: "Atlas", error: "message richiesto" });
+    const result = await dispatchAtlasTurn(message, { module: body.module || "" });
+    const status = Number(result?.status) || (result?.code === "AI_PAYMENT_REQUIRED" ? 402 : 200);
+    res.status(status).json(result);
+  } catch (err) {
+    res.status(err.status || 500).json({ ok: false, name: "Atlas", error: err.message || "route failed" });
+  }
+});
+
+/** J3: JSON-RPC tool bus (initialize, tools/list, tools/call, tools/register). */
+aiRouter.post("/agentq/mcp", async (req, res) => {
+  try {
+    const result = await handleMcpBatch(req.body);
+    if (result == null) return res.status(202).end();
+    if (Array.isArray(result) && result.length === 0) return res.status(202).end();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32603, message: err.message || "mcp failed" },
+    });
+  }
+});
+
+/** J6: live tool calls, pending ASK, decision tail, resident status. */
+aiRouter.get("/agentq/cockpit", (_req, res) => {
+  try {
+    res.json(buildCockpit());
+  } catch (err) {
+    res.status(500).json({ ok: false, name: "Atlas", error: err.message || "cockpit failed" });
+  }
+});
+
+/** J5: persisted cron/interval jobs. */
+aiRouter.get("/agentq/schedule", (_req, res) => {
+  try {
+    ensureDefaultSchedule();
+    res.json(publicSchedule());
+  } catch (err) {
+    res.status(500).json({ error: err.message || "schedule failed" });
+  }
+});
+
+aiRouter.post("/agentq/schedule", (req, res) => {
+  try {
+    const job = saveJob(req.body || {});
+    res.json({ ok: true, name: "Atlas", job });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || "schedule save failed" });
+  }
+});
+
+aiRouter.post("/agentq/schedule/:id/run", async (req, res) => {
+  try {
+    res.json(await runScheduledJob(req.params.id));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || "schedule run failed" });
+  }
+});
+
+/** X2: named playbooks. */
+aiRouter.get("/agentq/workflows", (_req, res) => {
+  res.json({ ok: true, name: "Atlas", workflows: listWorkflows() });
+});
+
+aiRouter.post("/agentq/workflows/run", async (req, res) => {
+  try {
+    const id = String(req.body?.id || req.body?.workflow || "").trim();
+    if (!id) return res.status(400).json({ ok: false, name: "Atlas", error: "id richiesto" });
+    res.json(await runWorkflow(id));
+  } catch (err) {
+    res.status(err.status || 500).json({ ok: false, name: "Atlas", error: err.message || "workflow failed" });
+  }
+});
+
+/** J2: checkpointed runs and resume after a restart. */
+aiRouter.get("/agentq/runs", (_req, res) => {
+  res.json({ ok: true, name: "Atlas", runs: listRuns(), open: listOpenRuns() });
+});
+
+aiRouter.post("/agentq/runs/:id/resume", async (req, res) => {
+  try {
+    res.json(await resumeWorkflowRun(req.params.id));
+  } catch (err) {
+    res.status(err.status || 500).json({ ok: false, name: "Atlas", error: err.message || "resume failed" });
+  }
 });
 
 /**

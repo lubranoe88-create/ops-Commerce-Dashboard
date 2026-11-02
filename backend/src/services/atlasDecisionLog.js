@@ -48,10 +48,12 @@ function sanitizeChoice(choice) {
   };
 }
 
+const DECISION_SOURCES = new Set(["wake", "hands", "news", "heal", "route", "schedule", "workflow", "run"]);
+
 function sanitizeEntry(raw) {
   if (!raw || typeof raw !== "object") return null;
   const source = clip(raw.source, 20);
-  if (source !== "wake" && source !== "hands" && source !== "news" && source !== "heal") return null;
+  if (!DECISION_SOURCES.has(source)) return null;
   const choices = [];
   for (const choice of Array.isArray(raw.choices) ? raw.choices : []) {
     const clean = sanitizeChoice(choice);

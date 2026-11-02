@@ -528,7 +528,7 @@ function writeMemoryFile(data) {
 export function appendExpandableMemory({ title, text, tags } = {}) {
   const data = readMemoryFile();
   const entry = {
-    id: `m-${Date.now().toString(36)}`,
+    id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     at: new Date().toISOString(),
     title: String(title || "Nota Atlas").slice(0, 160),
     text: String(text || "").slice(0, 4000),
@@ -562,7 +562,7 @@ export function upsertTaggedMemory({ tag, title, text } = {}) {
   const data = readMemoryFile();
   const idx = data.entries.findIndex((entry) => (entry?.tags || []).includes(key));
   const entry = {
-    id: idx >= 0 ? data.entries[idx].id : `m-${Date.now().toString(36)}`,
+    id: idx >= 0 ? data.entries[idx].id : `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     at: new Date().toISOString(),
     title: String(title || "Nota Atlas").slice(0, 160),
     text: String(text || "").slice(0, 4000),
