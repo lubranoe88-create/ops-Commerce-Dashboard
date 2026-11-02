@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-22";
+} from "./mapGlobe.js?v=rail-23";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,16 +33,16 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-22";
+} from "./aiAgentUi.js?v=rail-23";
 import {
   noteAiFunctionReports,
   openFunctionBoardPanel,
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-22";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-22";
+} from "./functionBoardUi.js?v=rail-23";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-23";
 
-const BUILD_ID = "rail-22";
+const BUILD_ID = "rail-23";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1607,7 +1607,7 @@ function speakViaSpeechSynthesis(line) {
   }
 }
 
-/** Play server MP3: on iPad prefer HTMLAudio (mpeg decodeAudioData is flaky), else AudioContext. */
+/** Play server MP3 on the MIC-primed AudioContext, then HTMLAudio if decode fails. */
 async function speakViaServerAudio(line) {
   ensureAudioSessionPlayAndRecord();
   const ctx = getPrimedAudioContext();
@@ -1644,6 +1644,9 @@ async function speakViaServerAudio(line) {
     if (!ctx) throw new Error("AudioContext assente");
     ensureAudioSessionPlayAndRecord();
     await ctx.resume?.();
+    if (ctx.state && ctx.state !== "running") {
+      throw new Error(`AudioContext ${ctx.state}`);
+    }
     const raw = atob(b64);
     const bytes = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
@@ -1680,17 +1683,20 @@ async function speakViaServerAudio(line) {
     return true;
   };
 
-  // iPad: HTMLAudio first (unlocked by MIC gesture). Desktop: AudioContext first.
-  const order = isIpadLike() ? [playHtml, playCtx] : [playCtx, playHtml];
-  let lastErr = null;
-  for (const step of order) {
-    try {
-      return await step();
-    } catch (err) {
-      lastErr = err;
-    }
+  // AudioContext first (resumed inside the MIC gesture). HTMLAudio is the fallback
+  // when Safari cannot decode the MP3 or the context is left suspended.
+  let ctxErr = null;
+  try {
+    return await playCtx();
+  } catch (err) {
+    ctxErr = err;
   }
-  throw new Error(lastErr?.message || String(lastErr || "TTS playback fallita"));
+  try {
+    return await playHtml();
+  } catch (err) {
+    const decodeMsg = ctxErr?.message || String(ctxErr || "decode saltato");
+    throw new Error(`decode: ${decodeMsg} · audio: ${err?.message || err}`);
+  }
 }
 
 /**
@@ -3069,6 +3075,7 @@ function pickRecorderMime() {
   const candidates = [
     "audio/mp4",
     "audio/aac",
+    "audio/mp4;codecs=mp4a.40.2",
     "audio/webm;codecs=opus",
     "audio/webm",
     "audio/ogg;codecs=opus",
@@ -3089,6 +3096,178 @@ function blobToBase64(blob) {
   });
 }
 
+function openMediaRecorder(stream) {
+  const preferred = isIpadLike() || isAppleWebKit()
+    ? ["audio/mp4", "audio/aac", "audio/mp4;codecs=mp4a.40.2"]
+    : ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  const seen = new Set();
+  for (const mime of preferred) {
+    if (!mime || seen.has(mime)) continue;
+    seen.add(mime);
+    if (typeof MediaRecorder.isTypeSupported === "function" && !MediaRecorder.isTypeSupported(mime)) {
+      continue;
+    }
+    try {
+      return { recorder: new MediaRecorder(stream, { mimeType: mime }), mime };
+    } catch {
+      /* try the next container */
+    }
+  }
+  try {
+    const recorder = new MediaRecorder(stream);
+    return { recorder, mime: recorder.mimeType || "" };
+  } catch (err) {
+    return { recorder: null, mime: "", error: err };
+  }
+}
+
+function encodeWavPcm(chunks, sampleRate) {
+  let length = 0;
+  for (const chunk of chunks) length += chunk.length;
+  const buffer = new ArrayBuffer(44 + length * 2);
+  const view = new DataView(buffer);
+  const write = (offset, text) => {
+    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  write(0, "RIFF");
+  view.setUint32(4, 36 + length * 2, true);
+  write(8, "WAVE");
+  write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, length * 2, true);
+  let offset = 44;
+  for (const chunk of chunks) {
+    for (let i = 0; i < chunk.length; i += 1) {
+      const s = Math.max(-1, Math.min(1, chunk[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      offset += 2;
+    }
+  }
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+function bytesInclude(bytes, word) {
+  const n = word.length;
+  if (!bytes || bytes.length < n) return false;
+  outer: for (let i = 0; i + n <= bytes.length; i += 1) {
+    for (let j = 0; j < n; j += 1) {
+      if (bytes[i + j] !== word.charCodeAt(j)) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
+
+/** True when the blob is one decodable container, not a header-only Safari fragment. */
+function containerLooksDecodable(bytes, mime) {
+  if (!bytes || bytes.length <= 16) return false;
+  if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return true;
+  if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) return bytes.length > 44;
+  if (bytes[0] === 0x4f && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) return true;
+  const ftyp = bytes.length > 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70;
+  if (ftyp) return bytesInclude(bytes, "mdat") && (bytesInclude(bytes, "moov") || bytesInclude(bytes, "moof"));
+  if (/aac/i.test(mime || "")) return bytes.length > 16;
+  return false;
+}
+
+/**
+ * Safari getUserMedia → PCM. MediaRecorder mp4 from a real iPad is often an empty
+ * or fragmented blob; the oscillator test never produces that file.
+ */
+function startPcmTap(stream) {
+  const ctx = getPrimedAudioContext();
+  if (!ctx || typeof ctx.createMediaStreamSource !== "function" || typeof ctx.createScriptProcessor !== "function") {
+    return null;
+  }
+  try {
+    ctx.resume?.();
+    const source = ctx.createMediaStreamSource(stream);
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    const mute = ctx.createGain();
+    mute.gain.value = 0;
+    const chunks = [];
+    processor.onaudioprocess = (ev) => {
+      const ch = ev.inputBuffer?.getChannelData?.(0);
+      if (!ch || !ch.length) return;
+      chunks.push(new Float32Array(ch));
+    };
+    source.connect(processor);
+    processor.connect(mute);
+    mute.connect(ctx.destination);
+    const rate = ctx.sampleRate || 48000;
+    return {
+      stop() {
+        try { processor.onaudioprocess = null; } catch { /* ignore */ }
+        try { processor.disconnect(); } catch { /* ignore */ }
+        try { source.disconnect(); } catch { /* ignore */ }
+        try { mute.disconnect(); } catch { /* ignore */ }
+      },
+      snapshot() {
+        let samples = 0;
+        let acc = 0;
+        for (const chunk of chunks) {
+          samples += chunk.length;
+          for (let i = 0; i < chunk.length; i += 1) acc += chunk[i] * chunk[i];
+        }
+        return {
+          samples,
+          sampleRate: rate,
+          rms: samples ? Math.sqrt(acc / samples) : 0,
+          blob: samples ? encodeWavPcm(chunks, rate) : null,
+        };
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function describeAudioBlob(blob) {
+  const mime = String(blob?.type || "application/octet-stream");
+  const m = mime.toLowerCase();
+  if (m.includes("wav")) return { mimeType: "audio/wav", filename: "mic.wav" };
+  if (m.includes("webm")) return { mimeType: mime, filename: "mic.webm" };
+  if (m.includes("ogg")) return { mimeType: mime, filename: "mic.ogg" };
+  if (m.includes("mpeg") || m.includes("mp3")) return { mimeType: "audio/mpeg", filename: "mic.mp3" };
+  if (m.includes("aac") && !m.includes("mp4")) return { mimeType: "audio/aac", filename: "mic.aac" };
+  return { mimeType: "audio/mp4", filename: "mic.m4a" };
+}
+
+async function chooseUploadBlob(chunks, mime, pcmTap) {
+  const parts = (chunks || []).filter((c) => c && c.size > 0);
+  const type = mime || parts[0]?.type || "audio/mp4";
+  const recorderBlob = parts.length ? new Blob(parts, { type }) : new Blob([], { type });
+  let recBytes = null;
+  if (recorderBlob.size > 16) recBytes = new Uint8Array(await recorderBlob.arrayBuffer());
+  const recOk = Boolean(recBytes && containerLooksDecodable(recBytes, type));
+  let snap = null;
+  try {
+    snap = pcmTap?.snapshot?.() || null;
+  } catch {
+    snap = null;
+  }
+  const wav = snap?.blob && snap.blob.size > 16 ? snap.blob : null;
+  const wavSpeech = Boolean(
+    wav &&
+      snap.samples > (snap.sampleRate || 16000) * 0.45 &&
+      snap.rms >= 0.008,
+  );
+  // Real iPad: send the PCM/WAV Whisper already accepts. The fake-mic test is a
+  // valid container; a Safari timeslice mp4 often is not.
+  if ((isIpadLike() || isAppleWebKit()) && wavSpeech) return wav;
+  if (recOk) return new Blob([recBytes], { type: type || "audio/mp4" });
+  if (wav) return wav;
+  if (recorderBlob.size > 16) return recorderBlob;
+  return recorderBlob;
+}
+
 function setupMic(button, onText) {
   if (!button) return null;
   if (button.dataset.micWired) {
@@ -3096,10 +3275,7 @@ function setupMic(button, onText) {
   }
   button.dataset.micWired = "1";
   const hasSR = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
-  const hasRec = typeof MediaRecorder !== "undefined" && Boolean(pickRecorderMime() || true);
-  button.title = hasSR
-    ? "Tocca per parlare (it-IT)"
-    : "Tocca per registrare (fallback iPad · Whisper)";
+  button.title = "Tocca per registrare, ritocca per inviare";
   button.setAttribute("aria-pressed", "false");
   button.removeAttribute("aria-disabled");
 
@@ -3113,16 +3289,17 @@ function setupMic(button, onText) {
   let recordMime = "";
   let recordTimer = null;
   let recordStartedAt = 0;
-  let mode = null; // "sr" | "rec" | "call"
-  /** getUserMedia promise started inside pointerdown (Safari requires gesture). */
+  let mode = null; // "sr" | "rec"
   let gestureMicPromise = null;
-  /** Continuous call session: stays open until explicit MIC end. */
-  let callLive = false;
-  let callGen = 0;
+  let pcmTap = null;
+  let pcmOnly = false;
+  let stopQueued = false;
+  let stopAfterStart = false;
+  let captureClosed = false;
+  let finalizeTimer = null;
   const uiButtons = new Set([button]);
-  // Safari mp4 needs contiguous capture (no timeslice) before stop yields a decodable file.
-  const MIN_RECORD_MS = 3200;
-  const CALL_SEGMENT_MS = 3800;
+  // Safari will not finalize an mp4 that is stopped in the first second.
+  const MIN_RECORD_MS = 2400;
 
   const clearStartWatch = () => {
     if (startWatchTimer) {
@@ -3141,32 +3318,40 @@ function setupMic(button, onText) {
   const setLiveUi = (live) => {
     state.micLive = live;
     document.body.classList.toggle("mic-live", live);
-    document.body.classList.toggle("voice-call", Boolean(callLive));
-    document.documentElement.dataset.voiceCall = callLive ? "1" : "0";
+    document.body.classList.remove("voice-call");
+    document.documentElement.dataset.voiceCall = "0";
     for (const btn of uiButtons) {
       btn.classList.toggle("live", live);
       btn.setAttribute("aria-pressed", live ? "true" : "false");
-      btn.title = callLive
-        ? "Chiamata attiva — ritocca per chiudere"
-        : hasSR
-          ? "Tocca per parlare (it-IT)"
-          : "Tocca per avviare la chiamata vocale";
+      btn.title = live ? "In registrazione — ritocca per inviare" : "Tocca per registrare, ritocca per inviare";
     }
   };
 
   const stopUi = () => {
     starting = false;
     mode = null;
+    pcmOnly = false;
     clearStartWatch();
     clearRecordTimer();
     setLiveUi(false);
   };
 
+  const stopPcmTap = () => {
+    const tap = pcmTap;
+    pcmTap = null;
+    try { tap?.stop?.(); } catch { /* ignore */ }
+    return tap;
+  };
+
   const hardStop = ({ skipUpload = false } = {}) => {
-    callLive = false;
-    callGen += 1;
+    captureClosed = true;
+    stopAfterStart = false;
     clearStartWatch();
     clearRecordTimer();
+    if (finalizeTimer) {
+      clearTimeout(finalizeTimer);
+      finalizeTimer = null;
+    }
     if (mediaRecorder && mediaRecorder.state !== "inactive") {
       try {
         if (skipUpload) mediaRecorder.onstop = null;
@@ -3177,6 +3362,7 @@ function setupMic(button, onText) {
     }
     mediaRecorder = null;
     recordChunks = [];
+    stopPcmTap();
     if (rec) {
       try {
         rec.onresult = null;
@@ -3185,38 +3371,13 @@ function setupMic(button, onText) {
         rec.onstart = null;
         rec.abort?.();
       } catch {
-        try {
-          rec.stop();
-        } catch {
-          /* ignore */
-        }
+        try { rec.stop(); } catch { /* ignore */ }
       }
       rec = null;
     }
     releaseMicStream(micStream);
     micStream = null;
     stopUi();
-  };
-
-  const endVoiceCall = (msg = "Chiamata chiusa") => {
-    callLive = false;
-    callGen += 1;
-    clearRecordTimer();
-    if (mediaRecorder && mediaRecorder.state === "recording") {
-      try {
-        mediaRecorder.onstop = null;
-        mediaRecorder.stop();
-      } catch {
-        /* ignore */
-      }
-    }
-    mediaRecorder = null;
-    recordChunks = [];
-    releaseMicStream(micStream);
-    micStream = null;
-    stopUi();
-    postChatUpdate(msg);
-    showToast(msg, "ok");
   };
 
   const micDiagHint = () => {
@@ -3229,163 +3390,158 @@ function setupMic(button, onText) {
     return parts.join(" · ");
   };
 
-  const transcribeBlob = async (blob) => {
-    const mime = blob?.type || recordMime || "audio/mp4";
+  const finishRecordingUpload = async (blob) => {
+    const meta = describeAudioBlob(blob);
     const size = blob?.size || 0;
-    const minBytes = /mp4|aac|m4a/i.test(mime) ? 600 : 64;
-    if (!blob || size < minBytes) {
-      return { ok: false, empty: true, size, mime };
-    }
-    const audioBase64 = await blobToBase64(blob);
-    const isMp4 = /mp4|aac|m4a|caf/i.test(mime);
-    const data = await api("/api/ai/transcribe", {
-      method: "POST",
-      body: JSON.stringify({
-        audioBase64,
-        mimeType: mime || (isMp4 ? "audio/mp4" : "audio/webm"),
-        filename: isMp4 ? "mic.m4a" : "mic.webm",
-        language: "it",
-      }),
-    });
-    const heard = String(data?.text || "").trim();
-    return { ok: Boolean(heard), text: heard, size, mime, model: data?.model };
-  };
-
-  const scheduleCallSegment = (delayMs = 0) => {
-    clearRecordTimer();
-    if (!callLive || !micStream) return;
-    recordTimer = setTimeout(() => {
-      if (callLive) armCallSegment();
-    }, delayMs);
-  };
-
-  /** One Safari-safe segment: start() without timeslice → stop after CALL_SEGMENT_MS → Whisper. */
-  const armCallSegment = () => {
-    if (!callLive || !micStream) return;
-    if (mediaRecorder && mediaRecorder.state === "recording") return;
-    ensureAudioSessionPlayAndRecord();
-    recordMime = recordMime || pickRecorderMime();
-    try {
-      mediaRecorder = recordMime
-        ? new MediaRecorder(micStream, { mimeType: recordMime })
-        : new MediaRecorder(micStream);
-    } catch (err) {
-      endVoiceCall(`MediaRecorder non avviabile: ${err?.name || err}`);
+    if (!blob || size <= 16) {
+      postChatUpdate(
+        `Registrazione vuota (${size} byte, ${meta.mimeType}). Parla circa 3 secondi, poi ritocca MIC.`,
+        "warn",
+      );
       return;
     }
-    recordChunks = [];
-    const gen = callGen;
-    mediaRecorder.ondataavailable = (ev) => {
-      if (ev.data && ev.data.size) recordChunks.push(ev.data);
-    };
-    mediaRecorder.onerror = () => {
-      if (callLive && gen === callGen) scheduleCallSegment(600);
-    };
-    mediaRecorder.onstop = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 450));
-      const chunks = recordChunks.splice(0, recordChunks.length);
-      const blob = new Blob(chunks, {
-        type: recordMime || chunks[0]?.type || "audio/mp4",
+    postChatUpdate(`Trascrizione in corso… (${Math.round(size / 1024)} KB, ${meta.filename})`);
+    try {
+      const audioBase64 = await blobToBase64(blob);
+      const data = await api("/api/ai/transcribe", {
+        method: "POST",
+        body: JSON.stringify({
+          audioBase64,
+          mimeType: meta.mimeType,
+          filename: meta.filename,
+          language: "it",
+        }),
       });
-      mediaRecorder = null;
-      if (!callLive || gen !== callGen) return;
-      try {
-        const result = await transcribeBlob(blob);
-        if (!callLive || gen !== callGen) return;
-        if (result.empty) {
-          scheduleCallSegment(200);
-          return;
-        }
-        if (!result.ok) {
-          // Silence / no speech: keep the call open, listen again.
-          scheduleCallSegment(250);
-          return;
-        }
-        postChatUpdate(`Voce rilevata: ${result.text}`);
-        showToast("Voce rilevata", "ok");
-        // Pause capture while the assistant replies (iPad ducks mic during TTS).
-        try {
-          await Promise.resolve(onText(result.text));
-        } catch (err) {
-          postChatUpdate(err?.message || "Risposta vocale fallita", "warn");
-        }
-        // Brief gap so TTS can play on the primed session, then listen again.
-        if (callLive && gen === callGen) scheduleCallSegment(2800);
-      } catch (err) {
-        if (!callLive || gen !== callGen) return;
-        postChatUpdate(err?.message || "Trascrizione fallita", "warn");
-        scheduleCallSegment(1200);
+      const heard = String(data?.text || "").trim();
+      if (!heard) {
+        const why = data?.error || data?.detail || data?.model || "testo vuoto";
+        postChatUpdate(
+          `Trascrizione vuota (${why}, ${size} byte, ${meta.mimeType}).`,
+          "warn",
+        );
+        return;
       }
-    };
-    try {
-      // Never timeslice on Apple — mp4 fragments arrive empty/corrupt.
-      if (isIpadLike() || isAppleWebKit()) mediaRecorder.start();
-      else {
-        try {
-          mediaRecorder.start(250);
-        } catch {
-          mediaRecorder.start();
-        }
-      }
-      recordStartedAt = Date.now();
-      starting = false;
-      mode = "call";
-      setLiveUi(true);
+      postChatUpdate(`Voce rilevata: ${heard}`);
+      showToast("Voce rilevata", "ok");
+      await Promise.resolve(onText(heard));
     } catch (err) {
-      endVoiceCall(`Impossibile registrare: ${err?.name || err}`);
-      return;
+      // Keep the upstream Whisper/HTTP text. Do not rewrite it as «nessuna voce».
+      postChatUpdate(err?.message || "Trascrizione fallita", "warn");
+      showToast(err?.message || "Trascrizione fallita", "warn");
     }
-    clearRecordTimer();
-    recordTimer = setTimeout(() => {
-      if (!(callLive && mediaRecorder && mediaRecorder.state === "recording")) return;
-      const elapsed = Date.now() - (recordStartedAt || 0);
-      const waitMore = Math.max(0, MIN_RECORD_MS - elapsed);
-      const stopNow = () => {
-        try {
-          mediaRecorder.requestData?.();
-        } catch {
-          /* ignore */
-        }
-        try {
-          mediaRecorder.stop();
-        } catch {
-          scheduleCallSegment(500);
-        }
-      };
-      if (waitMore > 0) {
-        recordTimer = setTimeout(stopNow, waitMore);
-      } else {
-        stopNow();
-      }
-    }, CALL_SEGMENT_MS);
   };
 
-  const startVoiceCall = async () => {
+  const finishFromCapture = async () => {
+    if (captureClosed) return;
+    captureClosed = true;
+    if (finalizeTimer) {
+      clearTimeout(finalizeTimer);
+      finalizeTimer = null;
+    }
+    const tap = stopPcmTap();
+    const chunks = recordChunks.splice(0, recordChunks.length);
+    const mime = recordMime;
+    const blob = await chooseUploadBlob(chunks, mime, tap);
+    mediaRecorder = null;
+    releaseMicStream(micStream);
+    micStream = null;
+    stopUi();
+    await finishRecordingUpload(blob);
+  };
+
+  const flushAndStop = () => {
+    if (captureClosed) return false;
+    const elapsed = recordStartedAt ? Date.now() - recordStartedAt : 0;
+    if (!recordStartedAt || elapsed < MIN_RECORD_MS) {
+      const wait = Math.max(200, MIN_RECORD_MS - elapsed);
+      postChatUpdate(`Ancora in ascolto… parla ancora ${Math.ceil(wait / 1000)}s`, "ok");
+      clearRecordTimer();
+      recordTimer = setTimeout(() => {
+        flushAndStop();
+      }, wait);
+      return true;
+    }
+    if (stopQueued) return true;
+    stopQueued = true;
+    clearRecordTimer();
+    const recNow = mediaRecorder;
+    if (pcmOnly || !recNow || recNow.state !== "recording") {
+      void finishFromCapture();
+      return true;
+    }
+    // requestData flushes the tail. On Safari mp4 it may return an empty blob;
+    // stop() still writes ftyp+mdat+moov when we did not use a timeslice.
+    try { recNow.requestData(); } catch { /* ignore */ }
+    setTimeout(() => {
+      try {
+        if (recNow.state === "recording") recNow.stop();
+        else void finishFromCapture();
+      } catch {
+        void finishFromCapture();
+      }
+    }, 140);
+    setTimeout(() => {
+      if (!captureClosed) void finishFromCapture();
+    }, 1100);
+    return true;
+  };
+
+  const armRecorder = (recorder) => {
+    let recStopped = false;
+    recorder.ondataavailable = (ev) => {
+      if (captureClosed) return;
+      if (ev.data && ev.data.size) recordChunks.push(ev.data);
+      if (recStopped) {
+        if (finalizeTimer) clearTimeout(finalizeTimer);
+        finalizeTimer = setTimeout(() => {
+          void finishFromCapture();
+        }, 200);
+      }
+    };
+    recorder.onerror = () => {
+      postChatUpdate("Errore registrazione microfono — uso il PCM se c’è", "warn");
+      try {
+        if (recorder.state === "recording") recorder.stop();
+        else void finishFromCapture();
+      } catch {
+        void finishFromCapture();
+      }
+    };
+    recorder.onstop = () => {
+      recStopped = true;
+      if (finalizeTimer) clearTimeout(finalizeTimer);
+      finalizeTimer = setTimeout(() => {
+        void finishFromCapture();
+      }, 420);
+    };
+  };
+
+  const startMediaRecorderFallback = async () => {
     markUserInput?.();
     ensureAudioSessionPlayAndRecord();
+    if (state.micLive || starting || (mediaRecorder && mediaRecorder.state === "recording") || pcmOnly) {
+      if (starting && !mediaRecorder) {
+        stopAfterStart = true;
+        return;
+      }
+      flushAndStop();
+      return;
+    }
     if (!window.isSecureContext) {
       gestureMicPromise = null;
       postChatUpdate(micErrorMessage("secure-context"), "warn");
       return;
     }
-    if (typeof MediaRecorder === "undefined") {
-      const leftover = gestureMicPromise;
-      gestureMicPromise = null;
-      if (leftover) {
-        leftover.then((perm) => {
-          if (perm?.stream) releaseMicStream(perm.stream);
-        }).catch(() => {});
-      }
-      postChatUpdate(
-        `Microfono non disponibile su questo browser (${micDiagHint()}). Su iPad serve Safari aggiornato.`,
-        "warn",
-      );
-      return;
-    }
 
     starting = true;
-    mode = "call";
-    document.documentElement.dataset.micEngine = "media-recorder-call";
+    mode = "rec";
+    captureClosed = false;
+    stopQueued = false;
+    pcmOnly = false;
+    setLiveUi(true);
+    postChatUpdate("Registrazione iPad — parla 2–8 secondi, poi ritocca MIC per inviare…");
+    document.documentElement.dataset.micEngine = "media-recorder";
+
     const capture = gestureMicPromise;
     gestureMicPromise = null;
     if (!capture) {
@@ -3394,42 +3550,88 @@ function setupMic(button, onText) {
       return;
     }
     const perm = await capture;
+    if (captureClosed) {
+      if (perm?.stream) releaseMicStream(perm.stream);
+      stopUi();
+      return;
+    }
     if (!perm?.ok || !perm.stream) {
       hardStop({ skipUpload: true });
       postChatUpdate(micErrorMessage(perm?.code), "warn");
       return;
     }
     micStream = perm.stream;
-    recordMime = pickRecorderMime();
-    callLive = true;
-    callGen += 1;
-    starting = false;
-    setLiveUi(true);
-    postChatUpdate(
-      "Chiamata aperta — parla liberamente. Rimango in ascolto e rispondo. Ritocca MIC per chiudere.",
-    );
-    showToast("Chiamata attiva", "ok");
-    armCallSegment();
-  };
+    pcmTap = startPcmTap(micStream);
+    recordChunks = [];
+    recordMime = "";
 
-  /** Legacy one-shot path kept for non-call desktop SpeechRecognition fallback only. */
-  const startMediaRecorderFallback = async () => {
-    // Continuous call is the default for touch / Safari / iPad.
-    if (preferWhisperMic()) {
-      if (callLive || state.micLive || starting || mode === "call") {
-        endVoiceCall("Chiamata chiusa");
+    if (typeof MediaRecorder === "undefined") {
+      if (!pcmTap) {
+        hardStop({ skipUpload: true });
+        postChatUpdate(
+          `Microfono non disponibile su questo browser (${micDiagHint()}). Su iPad serve Safari aggiornato.`,
+          "warn",
+        );
         return;
       }
-      await startVoiceCall();
-      return;
+      pcmOnly = true;
+      recordMime = "audio/wav";
+      recordStartedAt = Date.now();
+      starting = false;
+      if (stopAfterStart) {
+        stopAfterStart = false;
+        flushAndStop();
+      }
+    } else {
+      const opened = openMediaRecorder(micStream);
+      if (!opened.recorder) {
+        if (!pcmTap) {
+          hardStop({ skipUpload: true });
+          postChatUpdate(`MediaRecorder non avviabile: ${opened.error?.name || opened.error || "errore"}`, "warn");
+          return;
+        }
+        pcmOnly = true;
+        recordMime = "audio/wav";
+      } else {
+        mediaRecorder = opened.recorder;
+        recordMime = opened.mime || mediaRecorder.mimeType || "audio/mp4";
+        armRecorder(mediaRecorder);
+        try {
+          // No timeslice. Safari audio/mp4 + start(1000) emits empty or moof fragments
+          // that Whisper reads as silence. stop() alone writes one container.
+          const iso = /mp4|aac|m4a/i.test(recordMime);
+          if (isIpadLike() || isAppleWebKit() || iso) mediaRecorder.start();
+          else {
+            try { mediaRecorder.start(1000); } catch { mediaRecorder.start(); }
+          }
+        } catch (err) {
+          if (!pcmTap) {
+            hardStop({ skipUpload: true });
+            postChatUpdate(`Impossibile registrare: ${err?.name || err}`, "warn");
+            return;
+          }
+          try { mediaRecorder.onstop = null; } catch { /* ignore */ }
+          mediaRecorder = null;
+          pcmOnly = true;
+          recordMime = "audio/wav";
+        }
+      }
+      recordStartedAt = Date.now();
+      starting = false;
+      if (stopAfterStart) {
+        stopAfterStart = false;
+        flushAndStop();
+      }
     }
-    markUserInput?.();
-    ensureAudioSessionPlayAndRecord();
-    if (state.micLive || starting) {
-      endVoiceCall("Ascolto interrotto");
-      return;
+
+    if (!stopQueued) {
+      clearRecordTimer();
+      recordTimer = setTimeout(() => {
+        if (!captureClosed && (pcmOnly || (mediaRecorder && mediaRecorder.state === "recording"))) {
+          flushAndStop();
+        }
+      }, 12000);
     }
-    await startVoiceCall();
   };
 
   const bindRec = (instance) => {
@@ -3501,41 +3703,34 @@ function setupMic(button, onText) {
   };
 
   const startRecognition = () => {
-    // TTS unlock is done in onPointerDown (sync). Keep session primed here only if already unlocked.
     if (voiceUnlocked) ensureAudioSessionPlayAndRecord();
     markUserInput?.();
 
-    // Explicit end: second MIC tap closes the continuous call.
-    if (callLive || mode === "call" || (state.micLive && preferWhisperMic())) {
-      if (gestureMicPromise) {
+    const recording =
+      state.micLive ||
+      starting ||
+      pcmOnly ||
+      (mediaRecorder && mediaRecorder.state === "recording");
+    if (recording) {
+      if (gestureMicPromise && !mediaRecorder && !pcmOnly) {
         const leftover = gestureMicPromise;
         gestureMicPromise = null;
         leftover.then((perm) => {
-          if (perm?.stream) releaseMicStream(perm.stream);
+          if (perm?.stream && perm.stream !== micStream) releaseMicStream(perm.stream);
         }).catch(() => {});
       }
-      endVoiceCall("Chiamata chiusa");
-      return;
-    }
-
-    if (state.micLive || starting) {
-      if (gestureMicPromise) {
-        const leftover = gestureMicPromise;
-        gestureMicPromise = null;
-        leftover.then((perm) => {
-          if (perm?.stream) releaseMicStream(perm.stream);
-        }).catch(() => {});
+      if (starting && !mediaRecorder && !pcmOnly) {
+        stopAfterStart = true;
+        return;
       }
-      hardStop({ skipUpload: true });
-      postChatUpdate("Ascolto interrotto");
+      flushAndStop();
       return;
     }
 
     silenceVoice();
 
-    // Touch / Apple / no-SR: continuous MediaRecorder call + Whisper (no SpeechRecognition).
     if (preferWhisperMic() || !hasSR) {
-      document.documentElement.dataset.micEngine = "media-recorder-call";
+      document.documentElement.dataset.micEngine = "media-recorder";
       startMediaRecorderFallback();
       return;
     }
@@ -3547,11 +3742,7 @@ function setupMic(button, onText) {
     postChatUpdate("Avvio microfono…");
 
     if (rec) {
-      try {
-        rec.abort?.();
-      } catch {
-        /* ignore */
-      }
+      try { rec.abort?.(); } catch { /* ignore */ }
       rec = null;
     }
     rec = createSpeechRecognizer();
@@ -3564,7 +3755,7 @@ function setupMic(button, onText) {
 
     try {
       rec.start();
-    } catch (errStart) {
+    } catch {
       hardStop({ skipUpload: true });
       postChatUpdate("SpeechRecognition fallito — registrazione alternativa…", "warn");
       startMediaRecorderFallback();
@@ -3597,14 +3788,14 @@ function setupMic(button, onText) {
   };
 
   const beginGestureMicCapture = () => {
-    // CRITICAL (Safari iPad): unlock TTS + start getUserMedia inside the same user gesture.
     unlockVoiceOutput();
     ensureAudioSessionPlayAndRecord();
     getPrimedAudioContext();
-    // While a call is already live we keep the existing stream — do not re-getUserMedia.
-    if (callLive && micStream) return;
     const recording =
-      state.micLive || starting || (mediaRecorder && mediaRecorder.state === "recording");
+      state.micLive ||
+      starting ||
+      pcmOnly ||
+      (mediaRecorder && mediaRecorder.state === "recording");
     if (!gestureMicPromise && !recording) {
       gestureMicPromise = beginUserMediaCapture();
     }
@@ -3613,7 +3804,6 @@ function setupMic(button, onText) {
   const onPointerDown = (e) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     handledByPointer = true;
-    // Unlock + getUserMedia before preventDefault so Safari keeps this as a user gesture.
     beginGestureMicCapture();
     e.preventDefault();
     e.stopPropagation();
@@ -3638,32 +3828,11 @@ function setupMic(button, onText) {
 
   const releaseForTts = () => {
     ensureAudioSessionPlayAndRecord();
-    // Call mode: pause the current segment only; keep the stream for the next listen turn.
-    if (callLive) {
-      clearRecordTimer();
-      if (mediaRecorder && mediaRecorder.state === "recording") {
-        try {
-          mediaRecorder.requestData?.();
-        } catch {
-          /* ignore */
-        }
-        try {
-          mediaRecorder.stop();
-        } catch {
-          /* ignore */
-        }
-      }
+    if ((mediaRecorder && mediaRecorder.state === "recording") || pcmOnly) {
+      flushAndStop();
       return;
     }
-    if (mediaRecorder && mediaRecorder.state === "recording") {
-      try {
-        mediaRecorder.onstop = null;
-        mediaRecorder.stop();
-      } catch {
-        /* ignore */
-      }
-      mediaRecorder = null;
-    }
+    stopPcmTap();
     releaseMicStream(micStream);
     micStream = null;
     if (rec) {
@@ -3683,8 +3852,8 @@ function setupMic(button, onText) {
 
   const control = {
     toggle,
-    stop: () => (callLive ? endVoiceCall("Chiamata chiusa") : hardStop({ skipUpload: true })),
-    endCall: () => endVoiceCall("Chiamata chiusa"),
+    stop: () => hardStop({ skipUpload: true }),
+    endCall: () => hardStop({ skipUpload: true }),
     releaseForTts,
     attachButton(btn) {
       if (!btn || uiButtons.has(btn)) return;
@@ -3964,7 +4133,7 @@ function wireUi() {
       // the background; show a toast; user opens CHAT deliberately when they want history.
       return sendChat(text, { voice: true }).then(() => {
         if (state.module !== "chat") {
-          showToast(`In chiamata · risposta in corso`, "ok");
+          showToast("Voce inviata · risposta in corso", "ok");
         }
         // Hold the listen loop so server TTS can play on the primed AudioContext.
         return new Promise((r) => setTimeout(r, 3200));

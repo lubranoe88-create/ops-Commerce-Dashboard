@@ -106,8 +106,14 @@ export async function transcribeAudio({
     throw err;
   }
 
-  const primary = sttFormat(mimeType, filename);
+  const sniffed = sniffAudio(buffer);
+  const primary = sniffed?.format || sttFormat(mimeType, filename);
+  const sendMime = sniffed?.mime || mimeType;
+  const sendName = sniffed?.filename || filename;
+  // Safari audio/mp4 is AAC-in-M4A. If Whisper rejects the label, try the sibling.
   const formats = [primary];
+  if (primary === "m4a") formats.push("aac");
+  else if (primary === "aac") formats.push("m4a");
   const models = [
     "openai/whisper-1",
     "openai/whisper-large-v3",
@@ -161,13 +167,13 @@ export async function transcribeAudio({
       key,
       model: "openai/whisper-1",
       buffer,
-      mimeType,
-      filename,
+      mimeType: sendMime,
+      filename: sendName,
       language,
     });
     if (multipart.text) return multipart;
     lastErr = new Error(
-      `Whisper multipart testo vuoto (${buffer.length} byte, ${mimeType || "mime?"})`,
+      `Whisper multipart testo vuoto (${buffer.length} byte, ${sendMime || "mime?"}, format ${primary})`,
     );
     lastErr.status = 422;
     lastErr.upstream = true;
@@ -213,6 +219,29 @@ async function postMultipartTranscription({
   }
   const text = typeof payload?.text === "string" ? payload.text.trim() : "";
   return { text, model: payload?.model || model, format: "multipart" };
+}
+
+function sniffAudio(buffer) {
+  if (!buffer || buffer.length < 12) return null;
+  if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) {
+    return { format: "webm", filename: "mic.webm", mime: "audio/webm" };
+  }
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF") {
+    return { format: "wav", filename: "mic.wav", mime: "audio/wav" };
+  }
+  if (buffer.slice(0, 4).toString("ascii") === "OggS") {
+    return { format: "ogg", filename: "mic.ogg", mime: "audio/ogg" };
+  }
+  if (buffer.slice(4, 8).toString("ascii") === "ftyp") {
+    return { format: "m4a", filename: "mic.m4a", mime: "audio/mp4" };
+  }
+  if (buffer[0] === 0xff && (buffer[1] & 0xf6) === 0xf0) {
+    return { format: "aac", filename: "mic.aac", mime: "audio/aac" };
+  }
+  if (buffer.slice(0, 3).toString("ascii") === "ID3" || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)) {
+    return { format: "mp3", filename: "mic.mp3", mime: "audio/mpeg" };
+  }
+  return null;
 }
 
 function sttFormat(mimeType = "", filename = "") {
