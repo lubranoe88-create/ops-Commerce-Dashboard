@@ -1,5 +1,5 @@
 /**
- * Agent Q UI — plancia OPS
+ * Atlas UI (ex Agent Q paths) — plancia OPS
  * - Aggiornamenti all'ingresso
  * - Ricerca on-demand (sandbox + API + web hint)
  * - Pop-up documenti
@@ -94,11 +94,11 @@ export async function showEntryUpdates({ postChatUpdate, showToast } = {}) {
     const updates = data.updates || [];
     if (updates.length) {
       const lines = updates.slice(0, 5).map((u, i) => `${i + 1}. ${u.title}: ${u.detail || ""}`);
-      const msg = `Aggiornamenti recenti Agent Q\n${lines.join("\n")}`;
+      const msg = `Aggiornamenti recenti Atlas\n${lines.join("\n")}`;
       postChatUpdate?.(msg, "ok");
-      showToast?.(`Agent Q · ${updates.length} aggiornamenti`, "ok");
+      showToast?.(`Atlas · ${updates.length} aggiornamenti`, "ok");
     } else {
-      showToast?.("Agent Q · nessun aggiornamento nuovo", "ok");
+      showToast?.("Atlas · nessun aggiornamento nuovo", "ok");
     }
   } catch (err) {
     console.warn("[agentq] updates", err?.message || err);
@@ -113,12 +113,12 @@ export async function showEntryUpdates({ postChatUpdate, showToast } = {}) {
         .slice(0, 5)
         .map((p, i) => `${i + 1}. [${p.severity}] ${p.title}: ${p.detail || ""}`);
       postChatUpdate?.(
-        `Monitoraggio Agent Q · ${n} problemi da sistemare\n${lines.join("\n")}`,
+        `Monitoraggio Atlas · ${n} problemi da sistemare\n${lines.join("\n")}`,
         "warn",
       );
-      showToast?.(`Agent Q · ${n} problemi`, "warn");
+      showToast?.(`Atlas · ${n} problemi`, "warn");
     } else {
-      postChatUpdate?.("Monitoraggio Agent Q · nessun problema aperto.", "ok");
+      postChatUpdate?.("Monitoraggio Atlas · nessun problema aperto.", "ok");
     }
   } catch (err) {
     console.warn("[agentq] problems", err?.message || err);
@@ -142,7 +142,7 @@ export async function showProblems({ postChatUpdate } = {}) {
 }
 
 /**
- * Ricerca Agent Q — solo se l'utente lo chiede esplicitamente.
+ * Ricerca Atlas — solo se l'utente lo chiede esplicitamente.
  * trigger phrases: "cerca", "ricerca", "search", "agent q cerca"
  */
 export function isSearchRequest(text) {
@@ -159,10 +159,10 @@ export function extractSearchQuery(text) {
 export async function runOnDemandSearch(query, { postChatUpdate, openDoc } = {}) {
   const q = String(query || "").trim();
   if (!q) {
-    postChatUpdate?.("Per la ricerca Agent Q indica cosa cercare (es. «cerca budget»).", "warn");
+    postChatUpdate?.("Per la ricerca Atlas indica cosa cercare (es. «cerca budget»).", "warn");
     return null;
   }
-  postChatUpdate?.(`Agent Q · ricerca on-demand: ${q}`);
+  postChatUpdate?.(`Atlas · ricerca on-demand: ${q}`);
   const data = await api("/api/ai/agentq/search", {
     method: "POST",
     body: JSON.stringify({
@@ -181,7 +181,7 @@ export async function runOnDemandSearch(query, { postChatUpdate, openDoc } = {})
   const lines = hits.slice(0, 8).map((h, i) => {
     return `${i + 1}. [${h.source}] ${h.title} — ${h.snippet || ""}${h.uri ? ` · ${h.uri}` : ""}`;
   });
-  postChatUpdate?.(`Risultati Agent Q (${hits.length})\n${lines.join("\n")}`);
+  postChatUpdate?.(`Risultati Atlas (${hits.length})\n${lines.join("\n")}`);
 
   // Auto-open first sandbox/text or http hint in popup if requested via openDoc
   const firstDoc = hits.find((h) => String(h.uri || "").startsWith("sandbox://"));
@@ -219,7 +219,7 @@ export async function runHands(objective, { runHoloAction, postChatUpdate, speak
   });
   const actions = data.actions || [];
   if (data.speak) {
-    postChatUpdate?.(`Agent Q: ${data.speak}`);
+    postChatUpdate?.(`Atlas: ${data.speak}`);
     speak?.(data.speak);
   }
   for (const id of actions) {
@@ -227,7 +227,7 @@ export async function runHands(objective, { runHoloAction, postChatUpdate, speak
     await runHoloAction?.(id, { fromVoice: false });
   }
   if (!actions.length) {
-    postChatUpdate?.("Agent Q: nessuna azione plancia proposta per questo obiettivo.", "warn");
+    postChatUpdate?.("Atlas: nessuna azione plancia proposta per questo obiettivo.", "warn");
   }
   return data;
 }
@@ -279,7 +279,7 @@ export async function wireAgentqUi(ctx) {
           body: JSON.stringify({ title: note.slice(0, 80), text: note, tags: ["voice"] }),
         });
         ctx.postChatUpdate?.(
-          `Memoria Agent Q aggiornata (${data.count} note). Id: ${data.entry?.id || "—"}`,
+          `Memoria Atlas aggiornata (${data.count} note). Id: ${data.entry?.id || "—"}`,
           "ok",
         );
         ctx.speak?.(`Memoria aggiornata. Ora ho ${data.count} note.`);
@@ -317,7 +317,7 @@ export async function wireAgentqUi(ctx) {
           input.value = "";
         }
       } catch (err) {
-        ctx.postChatUpdate?.(err?.message || "Agent Q errore", "warn");
+        ctx.postChatUpdate?.(err?.message || "Atlas errore", "warn");
       }
     },
     true,

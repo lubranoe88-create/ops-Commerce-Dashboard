@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-24";
+} from "./mapGlobe.js?v=rail-25-atlas";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,16 +33,16 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-24";
+} from "./aiAgentUi.js?v=rail-25-atlas";
 import {
   noteAiFunctionReports,
   openFunctionBoardPanel,
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-24";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-24";
+} from "./functionBoardUi.js?v=rail-25-atlas";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-25-atlas";
 
-const BUILD_ID = "rail-24";
+const BUILD_ID = "rail-25-atlas";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2862,10 +2862,10 @@ async function ensureChatModelSelect() {
   }
 }
 
-/** Nota fissa concordata (Agent Q / Jarvis) — reiniettata a ogni ingresso in chat. */
+/** Nota fissa concordata (Atlas / ex Agente Q) — reiniettata a ogni ingresso in chat. */
 const PINNED_BRIEFING_LINES = [
-  "CONCORDATO · Agent Q in plancia (nota fissa ad ogni apertura chat)",
-  "1) Framework: Agent Q (sentient-engineering) da integrare in plancia. «Jarvis» era solo un’analogia — il nome corretto è Agent Q.",
+  "CONCORDATO · Atlas in plancia (nota fissa ad ogni apertura chat)",
+  "1) Framework: Atlas (ex Agente Q / sentient-engineering) integrato in plancia. Presentarsi sempre come Atlas.",
   "2) Ricerca su richiesta: modulo ricerca su file locali, database e API, oltre al browser Playwright — solo se l’utente lo chiede.",
   "3) Chiavi API: già presenti in plancia; riutilizzarle, mai hardcodarle.",
   "4) Client: uso da tablet ora (PC tra settimane/mesi); UI ok su browser tablet.",
@@ -4073,7 +4073,7 @@ function wireUi() {
       return;
     }
     if (state.module !== "chat") await showModule("chat");
-    // Agent Q: ricerca/mani on-demand prima della chat generica
+    // Atlas: ricerca/mani on-demand prima della chat generica
     try {
       if (typeof window.__opsAgentqHandle === "function") {
         const handled = await window.__opsAgentqHandle(text);
@@ -4083,7 +4083,7 @@ function wireUi() {
         }
       }
     } catch (err) {
-      postChatUpdate(err?.message || "Agent Q errore", "warn");
+      postChatUpdate(err?.message || "Atlas errore", "warn");
     }
     await sendChat(text);
   };
@@ -4494,8 +4494,8 @@ async function boot() {
       speak,
     });
   } catch (e) {
-    bootNote(e, "Agent Q non collegato");
-    postChatUpdate(`Agent Q ingresso fallito: ${e?.message || e}`, "warn");
+    bootNote(e, "Atlas non collegato");
+    postChatUpdate(`Atlas ingresso fallito: ${e?.message || e}`, "warn");
   }
 }
 

@@ -102,7 +102,8 @@ export async function runAiTurn({
   }
 
   const routerSystem = [
-    "You are the cheap OPS dashboard front-agent.",
+    SYSTEM_CARD,
+    "You are Atlas on the cheap OPS dashboard front route (identity: Atlas only).",
     "Reply ONLY with compact JSON:",
     '{"route":"answer_local"|"escalate_main"|"escalate_grok"|"need_questions",',
     '"reply":"italian short text if answer_local",',

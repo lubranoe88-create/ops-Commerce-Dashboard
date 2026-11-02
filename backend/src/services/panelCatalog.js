@@ -1,4 +1,6 @@
 /** Static panel catalog — AI system understanding (no LLM spend to load). */
+import { ATLAS_PERSONA } from "./atlasPersonality.js";
+
 export const PANEL_CATALOG = [
   {
     id: "map",
@@ -32,7 +34,8 @@ export const PANEL_CATALOG = [
   },
 ];
 
-export const SYSTEM_CARD = `OPS Commerce Intel dashboard.
+export const SYSTEM_CARD = `${ATLAS_PERSONA}
+OPS Commerce Intel dashboard (plancia).
 Panels: MAPPA (globe), PIPELINE, MEMORY, CHAT, side rail.
 AI analyzes mechanical SQLite data only — never scrapes/collects.
 Tools: emit actions[] for zoom/fly/module switches and paid write tools; browser_use only as fallback.

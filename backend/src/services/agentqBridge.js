@@ -1,5 +1,6 @@
 /**
- * Bridge Agent Q → plancia OPS.
+ * Bridge Atlas (ex Agente Q) → plancia OPS.
+ * Internal paths keep agentq* names; user-facing identity is Atlas.
  * - Riutilizza chiavi OpenRouter già in config (mai hardcodate).
  * - Ricerca on-demand: filesystem SOLO in sandbox, sqlite allowlist, API, web hints.
  * - Feed aggiornamenti all'ingresso.
@@ -13,6 +14,7 @@ import { completeChat } from "./openrouter.js";
 import { buildFunctionBoard } from "./functionBoard.js";
 import { getDb } from "../memory/db.js";
 import { getDashboardSnapshot } from "../memory/store.js";
+import { ATLAS_NAME, withAtlasPersona } from "./atlasPersonality.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(__dirname, "../../data");
@@ -88,7 +90,7 @@ function ensureDirs() {
   if (!fs.existsSync(sandboxReadme)) {
     fs.writeFileSync(
       sandboxReadme,
-      "Sandbox Agent Q — ricerca locale a permessi limitati.\nSolo questa directory è consultabile dalla ricerca filesystem.\n",
+      "Sandbox Atlas — ricerca locale a permessi limitati.\nSolo questa directory è consultabile dalla ricerca filesystem.\n",
       "utf8",
     );
   }
@@ -99,7 +101,7 @@ function ensureDirs() {
         [
           {
             at: new Date().toISOString(),
-            title: "Agent Q in plancia",
+            title: "Atlas in plancia",
             detail:
               "Bridge attivo: ricerca on-demand in sandbox, aggiornamenti ingresso, pop-up documenti, mani moduli/zoom.",
           },
@@ -364,7 +366,7 @@ function ensureMemoryExpand() {
             {
               id: "seed-1",
               at: new Date().toISOString(),
-              title: "Agent Q memoria",
+              title: "Atlas memoria",
               text: "Memoria espandibile avviata: nuove note si accumulano nel tempo.",
               tags: ["agentq", "seed"],
             },
@@ -415,7 +417,7 @@ export function appendExpandableMemory({ title, text, tags } = {}) {
   const entry = {
     id: `m-${Date.now().toString(36)}`,
     at: new Date().toISOString(),
-    title: String(title || "Nota Agent Q").slice(0, 160),
+    title: String(title || "Nota Atlas").slice(0, 160),
     text: String(text || "").slice(0, 4000),
     tags: Array.isArray(tags)
       ? tags.map((t) => String(t).slice(0, 40)).slice(0, 12)
@@ -587,7 +589,9 @@ export async function planHandActions(objective) {
   const result = await completeChat({
     model: config.openRouterModel,
     system:
-      "Sei Agent Q sulla plancia OPS. Rispondi SOLO JSON: {\"actions\":[\"id\",...],\"speak\":\"breve conferma in italiano\"}. Usa solo id del catalogo.",
+      withAtlasPersona(
+        `Sei ${ATLAS_NAME} sulla plancia OPS. Rispondi SOLO JSON: {"actions":["id",...],"speak":"breve conferma in italiano"}. Usa solo id del catalogo.`,
+      ),
     prompt: `Obiettivo: ${objective}\nCatalogo:\n${catalog}`,
     maxTokens: 200,
     temperature: 0.1,
@@ -622,7 +626,7 @@ export async function agentqStatus() {
   const mem = listExpandableMemory({ limit: 1 });
   return {
     ok: true,
-    name: "Agent Q",
+    name: ATLAS_NAME,
     integrated: true,
     keys: {
       openrouterConfigured: !String(config.openRouterApiKey || "").includes("CHANGE_ME"),
