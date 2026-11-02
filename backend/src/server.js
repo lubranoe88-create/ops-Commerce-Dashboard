@@ -20,6 +20,7 @@ import { refreshWorldNews } from "./services/newsIngest.js";
 import { installAtlasResident } from "./services/atlasResident.js";
 import { readIntegrityReport } from "./services/atlasIntegrityStore.js";
 import { runStartupIntegrity } from "./services/atlasStartupIntegrity.js";
+import { attemptSelfHeal } from "./services/atlasSelfHeal.js";
 import { applyBrowserUseRuntimeEnv } from "./services/browserUseRuntime.js";
 
 applyBrowserUseRuntimeEnv();
@@ -92,7 +93,7 @@ const chatLimiter = rateLimit({
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    build: "rail-32-reliability",
+    build: "rail-33-proactive",
     integrity: (() => {
       const report = readIntegrityReport();
       if (!report) return null;
@@ -174,6 +175,11 @@ app.use((err, _req, res, _next) => {
 // and surfaced; it does not stop the process. The resident wake reads the
 // same report and withholds hand actions while it is red.
 runStartupIntegrity({ reason: "boot" })
+  .then((report) =>
+    attemptSelfHeal({ integrity: report }).catch((err) => {
+      console.warn("[heal] boot", err?.message || err);
+    }),
+  )
   .catch((err) => {
     console.warn("[integrity] boot", err?.message || err);
   })

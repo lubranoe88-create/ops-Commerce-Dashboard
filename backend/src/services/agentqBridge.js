@@ -24,6 +24,7 @@ import { collectAutoFixes, proposeResolutions } from "./atlasProblemResolve.js";
 import { trustLineForResult } from "./atlasTrust.js";
 import { getBudgetStatus } from "./aiBudget.js";
 import { decisionSnippet, decisionStatus, recordDecision } from "./atlasDecisionLog.js";
+import { MODULE_IDS, noteHabit } from "./atlasHabits.js";
 import { providerStatus } from "./atlasReliability.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -774,6 +775,19 @@ function logHandsDecision(objective, gated, { local = false } = {}) {
     recordDecision({ source: "hands", choices });
   } catch {
     /* the plan still returns */
+  }
+  try {
+    const ids = [
+      ...(gated?.actions || []),
+      ...(gated?.ask || []).map((step) => (typeof step === "string" ? step : step?.id)),
+    ];
+    for (const id of ids) {
+      if (!id) continue;
+      if (MODULE_IDS.has(id)) noteHabit({ module: id, command: id });
+      else noteHabit({ command: id });
+    }
+  } catch {
+    /* habit tracking never blocks the plan */
   }
 }
 

@@ -589,7 +589,10 @@ function residentBubble(data) {
   const trust = data?.trustLine || "";
   const recall = data?.recallLine || "";
   const decision = data?.decisionLine || "";
-  return [data?.summary, literacy, trust, recall, decision]
+  const focus = data?.focus?.apply ? data.focus.because : "";
+  const suggestion = data?.suggestions?.text || "";
+  const curiosity = data?.curiosity?.text || "";
+  return [data?.summary, literacy, trust, recall, decision, focus, suggestion, curiosity]
     .map((part) => String(part || "").trim())
     .filter(Boolean)
     .join("\n\n");
@@ -611,6 +614,17 @@ async function presentResident(data, ctx) {
   const key = data.id || data.seq || residentBubble(data);
   if (!key || seenResidentIds.has(key)) return;
   seenResidentIds.add(key);
+  if (data?.urgency?.quiet === true) {
+    const note = String(data?.curiosity?.text || "").trim();
+    if (note) {
+      ctx.postChatUpdate?.(note, "ok", {
+        trust: "auto",
+        trustLine: trustLineFor("auto", "curiosità"),
+      });
+      ctx.speak?.(note, { ifUnlocked: true, yieldToCall: true });
+    }
+    return;
+  }
   if (data.shot === "once" || data.kind === "wake") {
     const restored = formatRestore(data.restored);
     if (restored) {
@@ -632,12 +646,47 @@ async function presentResident(data, ctx) {
         trustLine: trustLineFor("auto", "spesa"),
       });
     }
+    if (data.focus?.apply && data.focus.mode === "auto" && data.focus.module && typeof ctx.applyModule === "function") {
+      try {
+        await ctx.applyModule(data.focus.module);
+      } catch (err) {
+        ctx.postChatUpdate?.(atlasLine(err?.message || "Sezione abituale non aperta."), "warn");
+      }
+    }
   }
   const line = residentBubble(data);
   const mode = (data.ask || []).length ? "ask" : "auto";
   if (line) ctx.postChatUpdate?.(line, "ok", { trust: mode, trustLine: data.trustLine || "" });
-  if (data.summary) ctx.speak?.(data.summary, { ifUnlocked: true, yieldToCall: true });
+  const spoken = [data.summary, data.curiosity?.text].map((part) => String(part || "").trim()).filter(Boolean).join(" ");
+  if (spoken) ctx.speak?.(spoken, { ifUnlocked: true, yieldToCall: true });
   await executeHandPlan(withoutMic(data), ctx, { respectCall: true, quietIfEmpty: true });
+  const gated = data.integrity?.wakeGated === true;
+  if (!gated && data.suggestions && data.suggestions.held !== true) {
+    const planned = new Set(planFromHands(data).map((step) => step.id));
+    const auto = (data.suggestions.auto || []).filter((id) => id && !planned.has(id));
+    const ask = (data.suggestions.ask || []).filter((step) => step?.id && !planned.has(step.id));
+    if (auto.length || ask.length) {
+      await executeHandPlan(
+        {
+          actions: auto,
+          ask,
+          tagged: (data.suggestions.tagged || []).filter((step) => step?.id && !planned.has(step.id)),
+        },
+        ctx,
+        { respectCall: true, quietIfEmpty: true },
+      );
+    }
+  }
+  if (!gated && data.focus?.command && data.focus.commandMode === "auto" && data.focus.command !== data.focus.module) {
+    await executeHandPlan(
+      {
+        actions: [data.focus.command],
+        tagged: [{ id: data.focus.command, mode: "auto", reason: "habit" }],
+      },
+      ctx,
+      { respectCall: true, quietIfEmpty: true },
+    );
+  }
 }
 
 function openResidentEvents(ctx, afterSeq) {
@@ -671,8 +720,8 @@ export async function startAtlasResident(ctx = {}) {
   let data;
   try {
     const body = ctx.restoreModule
-      ? { module: "", preferStored: true }
-      : { module: moduleName || "map" };
+      ? { module: "", preferStored: true, prepareHabits: true }
+      : { module: moduleName || "map", prepareHabits: true };
     data = await api("/api/ai/agentq/resident/wake", {
       method: "POST",
       body: JSON.stringify(body),

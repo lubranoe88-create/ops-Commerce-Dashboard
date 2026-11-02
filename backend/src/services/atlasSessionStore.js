@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { upsertTaggedMemory } from "./agentqBridge.js";
+import { noteHabit } from "./atlasHabits.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PATH = path.resolve(__dirname, "../../data/agentq-memory/atlas-session.json");
@@ -123,6 +124,14 @@ function mirrorSession(session) {
 
 export function rememberWake({ wakeSummary = "", module = "", pendingAsk = [] } = {}) {
   const prev = readAtlasSession();
+  const named = String(module || "").trim();
+  if (named) {
+    try {
+      noteHabit({ module: named });
+    } catch {
+      /* the session file remains the source of truth */
+    }
+  }
   return persist({
     version: 1,
     wakeSummary: clip(wakeSummary || prev.wakeSummary, 800),
@@ -147,7 +156,15 @@ export function patchAtlasSession({ module, pendingAskAdd, pendingAskDrop } = {}
       at: new Date().toISOString(),
     });
   }
-  const nextModule = module != null && String(module).trim() ? clip(module, 40) : prev.module;
+  const named = module != null && String(module).trim();
+  const nextModule = named ? clip(module, 40) : prev.module;
+  if (named) {
+    try {
+      noteHabit({ module: nextModule });
+    } catch {
+      /* the session file remains the source of truth */
+    }
+  }
   return persist({
     ...prev,
     module: nextModule,

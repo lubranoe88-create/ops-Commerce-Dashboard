@@ -16,6 +16,17 @@
  * proposes ids; only a news ingress merges the ones L3 marks AUTO into the
  * actions the client may run. A hard startup-integrity failure gates the
  * wake: the operator gets the warning and no hand runs.
+ *
+ * C7: wake and news ingress also carry unasked next steps. AUTO ids are
+ * safe to run; ASK waits. They stay out of the model action list.
+ * C8: integrity or board errors try a functional self-heal (refresh,
+ * re-run checks, clear transient flags) and log it on M4. Destructive
+ * repairs stay ASK.
+ * X5: ingress is scored. Only a score at or above the threshold interrupts.
+ * A wake always speaks, because the operator just opened the plancia.
+ * P2: an open wake can focus the module the caller uses in this time of day,
+ * when L3 marks it AUTO.
+ * P3: at most one curiosity observation per cooldown, separate from C7.
  */
 import crypto from "node:crypto";
 import { config } from "../config.js";
@@ -37,6 +48,11 @@ import { trustLineForResult } from "./atlasTrust.js";
 import { RECALL_MARKER, recallForContext, recallQueryFromBundle } from "./atlasRecall.js";
 import { decisionStatus, formatDecisionLine, recordDecision } from "./atlasDecisionLog.js";
 import { providerStatus } from "./atlasReliability.js";
+import { proposeNextSteps } from "./atlasSuggestions.js";
+import { classifyUrgency } from "./atlasUrgency.js";
+import { preferredFocus } from "./atlasHabits.js";
+import { offerCuriosity } from "./atlasCuriosity.js";
+import { attemptSelfHeal, healNeeded } from "./atlasSelfHeal.js";
 
 const RESIDENT_RULES = [
   "You are resident inside the plancia: this is not an on-demand chat turn.",
@@ -494,6 +510,85 @@ async function askAtlas(kind, bundle, batch) {
   }
 }
 
+function reactionExtras(kind, bundle, batch) {
+  const newsItems = kind === "wake" ? asList(bundle?.news) : newsItemsFrom(batch);
+  let suggestions = {
+    text: "",
+    steps: [],
+    auto: [],
+    ask: [],
+    tagged: [],
+    held: session.integrityOk === false,
+  };
+  try {
+    suggestions = proposeNextSteps({
+      kind,
+      bundle,
+      newsItems,
+      integrityOk: session.integrityOk !== false,
+    });
+  } catch {
+    /* the wake still returns without a proposal */
+  }
+  let urgency = null;
+  try {
+    urgency = classifyUrgency({
+      kind,
+      bundle,
+      batch,
+      integrity: { ok: session.integrityOk !== false },
+    });
+  } catch {
+    urgency = null;
+  }
+  let curiosity = null;
+  try {
+    curiosity = offerCuriosity({ bundle, newsItems });
+  } catch {
+    curiosity = null;
+  }
+  return { suggestions, urgency, curiosity };
+}
+
+function safeFocus(prepare) {
+  try {
+    return preferredFocus({ prepare: Boolean(prepare) });
+  } catch {
+    return null;
+  }
+}
+
+async function maybeHeal(integrity, bundle) {
+  if (!healNeeded(integrity, bundle)) return null;
+  try {
+    return await attemptSelfHeal({
+      integrity,
+      bundle,
+      deps: {
+        rerunChecks: async () => {
+          if (integrityCheck) return integrityCheck();
+          const mod = await import("./atlasStartupIntegrity.js");
+          return mod.runStartupIntegrity({ reason: "heal", force: true });
+        },
+      },
+    });
+  } catch {
+    return null;
+  }
+}
+
+function publicHeal(heal) {
+  if (!heal?.attempted) return null;
+  return {
+    attempted: true,
+    recovered: Boolean(heal.recovered),
+    repairs: heal.repairs || [],
+    cleared: heal.cleared || [],
+    ask: heal.ask || [],
+    executed: heal.executed || [],
+  };
+}
+
 function publicLiteracy(brief) {
   if (!brief?.items?.length) return null;
   return {
@@ -522,6 +617,7 @@ async function createReaction(kind, bundle, batch) {
       );
   const summary = asAtlasLine(clip(asked.summary, 900) || (kind === "wake" ? mechanicalWakeSummary(bundle) : mechanicalIngressSummary(batch)));
   const decisionLine = logResidentDecisions(kind, gated, brief, asked);
+  const extras = reactionExtras(kind, bundle, batch);
   seq += 1;
   return {
     id: `atlas-${kind}-${seq}`,
@@ -532,6 +628,9 @@ async function createReaction(kind, bundle, batch) {
     decisionLine,
     newsLiteracy: literacyText,
     literacy: publicLiteracy(brief),
+    suggestions: extras.suggestions,
+    urgency: extras.urgency,
+    curiosity: extras.curiosity,
     actions: gated.actions,
     ask: gated.ask,
     tagged: gated.tagged,
@@ -557,6 +656,11 @@ function toPublic(reaction) {
     newsLiteracy: reaction.newsLiteracy || "",
     literacy: reaction.literacy || null,
     integrity: reaction.integrity || null,
+    suggestions: reaction.suggestions || null,
+    urgency: reaction.urgency || null,
+    curiosity: reaction.curiosity || null,
+    heal: reaction.heal || null,
+    focus: reaction.focus || null,
     actions: reaction.actions || [],
     ask: reaction.ask || [],
     tagged: reaction.tagged || [],
@@ -723,9 +827,9 @@ async function doWake(input = {}) {
   let integrity;
   try {
     integrity = await readWakeIntegrity();
-    session.integrityOk = integrity?.ok !== false;
     const requested = clip(input.module || input.uiState?.module || "", 40);
     const preferStored = input.preferStored === true || input.preferStoredModule === true;
+    const prepareHabits = input.prepareHabits === true;
     let storedModule = "";
     if (!requested) {
       try {
@@ -734,7 +838,9 @@ async function doWake(input = {}) {
         storedModule = "";
       }
     }
-    const moduleName = requested || (preferStored ? storedModule : "") || "map";
+    const focus = safeFocus(prepareHabits);
+    let moduleName = requested || (preferStored ? storedModule : "") || "map";
+    if (focus?.apply && focus.module) moduleName = focus.module;
     const collected = await collectWakeBundle({ module: moduleName });
     if (!Array.isArray(collected.news)) collected.news = [];
     const queued = mergeQueued(collected, pending.splice(0, pending.length));
@@ -759,6 +865,12 @@ async function doWake(input = {}) {
     }
     collected.queuedIngress = kept;
     session.lastBundle = collected;
+    let heal = null;
+    if (healNeeded(integrity, collected)) {
+      heal = await maybeHeal(integrity, collected);
+      if (heal?.recovered && heal.integrity) integrity = heal.integrity;
+    }
+    session.integrityOk = integrity?.ok !== false;
     if (!session.integrityOk) {
       const brief = literacyFor("wake", collected, null);
       const detail = (integrity.failures || []).map((failure) => `${failure.id}: ${failure.detail}`).join("; ");
@@ -787,6 +899,7 @@ async function doWake(input = {}) {
             ],
           })
         : null;
+      const extras = reactionExtras("wake", collected, null);
       seq += 1;
       const reaction = {
         id: `atlas-wake-${seq}`,
@@ -796,9 +909,14 @@ async function doWake(input = {}) {
           `Integrità di avvio non superata. Non eseguo passi sulla plancia finché i controlli non tornano interi. ${detail}`,
         ),
         recallLine: recalled.line,
-        decisionLine: decisionLines([wakeEntry, newsEntry]),
+        decisionLine: [decisionLines([wakeEntry, newsEntry]), heal?.decisionLine].filter(Boolean).join(" | "),
         newsLiteracy: brief.text,
         literacy: publicLiteracy(brief),
+        suggestions: extras.suggestions,
+        urgency: extras.urgency,
+        curiosity: extras.curiosity,
+        heal: publicHeal(heal),
+        focus: focus || null,
         actions: [],
         ask: [],
         tagged: [],
@@ -818,6 +936,11 @@ async function doWake(input = {}) {
     }
     const reaction = await createReaction("wake", collected, null);
     reaction.integrity = integrityStamp(integrity, false);
+    reaction.heal = publicHeal(heal);
+    reaction.focus = focus || null;
+    if (heal?.decisionLine) {
+      reaction.decisionLine = [reaction.decisionLine, heal.decisionLine].filter(Boolean).join(" | ");
+    }
     session.lastWakeAt = reaction.at;
     const row = attachContinuity(
       { ...toPublic(reaction), shot: "once", state: publicState(collected) },

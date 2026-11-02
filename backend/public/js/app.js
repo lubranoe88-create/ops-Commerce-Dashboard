@@ -40,15 +40,15 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { openSandboxDoc, rememberOpenModule, wireAgentqUi } from "./agentqUi.js?v=rail-32-reliability";
-import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-32-reliability";
+import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-33-proactive";
+import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-33-proactive";
 import {
   dispatchAtlasHand,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
-} from "./atlasHoloDispatch.js?v=rail-32-reliability";
+} from "./atlasHoloDispatch.js?v=rail-33-proactive";
 
-const BUILD_ID = "rail-32-reliability";
+const BUILD_ID = "rail-33-proactive";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2162,6 +2162,32 @@ function runHoloAction(action, opts = {}) {
       showToast(`CONTROLLI PLANCIA · ${src}`);
       return Promise.resolve();
     }
+    case "status":
+    case "health":
+    case "agentq-status":
+      return api("/api/ai/agentq/state", {
+        method: "POST",
+        body: JSON.stringify({
+          question: "stato della plancia",
+          module: state.module,
+          via: "resident",
+        }),
+      })
+        .then((data) => {
+          if (data?.reply) {
+            postChatUpdate(data.reply, "ok", {
+              trust: data.trust?.mode || "auto",
+              trustLine: data.trustLine || "",
+            });
+          }
+        })
+        .catch((err) => {
+          postChatUpdate(`Atlas. Stato non letto: ${err?.message || "errore"}`, "warn");
+        });
+    case "problems":
+      return showProblems({ postChatUpdate, runHoloAction, resolve: false }).catch((err) => {
+        postChatUpdate(`Atlas. Problemi non letti: ${err?.message || "errore"}`, "warn");
+      });
     case "tema-cyan":
       applyAccentTheme("cyan");
       showToast(`TEMA CYAN · ${src}`);

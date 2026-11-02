@@ -91,9 +91,14 @@ aiRouter.get("/agentq/integrity", (_req, res) => {
 aiRouter.post("/agentq/resident/wake", async (req, res) => {
   try {
     const body = req.body && typeof req.body === "object" ? req.body : {};
+    const raw = body.module ?? body.uiState?.module ?? "";
+    const named = String(raw || "").trim();
+    const preparing = body.prepareHabits === true || body.preferStored === true;
     const result = await wakeResident({
-      module: body.module || body.uiState?.module || "map",
+      module: named || (preparing ? "" : "map"),
       uiState: body.uiState || {},
+      preferStored: body.preferStored === true,
+      prepareHabits: body.prepareHabits === true,
     });
     res.json(result);
   } catch (err) {

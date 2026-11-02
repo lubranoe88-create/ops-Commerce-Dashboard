@@ -1,7 +1,7 @@
 /**
  * M4: durable decision log.
- * Each wake, hands, and news choice is appended with why Atlas made it.
- * Status and the updates payload expose a short snippet.
+ * Each wake, hands, news, and self-heal choice is appended with why Atlas
+ * made it. Status and the updates payload expose a short snippet.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -51,7 +51,7 @@ function sanitizeChoice(choice) {
 function sanitizeEntry(raw) {
   if (!raw || typeof raw !== "object") return null;
   const source = clip(raw.source, 20);
-  if (source !== "wake" && source !== "hands" && source !== "news") return null;
+  if (source !== "wake" && source !== "hands" && source !== "news" && source !== "heal") return null;
   const choices = [];
   for (const choice of Array.isArray(raw.choices) ? raw.choices : []) {
     const clean = sanitizeChoice(choice);
