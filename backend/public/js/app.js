@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-8";
+} from "./mapGlobe.js?v=rail-9";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,13 +33,13 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-8";
+} from "./aiAgentUi.js?v=rail-9";
 import {
   noteAiFunctionReports,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-8";
+} from "./functionBoardUi.js?v=rail-9";
 
-const BUILD_ID = "rail-8";
+const BUILD_ID = "rail-9";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2502,8 +2502,8 @@ async function ensureChatModelSelect() {
 
 /** Nota fissa concordata (Agent Q / Jarvis) — reiniettata a ogni ingresso in chat. */
 const PINNED_BRIEFING_LINES = [
-  "CONCORDATO · Agent Q / Jarvis (nota fissa ad ogni apertura chat)",
-  "1) Framework: Agent Q (sentient-engineering) scelto per l’assistente tipo Jarvis in plancia.",
+  "CONCORDATO · Agent Q in plancia (nota fissa ad ogni apertura chat)",
+  "1) Framework: Agent Q (sentient-engineering) da integrare in plancia. «Jarvis» era solo un’analogia — il nome corretto è Agent Q.",
   "2) Ricerca su richiesta: modulo ricerca su file locali, database e API, oltre al browser Playwright — solo se l’utente lo chiede.",
   "3) Chiavi API: già presenti in plancia; riutilizzarle, mai hardcodarle.",
   "4) Client: uso da tablet ora (PC tra settimane/mesi); UI ok su browser tablet.",
