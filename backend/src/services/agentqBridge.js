@@ -11,11 +11,59 @@ import { fileURLToPath } from "node:url";
 import { config } from "../config.js";
 import { completeChat } from "./openrouter.js";
 import { buildFunctionBoard } from "./functionBoard.js";
+import { getDb } from "../memory/db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(__dirname, "../../data");
 const SANDBOX_ROOT = path.resolve(DATA_ROOT, "agentq-sandbox");
 const UPDATES_PATH = path.resolve(DATA_ROOT, "agentq-updates/updates.json");
+const MEMORY_EXPAND_PATH = path.resolve(DATA_ROOT, "agentq-memory/expandable.json");
+
+/** Solo SELECT su queste tabelle — nessuna scrittura via ricerca. */
+const DB_SEARCH_ALLOWLIST = Object.freeze({
+  concepts: {
+    sql: `SELECT id, slug, label, mention_count FROM concepts
+          WHERE lower(slug) LIKE ? OR lower(label) LIKE ?
+          ORDER BY mention_count DESC LIMIT ?`,
+    map: (r) => ({
+      title: r.label || r.slug,
+      snippet: `concept · mentions ${r.mention_count ?? 0}`,
+      uri: `db://concepts/${r.id}`,
+    }),
+  },
+  coverage_areas: {
+    sql: `SELECT area_key, label, kind, coverage_degree FROM coverage_areas
+          WHERE lower(area_key) LIKE ? OR lower(label) LIKE ?
+          ORDER BY coverage_degree DESC LIMIT ?`,
+    map: (r) => ({
+      title: r.label || r.area_key,
+      snippet: `${r.kind} · coverage ${r.coverage_degree ?? 0}%`,
+      uri: `db://coverage/${r.area_key}`,
+    }),
+  },
+  pipeline_errors: {
+    sql: `SELECT id, source_key, severity, cause_code, cause_text, status FROM pipeline_errors
+          WHERE lower(source_key) LIKE ? OR lower(cause_text) LIKE ? OR lower(cause_code) LIKE ?
+          ORDER BY id DESC LIMIT ?`,
+    map: (r) => ({
+      title: `${r.source_key} · ${r.cause_code || r.severity}`,
+      snippet: `${r.status}: ${r.cause_text || ""}`.slice(0, 220),
+      uri: `db://pipeline_errors/${r.id}`,
+    }),
+    // 3 LIKE params + limit
+    bind: (like, limit) => [like, like, like, limit],
+  },
+  daily_tops: {
+    sql: `SELECT rank, business_key, display_name, score FROM daily_tops
+          WHERE lower(business_key) LIKE ? OR lower(display_name) LIKE ?
+          ORDER BY score DESC LIMIT ?`,
+    map: (r) => ({
+      title: r.display_name || r.business_key,
+      snippet: `rank ${r.rank} · score ${r.score}`,
+      uri: `db://daily_tops/${r.business_key}`,
+    }),
+  },
+});
 
 /** Azioni che il client può eseguire come "mani" sulla plancia. */
 export const AGENTQ_HAND_ACTIONS = [
@@ -143,6 +191,55 @@ export function searchSandboxFilesystem(query, { limit = 8 } = {}) {
 }
 
 /**
+ * Ricerca SQLite allowlist (sola lettura) — concepts, coverage, errori, tops.
+ */
+export function searchDatabase(query, { limit = 8 } = {}) {
+  const q = String(query || "").trim();
+  if (!q) return [];
+  const like = `%${q.toLowerCase().replace(/[%_]/g, "")}%`;
+  const perTable = Math.max(2, Math.ceil(limit / 2));
+  const hits = [];
+  let db;
+  try {
+    db = getDb();
+  } catch (e) {
+    throw new Error(`db unavailable: ${e.message}`);
+  }
+  for (const [table, spec] of Object.entries(DB_SEARCH_ALLOWLIST)) {
+    try {
+      const binds = spec.bind ? spec.bind(like, perTable) : [like, like, perTable];
+      const rows = db.prepare(spec.sql).all(...binds);
+      for (const row of rows) {
+        const mapped = spec.map(row);
+        hits.push({
+          source: "database",
+          table,
+          title: mapped.title,
+          snippet: mapped.snippet,
+          uri: mapped.uri,
+          score: scoreText(`${mapped.title} ${mapped.snippet}`, tokensOf(q)) + 1,
+        });
+      }
+    } catch (e) {
+      // Tabella assente o schema diverso: salta, non blocca le altre fonti.
+      hits.push({
+        source: "database",
+        table,
+        title: `(skip ${table})`,
+        snippet: e.message,
+        uri: "",
+        score: 0,
+        meta: { skipped: true },
+      });
+    }
+  }
+  return hits
+    .filter((h) => !h.meta?.skipped && h.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+/**
  * Hint web (non naviga): il client/browser-use apre dopo conferma utente.
  */
 export function searchWebHints(query) {
@@ -187,9 +284,12 @@ export async function searchApiWikipedia(query, { limit = 5 } = {}) {
 
 /**
  * Ricerca multi-fonte — SOLO se esplicitamente richiesta (il route caller lo impone).
- * sources: filesystem | api | web_hint | all
+ * sources: filesystem | database | api | web_hint | all
  */
-export async function runAgentqSearch(query, { sources = ["filesystem", "api", "web_hint"] } = {}) {
+export async function runAgentqSearch(
+  query,
+  { sources = ["filesystem", "database", "api", "web_hint"] } = {},
+) {
   const q = String(query || "").trim();
   if (!q) {
     const err = new Error("query richiesta");
@@ -203,7 +303,7 @@ export async function runAgentqSearch(query, { sources = ["filesystem", "api", "
   );
   if (wanted.has("all")) {
     wanted.clear();
-    ["filesystem", "api", "web_hint"].forEach((s) => wanted.add(s));
+    ["filesystem", "database", "api", "web_hint"].forEach((s) => wanted.add(s));
   }
 
   const hits = [];
@@ -213,6 +313,13 @@ export async function runAgentqSearch(query, { sources = ["filesystem", "api", "
       hits.push(...searchSandboxFilesystem(q));
     } catch (e) {
       errors.push(`filesystem: ${e.message}`);
+    }
+  }
+  if (wanted.has("database") || wanted.has("db") || wanted.has("sqlite")) {
+    try {
+      hits.push(...searchDatabase(q));
+    } catch (e) {
+      errors.push(`database: ${e.message}`);
     }
   }
   if (wanted.has("api")) {
@@ -232,6 +339,7 @@ export async function runAgentqSearch(query, { sources = ["filesystem", "api", "
     hits,
     errors,
     sandboxRoot: "backend/data/agentq-sandbox",
+    dbAllowlist: Object.keys(DB_SEARCH_ALLOWLIST),
     onDemand: true,
   };
 }

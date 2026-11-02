@@ -56,8 +56,9 @@ aiRouter.get("/agentq/status", requireAiPaid, async (_req, res) => {
 
 /**
  * Ricerca Agent Q — SOLO su richiesta esplicita del client.
- * Body: { query, sources?: ["filesystem","api","web_hint"] }
+ * Body: { query, sources?: ["filesystem","database","api","web_hint"] }
  * Filesystem limitato alla sandbox backend/data/agentq-sandbox.
+ * Database: solo SELECT su allowlist (concepts, coverage, errors, tops).
  */
 aiRouter.post("/agentq/search", requireAiPaid, async (req, res) => {
   try {
@@ -65,7 +66,7 @@ aiRouter.post("/agentq/search", requireAiPaid, async (req, res) => {
       return res.status(400).json({ error: "query richiesta (ricerca solo on-demand)" });
     }
     const result = await runAgentqSearch(req.body.query || req.body.q, {
-      sources: req.body.sources || ["filesystem", "api", "web_hint"],
+      sources: req.body.sources || ["filesystem", "database", "api", "web_hint"],
     });
     res.json(result);
   } catch (err) {
