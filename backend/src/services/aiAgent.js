@@ -6,6 +6,7 @@ import { config } from "../config.js";
 import { completeChat } from "./openrouter.js";
 import { assertCanCall, recordCompletion, getBudgetStatus } from "./aiBudget.js";
 import { PANEL_CATALOG, SYSTEM_CARD, sanitizeActions } from "./panelCatalog.js";
+import { asAtlasLine } from "./atlasPersonality.js";
 import { getDashboardSnapshot, searchCrossThreadMemory } from "../memory/store.js";
 import {
   saveBriefingSession,
@@ -68,7 +69,9 @@ export async function runAiTurn({
   if (!isAiPaid()) {
     return {
       route: "blocked_free",
-      reply: "Piano free: nessun modello AI. Usa i dati meccanici della plancia.",
+      reply: asAtlasLine(
+        "Piano free: nessun modello AI. Uso solo i dati meccanici della plancia.",
+      ),
       actions: [],
       tier: "none",
       model: null,
@@ -129,10 +132,11 @@ export async function runAiTurn({
     if (err.code === "AI_BUDGET_HARD" || err.code === "NO_OPENROUTER") {
       return {
         route: err.code === "NO_OPENROUTER" ? "no_openrouter" : "budget_hard",
-        reply:
+        reply: asAtlasLine(
           err.code === "NO_OPENROUTER"
-            ? "OpenRouter non configurato. Dati meccanici disponibili senza AI."
-            : "Cap AI giornaliero raggiunto. Continuo solo con dati meccanici.",
+            ? "OpenRouter non è configurato. I dati meccanici della plancia restano disponibili."
+            : "Cap AI giornaliero raggiunto. Continuo solo con i dati meccanici della plancia.",
+        ),
         actions: [],
         tier: "none",
         model: null,
@@ -160,7 +164,9 @@ export async function runAiTurn({
       route: "need_questions",
       reply:
         parsed.reply ||
-        "Prima di procedere: 1) Cosa vuoi fare oggi? 2) Come vuoi procedere? 3) Qual è l'obiettivo di oggi?",
+        asAtlasLine(
+          "Prima di procedere: 1) Cosa vuoi fare oggi? 2) Come vuoi procedere? 3) Qual è l’obiettivo di oggi?",
+        ),
       actions,
       tier: "router",
       model: routerRaw.model,
@@ -204,7 +210,9 @@ export async function runAiTurn({
           reply:
             parsed.reply ||
             routerRaw.content ||
-            "Budget AI in fascia soft: resto sull'agente economico. Riprova domani per analisi potenziata.",
+            asAtlasLine(
+              "Budget AI in fascia soft: resto sul modello economico. Riprova domani per un’analisi più ampia.",
+            ),
           actions,
           tier: "router",
           model: routerRaw.model,
@@ -219,8 +227,9 @@ export async function runAiTurn({
         route: "answer_local",
         reply:
           parsed.reply ||
-          "Cap/fascia budget: nessuna escalation. Ecco quanto posso dire in locale: " +
-            (parsed.reply || "usa i pannelli meccanici."),
+          asAtlasLine(
+            "Cap o fascia budget: nessuna escalation. Usa i pannelli meccanici della plancia.",
+          ),
         actions,
         tier: "router",
         model: routerRaw.model,

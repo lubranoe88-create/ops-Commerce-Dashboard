@@ -12,6 +12,7 @@ import {
 import { completeChat } from "../services/openrouter.js";
 import { isAllowedChatModel, resolveChatModel } from "../services/chatModels.js";
 import { config } from "../config.js";
+import { asAtlasLine, presentAtlasThreadTitle } from "../services/atlasPersonality.js";
 
 export const dashboardRouter = Router();
 
@@ -68,7 +69,7 @@ dashboardRouter.get("/chat/memory/search", (req, res) => {
 });
 
 dashboardRouter.post("/chat/threads", (req, res) => {
-  const title = (req.body?.title || "Nuova chat").toString().slice(0, 120);
+  const title = presentAtlasThreadTitle(req.body?.title);
   res.json(createChatThread(title));
 });
 
@@ -139,7 +140,7 @@ dashboardRouter.post("/chat/threads/:id/messages", async (req, res) => {
 
   const snap = getDashboardSnapshot();
   const system = [
-    "Sei l'interfaccia conversazionale del dashboard commerciale ops.",
+    "Sei Atlas, l'assistente della plancia OPS. Presentati solo come Atlas.",
     "Usa solo i dati del contesto JSON. Non inventare revenue non verificati.",
     "Rispetta regole meccaniche e correzioni utente. Rispondi in italiano, conciso.",
   ].join(" ");
@@ -159,10 +160,11 @@ dashboardRouter.post("/chat/threads/:id/messages", async (req, res) => {
 
   const key = config.openRouterApiKey;
   if (!key || key.includes("CHANGE_ME") || key.includes("PLACEHOLDER") || key.includes("your-key")) {
-    const fallback =
-      "OpenRouter non configurato (placeholder). Ecco un riepilogo locale: " +
-      `salute pipeline ${snap.pipeline_health}/100, top1 ${snap.tops[0]?.title || snap.tops[0]?.display_name || "n/d"}, ` +
-      `errori open ${snap.errors.filter((e) => e.status === "open").length}.`;
+    const fallback = asAtlasLine(
+      "OpenRouter non è configurato. Riepilogo locale: " +
+        `salute pipeline ${snap.pipeline_health}/100, top1 ${snap.tops[0]?.title || snap.tops[0]?.display_name || "n/d"}, ` +
+        `errori open ${snap.errors.filter((e) => e.status === "open").length}.`,
+    );
     appendChatMessage(id, { role: "assistant", content: fallback });
     return res.json({
       reply: fallback,
@@ -184,8 +186,8 @@ dashboardRouter.post("/chat/threads/:id/messages", async (req, res) => {
       messages: getChatMessages(id),
     });
   } catch (err) {
-    const msg = err.message || "Chat upstream failed";
-    appendChatMessage(id, { role: "assistant", content: `Errore modello: ${msg}` });
+    const msg = asAtlasLine(`Errore modello: ${err.message || "Chat upstream failed"}`);
+    appendChatMessage(id, { role: "assistant", content: msg });
     return res.status(502).json({ error: msg, messages: getChatMessages(id) });
   }
 });

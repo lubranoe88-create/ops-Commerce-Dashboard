@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=rail-25-atlas" />
+  <link rel="stylesheet" href="/css/app.css?v=rail-28-c1" />
 </head>
 <body>
   <!--
@@ -93,11 +93,12 @@
             <div class="legend mono" id="coverageMini"></div>
           </div>
           <p id="imageryCredit" class="imagery-credit">Esri World Imagery (grayscale) · Buildings: Re:Earth / OSM / Overture (ODbL)</p>
-          <div id="chatPanel" class="chat-wrap" hidden>
+          <div id="chatPanel" class="chat-wrap" hidden aria-label="Chat con Atlas">
             <div class="threads" id="threadList"></div>
             <div class="chat-model-bar">
+              <span class="chat-who" id="chatWho">Atlas</span>
               <label class="chat-model-label" for="chatModelSelect">Model</label>
-              <select id="chatModelSelect" class="chat-model-select" title="Chat model"></select>
+              <select id="chatModelSelect" class="chat-model-select" title="Modello Atlas"></select>
               <span id="chatModelHint" class="chat-model-hint muted mono"></span>
               <button type="button" id="exportChatBtn" class="pill-btn" title="Export thread">Export</button>
             </div>
@@ -138,7 +139,7 @@
               <div class="map-pick-title" id="mapPickTitle">—</div>
               <div class="map-pick-detail muted" id="mapPickDetail"></div>
               <div class="map-pick-actions">
-                <button type="button" id="mapPickAnalyze" class="pill-btn primary" hidden>Analizza in chat</button>
+                <button type="button" id="mapPickAnalyze" class="pill-btn primary" hidden>Analizza con Atlas</button>
                 <button type="button" id="mapPickCompare" class="pill-btn" hidden>Confronta</button>
               </div>
             </div>
@@ -157,7 +158,7 @@
         </div>
 
         <div class="analizza-bar" id="analizzaBar">
-          <input id="chatInput" type="text" placeholder="Analizza…" autocomplete="off" aria-label="Analizza" />
+          <input id="chatInput" type="text" placeholder="Chiedi ad Atlas…" autocomplete="off" aria-label="Messaggio per Atlas" title="Messaggio per Atlas" />
           <div class="analizza-actions">
             <button type="button" id="globalMic" class="analizza-mic" title="Voce">
               <svg class="mic-glyph" viewBox="0 0 16 22" aria-hidden="true"><rect x="4.5" y="1" width="7" height="12" rx="3.5"/><path d="M1.5 10.5a6.5 6.5 0 0 0 13 0M8 17v4"/></svg>
@@ -203,7 +204,7 @@
     <div id="aiBriefingModal" class="ai-briefing" hidden>
       <form id="aiBriefingForm" class="ai-briefing-panel" autocomplete="off">
         <h2 class="ai-briefing-title">Briefing di sessione</h2>
-        <p class="ai-briefing-lead">Tre domande, poi l’agente apre il giorno sui dati meccanici.</p>
+        <p class="ai-briefing-lead">Tre domande, poi Atlas apre il giorno sui dati meccanici.</p>
         <label class="ai-briefing-field">
           <span>Cosa vuoi fare oggi?</span>
           <input id="aiQ1" name="q1" type="text" required maxlength="500" />
@@ -232,6 +233,6 @@
     }
   }
   </script>
-  <script type="module" src="/js/app.js?v=rail-27-x1"></script>
+  <script type="module" src="/js/app.js?v=rail-28-c1"></script>
 </body>
 </html>

@@ -1,12 +1,33 @@
 import { config } from "../config.js";
 import { resolveChatModel } from "./chatModels.js";
-import { withAtlasPersona } from "./atlasPersonality.js";
+import { presentAtlasChatText, withAtlasPersona } from "./atlasPersonality.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 /**
+ * Atlas is the only system message. Extra system turns are dropped so a caller
+ * cannot replace the persona with another name.
+ */
+export function assembleChatMessages({
+  system,
+  prompt,
+  messages: priorMessages,
+} = {}) {
+  const messages = [{ role: "system", content: withAtlasPersona(system) }];
+  if (Array.isArray(priorMessages)) {
+    for (const m of priorMessages) {
+      if (!m?.role || typeof m.content !== "string") continue;
+      if (String(m.role).toLowerCase() === "system") continue;
+      messages.push({ role: m.role, content: m.content });
+    }
+  }
+  if (prompt) messages.push({ role: "user", content: prompt });
+  return messages;
+}
+
+/**
  * Call OpenRouter chat completions. API key stays server-side.
- * Returns usage for budget metering.
+ * Returns usage for budget metering. Every chat path gets the Atlas persona.
  */
 export async function completeChat({
   prompt,
@@ -16,15 +37,8 @@ export async function completeChat({
   temperature = 0.2,
   messages: priorMessages,
 } = {}) {
-  const messages = [];
   // Every chat completion (dashboard chat, /api/chat, agent turns, hands) gets Atlas.
-  messages.push({ role: "system", content: withAtlasPersona(system) });
-  if (Array.isArray(priorMessages) && priorMessages.length) {
-    for (const m of priorMessages) {
-      if (m?.role && typeof m.content === "string") messages.push(m);
-    }
-  }
-  if (prompt) messages.push({ role: "user", content: prompt });
+  const messages = assembleChatMessages({ system, prompt, messages: priorMessages });
 
   const modelId = resolveChatModel(model);
   const key = config.openRouterApiKey;
@@ -72,7 +86,7 @@ export async function completeChat({
   }
 
   return {
-    content: content.trim(),
+    content: presentAtlasChatText(content.trim()),
     model: payload?.model || modelId,
     usage: payload?.usage ?? null,
   };

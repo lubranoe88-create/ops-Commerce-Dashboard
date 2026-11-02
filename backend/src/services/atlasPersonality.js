@@ -31,3 +31,28 @@ export function withAtlasPersona(system) {
   if (!body) return ATLAS_PERSONA;
   return `${ATLAS_PERSONA}\n\n${body}`;
 }
+
+const DEFAULT_THREAD_TITLE = /^(session|nuova chat|new chat)$/i;
+
+/** One system line when chat opens. The client shows it once per browser session. */
+export const ATLAS_CHAT_GREETING =
+  "Atlas. Sono l’assistente della plancia. Chiedimi un’analisi, la mappa, la pipeline o la memory.";
+
+export function presentAtlasChatText(text) {
+  return String(text ?? "").replace(/\bAgente Q\b|\bAgent Q\b|\bAgentQ\b/g, ATLAS_NAME);
+}
+
+/** Default or legacy thread titles present as Atlas. Custom titles stay. */
+export function presentAtlasThreadTitle(title) {
+  const raw = presentAtlasChatText(title).trim();
+  if (!raw || DEFAULT_THREAD_TITLE.test(raw)) return ATLAS_NAME;
+  return raw.slice(0, 120);
+}
+
+/** Mechanical chat replies that never reach the model still speak as Atlas. */
+export function asAtlasLine(text) {
+  const body = presentAtlasChatText(text).trim();
+  if (!body) return `${ATLAS_NAME}.`;
+  if (/^atlas\b/i.test(body)) return body;
+  return `${ATLAS_NAME}. ${body}`;
+}

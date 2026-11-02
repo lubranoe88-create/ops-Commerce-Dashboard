@@ -1,4 +1,5 @@
 import { getDb, openMemoryDb } from "./db.js";
+import { presentAtlasThreadTitle } from "../services/atlasPersonality.js";
 import { recordBusinessAppearance, getConsistencyRanking } from "./consistency.js";
 import { reorganizeAfterConversation } from "./reorganize.js";
 
@@ -451,13 +452,15 @@ export function evaluateVerification({ signals }) {
 export function listChatThreads() {
   return getDb()
     .prepare(`SELECT id, title, created_at, updated_at FROM chat_threads ORDER BY updated_at DESC`)
-    .all();
+    .all()
+    .map((row) => ({ ...row, title: presentAtlasThreadTitle(row.title) }));
 }
 
-export function createChatThread(title = "Nuova chat") {
+export function createChatThread(title = "Atlas") {
   const db = getDb();
-  const r = db.prepare(`INSERT INTO chat_threads (title) VALUES (?)`).run(title);
-  return { id: Number(r.lastInsertRowid), title };
+  const shown = presentAtlasThreadTitle(title);
+  const r = db.prepare(`INSERT INTO chat_threads (title) VALUES (?)`).run(shown);
+  return { id: Number(r.lastInsertRowid), title: shown };
 }
 
 export function getChatMessages(threadId) {

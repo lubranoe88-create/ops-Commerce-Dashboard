@@ -40,9 +40,9 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-27-x1";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-28-c1";
 
-const BUILD_ID = "rail-27-x1";
+const BUILD_ID = "rail-28-c1";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1171,7 +1171,7 @@ async function openChatAnalyze(title) {
     input.value = prompt;
     input.focus();
   }
-  showToast("Chat pronta · analizza");
+  showToast("Atlas pronto");
 }
 
 function updateCompareStrip() {
@@ -1838,9 +1838,28 @@ function silenceVoice() {
   }
 }
 
+function presentChatText(text, role = "system") {
+  const raw = String(text || "");
+  if (String(role || "").toLowerCase() === "user") return raw;
+  return raw.replace(/\bAgente Q\b|\bAgent Q\b|\bAgentQ\b/g, "Atlas");
+}
+
+function atlasThreadLabel(title) {
+  const raw = presentChatText(title, "system").trim();
+  if (!raw || /^(session|nuova chat|new chat)$/i.test(raw)) return "Atlas";
+  return raw;
+}
+
+function chatExportRole(role) {
+  const r = String(role || "").toLowerCase();
+  if (r === "assistant" || r === "system") return "ATLAS";
+  if (r === "user") return "TU";
+  return (r || "msg").toUpperCase();
+}
+
 /** Status / onboarding / command acks → chat panel (and toast), never TTS. */
 function postChatUpdate(text, kind = "ok") {
-  const line = String(text || "").trim();
+  const line = presentChatText(text, "system").trim();
   if (!line) return;
   showToast(line, kind);
   const msgs = $("messageList");
@@ -1924,9 +1943,9 @@ function maybeVoiceOnboarding() {
   }
   document.body.dataset.voiceOnboard = "shown";
   const lines = [
-    "Benvenuto nella plancia. Di’ MAPPA, PIPELINE, MEMORY o CHAT.",
-    "Di’ CHAT per aprire la chat. Usa la rotella o i tasti più e meno per lo zoom mappa.",
-    "Di’ AGGIORNA per i dati freschi. Tocca MIC per parlare; la voce si attiva al primo tocco.",
+    "Atlas. Benvenuto nella plancia. Di’ MAPPA, PIPELINE, MEMORY o CHAT.",
+    "Atlas. Di’ CHAT per aprire la chat. Usa la rotella o i tasti più e meno per lo zoom mappa.",
+    "Atlas. Di’ AGGIORNA per i dati freschi. Tocca MIC per parlare; la voce si attiva al primo tocco.",
   ];
   // Chat always. Spoken only if MIC already unlocked and the capture is closed.
   pendingVoiceLines = lines.slice();
@@ -1948,7 +1967,7 @@ function maybeVoiceOnboarding() {
     });
   } else {
     pendingVoiceLines = [];
-    if (!voiceUnlocked) postChatUpdate("Tocca MIC per attivare la voce", "ok");
+    if (!voiceUnlocked) postChatUpdate("Atlas. Tocca MIC per attivare la voce", "ok");
   }
 }
 
@@ -2638,14 +2657,15 @@ async function showModule(mod, opts = {}) {
       setExclusivePanels(mod);
 
       if (mod === "chat") {
-        $("moduleLegend").textContent = "Chat · saved history · voice";
+        $("moduleLegend").textContent = "Atlas · cronologia · voce";
         sideForModule(mod, snap);
         // Never block opening chat if thread API is slow/rate-limited
         try {
-          await loadChat();
+          await loadChat({ introduce: true });
         } catch (err) {
           console.warn("[chat] loadChat", err?.message || err);
-          showToast(err?.message || "Chat history non disponibile", "warn");
+          showToast(err?.message || "Cronologia Atlas non disponibile", "warn");
+          maybeIntroduceAtlas($("messageList"), [], true);
         }
         if (!stillCurrent(epoch, mod)) return;
         requestAnimationFrame(() => {
@@ -2877,13 +2897,57 @@ function renderPinnedBriefing(msgs) {
   if (!msgs) return;
   const pin = document.createElement("div");
   pin.className = "bubble system pinned-briefing";
-  pin.dataset.pinned = "concordato-agentq";
+  pin.dataset.pinned = "concordato-atlas";
   pin.setAttribute("role", "note");
   pin.textContent = PINNED_BRIEFING_LINES.join("\n");
   msgs.appendChild(pin);
 }
 
-async function loadChat() {
+let atlasGreetedThisPage = false;
+const ATLAS_GREET_KEY = "atlas_chat_greet_v1";
+const ATLAS_GREETING =
+  "Atlas. Sono l’assistente della plancia. Chiedimi un’analisi, la mappa, la pipeline o la memory.";
+
+function atlasGreetingRemembered() {
+  if (atlasGreetedThisPage) return true;
+  try {
+    return sessionStorage.getItem(ATLAS_GREET_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberAtlasGreeting() {
+  atlasGreetedThisPage = true;
+  try {
+    sessionStorage.setItem(ATLAS_GREET_KEY, "1");
+  } catch {
+    /* private mode */
+  }
+}
+
+function messagesIncludeAtlasGreeting(messages) {
+  return (messages || []).some((m) => String(m.content || "").includes(ATLAS_GREETING));
+}
+
+/** One Atlas intro per browser session, only when chat opens and the line is missing. */
+function maybeIntroduceAtlas(msgs, messages, introduce) {
+  if (!introduce || !msgs) return;
+  if (messagesIncludeAtlasGreeting(messages) || msgs.querySelector("[data-atlas-greet]")) {
+    rememberAtlasGreeting();
+    return;
+  }
+  if (atlasGreetingRemembered()) return;
+  rememberAtlasGreeting();
+  const line = document.createElement("div");
+  line.className = "bubble system";
+  line.dataset.atlasGreet = "1";
+  line.setAttribute("role", "status");
+  line.textContent = ATLAS_GREETING;
+  msgs.appendChild(line);
+}
+
+async function loadChat({ introduce = false } = {}) {
   await ensureChatModelSelect();
   renderChatSuggestions();
   const { threads } = await api("/api/chat/threads");
@@ -2893,16 +2957,16 @@ async function loadChat() {
   neu.className = "pill-btn primary";
   neu.textContent = "New";
   neu.onclick = async () => {
-    const t = await api("/api/chat/threads", { method: "POST", body: JSON.stringify({ title: "Session" }) });
+    const t = await api("/api/chat/threads", { method: "POST", body: JSON.stringify({ title: "Atlas" }) });
     state.threadId = t.id;
-    showToast("Nuova sessione chat");
+    showToast("Nuova sessione Atlas");
     await loadChat();
   };
   list.appendChild(neu);
   (threads || []).forEach((t) => {
     const b = document.createElement("button");
     b.className = "pill-btn" + (t.id === state.threadId ? " primary" : "");
-    b.textContent = t.title || t.id;
+    b.textContent = atlasThreadLabel(t.title) || t.id;
     b.onclick = async () => {
       state.threadId = t.id;
       await loadChat();
@@ -2916,7 +2980,8 @@ async function loadChat() {
   // Concordato: compact note once — not a sticky wall that makes old history look "stuck" on screen.
   renderPinnedBriefing(msgs);
   if (!state.threadId) {
-    msgs.scrollTop = 0;
+    maybeIntroduceAtlas(msgs, [], introduce);
+    msgs.scrollTop = msgs.scrollHeight;
     return;
   }
   const { messages } = await api(`/api/chat/threads/${state.threadId}`);
@@ -2934,14 +2999,17 @@ async function loadChat() {
   }
   chatMessages.slice(start).forEach((m) => {
     const d = document.createElement("div");
-    d.className = `bubble ${m.role}`;
+    const role = m.role === "assistant" || m.role === "system" || m.role === "user" ? m.role : "user";
+    d.className = `bubble ${role}`;
+    d.dataset.role = role;
     const attach = m.attachment_name
       ? `\n[allegato: ${m.attachment_name}]`
       : "";
-    d.textContent = `${m.content || ""}${attach}`;
+    d.textContent = `${presentChatText(m.content || "", role)}${attach}`;
     if (m.speech_input) d.dataset.speech = "1";
     msgs.appendChild(d);
   });
+  maybeIntroduceAtlas(msgs, chatMessages, introduce);
   // Always land on the latest messages — scrollTop=0 was resurfacing the oldest user line.
   requestAnimationFrame(() => {
     msgs.scrollTop = msgs.scrollHeight;
@@ -2951,7 +3019,7 @@ async function loadChat() {
 async function sendChat(text, { voice = false } = {}) {
   if (!text.trim()) return;
   if (!state.threadId) {
-    const t = await api("/api/chat/threads", { method: "POST", body: JSON.stringify({ title: "Session" }) });
+    const t = await api("/api/chat/threads", { method: "POST", body: JSON.stringify({ title: "Atlas" }) });
     state.threadId = t.id;
   }
   await ensureChatModelSelect();
@@ -2986,7 +3054,7 @@ async function sendChat(text, { voice = false } = {}) {
         uiState: { module: state.module, focusedTopId: state.focusedTopId },
       });
       $("chatInput").value = "";
-      const reply = result.reply || "(nessuna risposta)";
+      const reply = result.reply || "Atlas. Nessuna risposta.";
       // Store assistant reply on the same thread
       try {
         await api(`/api/chat/threads/${state.threadId}/messages`, {
@@ -3030,7 +3098,7 @@ async function sendChat(text, { voice = false } = {}) {
       if (voiceUnlocked) postChatUpdate("Risposta vocale ricevuta · in lettura", "ok");
     }
   } catch (err) {
-    showToast(err.message || "Chat fallita", "bad");
+    showToast(err.message || "Atlas non ha risposto", "bad");
   }
 }
 
@@ -4123,15 +4191,15 @@ function wireUi() {
   });
   $("exportChatBtn")?.addEventListener("click", async () => {
     if (!state.threadId) {
-      showToast("Nessun thread da esportare", "warn");
+      showToast("Nessuna chat Atlas da esportare", "warn");
       return;
     }
     const { messages } = await api(`/api/chat/threads/${state.threadId}`);
     const text = (messages || [])
-      .map((m) => `${(m.role || "msg").toUpperCase()}: ${m.content || ""}`)
+      .map((m) => `${chatExportRole(m.role)}: ${presentChatText(m.content || "", m.role)}`)
       .join("\n\n");
     downloadText(`chat-thread-${state.threadId}.txt`, text || "(empty)");
-    showToast("Chat esportata");
+    showToast("Conversazione Atlas esportata");
   });
   window.addEventListener("keydown", (e) => {
     const tag = (e.target?.tagName || "").toLowerCase();

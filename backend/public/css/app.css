@@ -564,6 +564,13 @@ body[data-module="chat"] #chatPanel {
   padding: 8px 10px;
   border-bottom: 1px solid var(--stroke);
 }
+.chat-who {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
 .chat-model-label {
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -1430,6 +1437,17 @@ body[data-module="chat"] .analizza-bar { z-index: 50; }
   color: rgba(220, 230, 240, 0.9);
   font-size: 12px;
   letter-spacing: 0.02em;
+}
+.bubble.assistant::before,
+.bubble.system:not([data-history-trim]):not([data-atlas-greet])::before {
+  content: "Atlas";
+  display: block;
+  margin-bottom: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cyan);
 }
 .bubble.system.pinned-briefing {
   white-space: pre-wrap;
