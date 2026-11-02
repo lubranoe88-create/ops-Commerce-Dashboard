@@ -36,6 +36,8 @@ import {
 } from "./aiAgentUi.js?v=rail-15";
 import {
   noteAiFunctionReports,
+  openFunctionBoardPanel,
+  toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-15";
 import { wireAgentqUi } from "./agentqUi.js?v=rail-15";
@@ -1903,6 +1905,12 @@ function runHoloAction(action, { fromVoice = false } = {}) {
       showToast(`STRUMENTI ${on ? "ON" : "OFF"} · ${src}`);
       return Promise.resolve();
     }
+    case "controlli":
+    case "funzionamento": {
+      toggleFunctionBoardPanel();
+      showToast(`CONTROLLI PLANCIA · ${src}`);
+      return Promise.resolve();
+    }
     case "tema-cyan":
       applyAccentTheme("cyan");
       showToast(`TEMA CYAN · ${src}`);
@@ -1943,7 +1951,8 @@ function handleVoiceCommand(text) {
     [/pipeline/, "pipeline"],
     [/memory|memoria/, "memory"],
     [/\bchat\b|assistente/, "chat"],
-    [/strumenti|controlli|tools/, "strumenti"],
+    [/funzionamento|controlli\s*plancia|pagina\s*controllo|\bcontrolli\b/, "controlli"],
+    [/strumenti|tools/, "strumenti"],
     [/tema\s*(cyan|ciano)/, "tema-cyan"],
     [/tema\s*(ambra|amber)/, "tema-amber"],
     [/tema\s*(mint|verde)/, "tema-mint"],
