@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-17";
+} from "./mapGlobe.js?v=rail-18";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,16 +33,16 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-17";
+} from "./aiAgentUi.js?v=rail-18";
 import {
   noteAiFunctionReports,
   openFunctionBoardPanel,
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-17";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-17";
+} from "./functionBoardUi.js?v=rail-18";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-18";
 
-const BUILD_ID = "rail-17";
+const BUILD_ID = "rail-18";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1396,10 +1396,11 @@ function syncHoloActive(actionOrModule) {
   });
 }
 
-/** Pending onboarding lines to speak after the first user gesture unlocks audio (required on iOS). */
+/** Onboarding lines. Spoken only after MIC unlock and only while the mic is closed. */
 let pendingVoiceLines = [];
-/** True after MIC/gesture sync unlock — required before any speak() on Safari. */
+/** True only after unlockVoiceOutput runs synchronously inside MIC pointerdown/click. */
 let voiceUnlocked = false;
+let lastTtsGateMsgAt = 0;
 
 function isAppleWebKit() {
   const ua = navigator.userAgent || "";
@@ -1436,48 +1437,91 @@ function ensureAudioSessionPlayAndRecord() {
 function getPrimedAudioContext() {
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) return null;
-  if (!state._audioCtx) state._audioCtx = new Ctx();
   try {
-    state._audioCtx.resume?.();
+    if (!state._audioCtx || state._audioCtx.state === "closed") {
+      state._audioCtx = new Ctx();
+      state._audioPrimed = false;
+    }
+  } catch {
+    return null;
+  }
+  const ctx = state._audioCtx;
+  try {
+    ctx.resume?.();
   } catch {
     /* ignore */
   }
-  return state._audioCtx;
+  // iOS stays silent later unless a buffer actually starts during the user gesture.
+  if (!state._audioPrimed) {
+    try {
+      const buffer = ctx.createBuffer(1, 1, ctx.sampleRate || 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(ctx.destination);
+      src.start(0);
+      state._audioPrimed = true;
+    } catch {
+      /* ignore */
+    }
+  }
+  return ctx;
+}
+
+/** Every MIC gesture: resume playback and keep the context alive across capture. */
+function primeAudioContextInGesture(ctx) {
+  if (!ctx) return;
+  try {
+    const rate = ctx.sampleRate || 44100;
+    const frames = Math.max(1, Math.floor(rate * 0.03));
+    const buffer = ctx.createBuffer(1, frames, rate);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ctx.destination);
+    src.start(0);
+    state._audioPrimed = true;
+  } catch {
+    /* ignore */
+  }
+  if (state._keepAlive) return;
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.00001;
+    osc.frequency.value = 30;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    state._keepAlive = osc;
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
- * Unlock outgoing voice synchronously inside a user gesture (pointerdown on MIC).
+ * Unlock outgoing voice synchronously inside MIC pointerdown/click.
  * Must NOT be deferred after await/fetch — Safari drops the gesture otherwise.
+ * Does not speak: TTS while the mic is opening ducks playback on iPad.
  */
-function unlockVoiceOutput({ speakPending = true } = {}) {
+function unlockVoiceOutput() {
   voiceUnlocked = true;
   document.documentElement.dataset.tts = "1";
   ensureAudioSessionPlayAndRecord();
-  getPrimedAudioContext();
-  try {
-    const synth = window.speechSynthesis;
-    if (synth) {
-      synth.getVoices?.();
-      const warm = new SpeechSynthesisUtterance(" ");
-      warm.volume = 0;
-      warm.lang = "it-IT";
-      synth.speak(warm);
-      synth.cancel();
+  primeAudioContextInGesture(getPrimedAudioContext());
+  // iPadOS 26 SpeechSynthesis can break the audio session. iPad playback is server + AudioContext.
+  if (!isIpadLike()) {
+    try {
+      const synth = window.speechSynthesis;
+      if (synth) {
+        synth.getVoices?.();
+        const warm = new SpeechSynthesisUtterance(" ");
+        warm.volume = 0;
+        warm.lang = "it-IT";
+        synth.speak(warm);
+        synth.cancel();
+      }
+    } catch {
+      /* ignore */
     }
-  } catch {
-    /* ignore */
-  }
-  if (speakPending && pendingVoiceLines.length) {
-    const lines = pendingVoiceLines.slice();
-    pendingVoiceLines = [];
-    let i = 0;
-    const step = () => {
-      if (i >= lines.length) return;
-      speak(lines[i], { force: true });
-      i += 1;
-      setTimeout(step, 2200);
-    };
-    step();
   }
   try {
     if (state.aiPaid) {
@@ -1506,6 +1550,8 @@ function pickItalianVoice(synth) {
 }
 
 function speakViaSpeechSynthesis(line) {
+  // iPad playback is server TTS through AudioContext only.
+  if (isIpadLike()) return false;
   const synth = window.speechSynthesis;
   if (!synth || !line) return false;
   try {
@@ -1530,83 +1576,92 @@ function speakViaSpeechSynthesis(line) {
   }
 }
 
-/** Play server MP3: prefer HTMLAudioElement on iPad (decodeAudioData is flaky with mpeg). */
+/** Play server audio on the single AudioContext primed during MIC pointerdown. */
 async function speakViaServerAudio(line) {
+  ensureAudioSessionPlayAndRecord();
+  const ctx = getPrimedAudioContext();
+  if (!ctx) throw new Error("AudioContext assente");
   const data = await api("/api/ai/speak", {
     method: "POST",
     body: JSON.stringify({ text: line }),
   });
   const b64 = data?.audioBase64;
-  const mime = data?.mime || "audio/mpeg";
   if (!b64) throw new Error("TTS server senza audio");
-
-  // Primary path for Safari/iPad: <audio> element (autoplay unlocked by prior MIC gesture).
   try {
-    try {
-      state._ttsAudio?.pause?.();
-    } catch {
-      /* ignore */
-    }
-    const audio = new Audio(`data:${mime};base64,${b64}`);
-    audio.setAttribute("playsinline", "true");
-    audio.preload = "auto";
-    state._ttsAudio = audio;
-    getPrimedAudioContext(); // keep session primed
-    await audio.play();
-    return true;
-  } catch (audioElErr) {
-    // Fallback: AudioContext decode
-    const ctx = getPrimedAudioContext();
-    if (!ctx) throw audioElErr;
-    await ctx.resume?.();
-    const raw = atob(b64);
-    const bytes = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
-    const audioBuf = await ctx.decodeAudioData(bytes.buffer.slice(0));
-    try {
-      state._ttsSource?.stop?.();
-    } catch {
-      /* ignore */
-    }
-    const source = ctx.createBufferSource();
-    source.buffer = audioBuf;
-    source.connect(ctx.destination);
-    state._ttsSource = source;
-    source.start(0);
-    return true;
+    state._ttsAudio?.pause?.();
+  } catch {
+    /* ignore */
   }
+  ensureAudioSessionPlayAndRecord();
+  await ctx.resume?.();
+  const raw = atob(b64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+  const copy = bytes.buffer.slice(0);
+  const audioBuf = await new Promise((resolve, reject) => {
+    let settled = false;
+    const ok = (buf) => {
+      if (settled) return;
+      settled = true;
+      resolve(buf);
+    };
+    const bad = (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err || new Error("decodeAudioData fallita"));
+    };
+    try {
+      const result = ctx.decodeAudioData(copy.slice(0), ok, bad);
+      if (result && typeof result.then === "function") result.then(ok, bad);
+    } catch (err) {
+      bad(err);
+    }
+  });
+  try {
+    state._ttsSource?.stop?.();
+  } catch {
+    /* ignore */
+  }
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuf;
+  source.connect(ctx.destination);
+  state._ttsSource = source;
+  source.start(0);
+  return true;
 }
 
 /**
- * Speak when TTS unlocked. On iPad prefer server TTS → AudioContext;
- * always sanitize angle brackets; never call speak before MIC unlock.
+ * Speak only after MIC unlock. On iPad prefer server TTS on the primed AudioContext.
+ * Angle brackets are stripped. `opts.force` must not unlock audio by itself.
  */
-function speak(text, { force = false } = {}) {
+function speak(text, opts = {}) {
   const unlocked = voiceUnlocked || document.documentElement.dataset.tts === "1";
-  if (!force && !unlocked) {
-    postChatUpdate?.("Tocca MIC per attivare la voce", "warn");
+  if (!unlocked) {
+    const now = Date.now();
+    if (now - lastTtsGateMsgAt > 4000) {
+      lastTtsGateMsgAt = now;
+      postChatUpdate?.("Tocca MIC per attivare la voce", "warn");
+    }
     return;
-  }
-  if (force) {
-    voiceUnlocked = true;
-    document.documentElement.dataset.tts = "1";
   }
   const line = sanitizeTtsText(text);
   if (!line) return;
 
-  // Ensure mic tracks are closed before TTS (Safari play-and-record ducks SpeechSynthesis).
+  ensureAudioSessionPlayAndRecord();
+  // Close capture tracks before playback. Do not drop an in-flight upload.
   try {
-    globalMicControl?.stop?.();
+    if (typeof globalMicControl?.releaseForTts === "function") globalMicControl.releaseForTts();
+    else globalMicControl?.stop?.();
   } catch {
     /* ignore */
   }
 
-  const preferServer = isIpadLike() || force === "server";
+  const preferServer = isIpadLike() || opts.force === "server" || opts.via === "server";
   const failSpeak = (err) => {
     const msg = err?.message || String(err || "TTS fallita");
     postChatUpdate?.(`Voce non riprodotta: ${msg}`, "warn");
     showToast?.(`TTS: ${msg}`, "warn");
-    speakViaSpeechSynthesis(line);
+    if (!isIpadLike()) speakViaSpeechSynthesis(line);
   };
   if (preferServer) {
     speakViaServerAudio(line).catch(failSpeak);
@@ -1728,7 +1783,7 @@ function maybeVoiceOnboarding() {
     "Di’ CHAT per aprire la chat. Usa la rotella o i tasti più e meno per lo zoom mappa.",
     "Di’ AGGIORNA per i dati freschi. Tocca MIC per parlare; la voce si attiva al primo tocco.",
   ];
-  // Chat/toast always. Queue TTS until first user gesture (iOS Safari requirement).
+  // Chat always. Spoken only if MIC already unlocked and the capture is closed.
   pendingVoiceLines = lines.slice();
   let i = 0;
   const step = () => {
@@ -1738,10 +1793,17 @@ function maybeVoiceOnboarding() {
     setTimeout(step, 900);
   };
   setTimeout(step, 400);
-  if (document.documentElement.dataset.tts === "1") {
-    unlockVoiceOutput({ speakPending: true });
+  if (voiceUnlocked && !state.micLive) {
+    const queued = pendingVoiceLines.splice(0);
+    queued.forEach((line, idx) => {
+      setTimeout(() => {
+        if (state.micLive) return;
+        speak(line);
+      }, 400 + idx * 2200);
+    });
   } else {
-    postChatUpdate("Tocca un comando o MIC per attivare la voce dell’agente.", "ok");
+    pendingVoiceLines = [];
+    if (!voiceUnlocked) postChatUpdate("Tocca MIC per attivare la voce", "ok");
   }
 }
 
@@ -2710,11 +2772,11 @@ async function loadChat() {
     return;
   }
   const { messages } = await api(`/api/chat/threads/${state.threadId}`);
-  const list = Array.isArray(messages) ? messages : [];
+  const chatMessages = Array.isArray(messages) ? messages : [];
   // Tablet UX: show only the recent tail so an old first prompt (e.g. «Riassumi i top…»)
   // does not dominate the viewport when re-entering chat from the plancia.
   const RECENT_TAIL = 12;
-  const start = Math.max(0, list.length - RECENT_TAIL);
+  const start = Math.max(0, chatMessages.length - RECENT_TAIL);
   if (start > 0) {
     const more = document.createElement("div");
     more.className = "bubble system";
@@ -2722,7 +2784,7 @@ async function loadChat() {
     more.textContent = `… ${start} messaggi precedenti nascosti · apri Export o New per gestione completa`;
     msgs.appendChild(more);
   }
-  list.slice(start).forEach((m) => {
+  chatMessages.slice(start).forEach((m) => {
     const d = document.createElement("div");
     d.className = `bubble ${m.role}`;
     const attach = m.attachment_name
@@ -2804,7 +2866,7 @@ async function sendChat(text, { voice = false } = {}) {
       }
       if (voice) {
         // Do not "unlock" after async — Safari needs the prior MIC gesture. speak() warns if gated.
-        speak(reply, { force: voiceUnlocked });
+        speak(reply);
         if (voiceUnlocked) postChatUpdate("Risposta vocale ricevuta · in lettura", "ok");
       }
       return;
@@ -2816,7 +2878,7 @@ async function sendChat(text, { voice = false } = {}) {
         .reverse()
         .find((n) => n.classList.contains("assistant") || n.dataset?.role === "assistant");
       const replyText = (lastAssistant?.textContent || "").trim();
-      if (replyText) speak(replyText, { force: voiceUnlocked });
+      if (replyText) speak(replyText);
       if (voiceUnlocked) postChatUpdate("Risposta vocale ricevuta · in lettura", "ok");
     }
   } catch (err) {
@@ -2848,21 +2910,28 @@ function micErrorMessage(code) {
       return "Nessun microfono trovato su questo dispositivo.";
     case "NotReadableError":
       return "Microfono occupato. Chiudi altre app che lo usano e riprova.";
+    case "gesture":
+      return "Tocca MIC per attivare il microfono.";
     default:
       return code ? `Microfono: ${code}` : "Microfono non disponibile.";
   }
 }
 
-/** Keep the MediaStream alive while SpeechRecognition runs (Safari goes silent if tracks are stopped too early). */
-async function acquireMicStream() {
+/**
+ * Call only from the MIC pointerdown/click stack, before any await.
+ * getUserMedia is refused outside a secure context.
+ */
+function beginUserMediaCapture() {
   if (!window.isSecureContext) {
-    return { ok: false, code: "secure-context" };
+    return Promise.resolve({ ok: false, code: "secure-context" });
   }
-  if (!navigator.mediaDevices?.getUserMedia) {
-    return { ok: true, stream: null };
+  const gum = navigator.mediaDevices?.getUserMedia;
+  if (typeof gum !== "function") {
+    return Promise.resolve({ ok: false, code: "not-allowed" });
   }
+  ensureAudioSessionPlayAndRecord();
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
+    const pending = gum.call(navigator.mediaDevices, {
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
@@ -2870,9 +2939,12 @@ async function acquireMicStream() {
       },
       video: false,
     });
-    return { ok: true, stream };
+    return Promise.resolve(pending).then(
+      (stream) => ({ ok: true, stream }),
+      (err) => ({ ok: false, code: err?.name || "NotAllowedError" }),
+    );
   } catch (err) {
-    return { ok: false, code: err?.name || "not-allowed" };
+    return Promise.resolve({ ok: false, code: err?.name || "not-allowed" });
   }
 }
 
@@ -2892,6 +2964,8 @@ function releaseMicStream(stream) {
 }
 
 function createSpeechRecognizer() {
+  // iPad Safari SpeechRecognition stays silent or throws — Whisper only.
+  if (isIpadLike()) return null;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return null;
   const rec = new SR();
@@ -3074,9 +3148,7 @@ function setupMic(button, onText) {
         return;
       }
       postChatUpdate(`Voce rilevata: ${heard}`);
-      showToast(`Voce rilevata`, "ok");
-      // Speak confirmation through server TTS (HTMLAudio / AudioContext) after mic is closed.
-      speak(`Voce rilevata. ${heard}`, { force: true });
+      showToast("Voce rilevata", "ok");
       onText(heard);
     } catch (err) {
       // Never collapse upstream errors into generic "nessuna voce".
@@ -3134,10 +3206,18 @@ function setupMic(button, onText) {
       return;
     }
     if (!window.isSecureContext) {
+      gestureMicPromise = null;
       postChatUpdate(micErrorMessage("secure-context"), "warn");
       return;
     }
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    if (typeof MediaRecorder === "undefined") {
+      const leftover = gestureMicPromise;
+      gestureMicPromise = null;
+      if (leftover) {
+        leftover.then((perm) => {
+          if (perm?.stream) releaseMicStream(perm.stream);
+        }).catch(() => {});
+      }
       postChatUpdate(
         `Microfono non disponibile su questo browser (${micDiagHint()}). Su iPad serve Safari aggiornato.`,
         "warn",
@@ -3150,23 +3230,19 @@ function setupMic(button, onText) {
     setLiveUi(true);
     postChatUpdate("Registrazione iPad — parla 2–8 secondi, poi ritocca MIC per inviare…");
 
-    // Prefer getUserMedia started inside pointerdown gesture (Safari iPad requirement).
-    let perm;
-    if (gestureMicPromise) {
-      try {
-        const stream = await gestureMicPromise;
-        perm = { ok: true, stream };
-      } catch (err) {
-        perm = { ok: false, code: err?.name || "not-allowed" };
-      } finally {
-        gestureMicPromise = null;
-      }
-    } else {
-      perm = await acquireMicStream();
-    }
-    if (!perm.ok) {
+    document.documentElement.dataset.micEngine = "media-recorder";
+    // getUserMedia only from the MIC gesture. Never open a second capture here.
+    const capture = gestureMicPromise;
+    gestureMicPromise = null;
+    if (!capture) {
       hardStop({ skipUpload: true });
-      postChatUpdate(micErrorMessage(perm.code), "warn");
+      postChatUpdate(micErrorMessage("gesture"), "warn");
+      return;
+    }
+    const perm = await capture;
+    if (!perm?.ok || !perm.stream) {
+      hardStop({ skipUpload: true });
+      postChatUpdate(micErrorMessage(perm?.code), "warn");
       return;
     }
     micStream = perm.stream;
@@ -3266,12 +3342,6 @@ function setupMic(button, onText) {
       const code = ev?.error || "mic";
       hardStop({ skipUpload: true });
       if (code === "aborted") return;
-      // If SR fails hard on WebKit, fall back to MediaRecorder once.
-      if (isAppleWebKit() || code === "service-not-allowed" || code === "network") {
-        postChatUpdate("Riconoscimento web non disponibile — passo a registrazione…", "warn");
-        startMediaRecorderFallback();
-        return;
-      }
       const msg = micErrorMessage(code);
       if (msg) postChatUpdate(msg, "warn");
     };
@@ -3299,14 +3369,14 @@ function setupMic(button, onText) {
     markUserInput?.();
 
     if (state.micLive || starting) {
-      if (mode === "rec" && mediaRecorder && mediaRecorder.state === "recording") {
-        try {
-          mediaRecorder.stop();
-        } catch {
-          hardStop({ skipUpload: true });
-        }
-        return;
+      if (gestureMicPromise) {
+        const leftover = gestureMicPromise;
+        gestureMicPromise = null;
+        leftover.then((perm) => {
+          if (perm?.stream) releaseMicStream(perm.stream);
+        }).catch(() => {});
       }
+      if (mode === "rec" && stopRecordingForUpload()) return;
       hardStop({ skipUpload: true });
       postChatUpdate("Ascolto interrotto");
       return;
@@ -3314,12 +3384,14 @@ function setupMic(button, onText) {
 
     // iPad / Apple WebKit / PWA: never use Web SpeechRecognition — MediaRecorder + Whisper only.
     if (isIpadLike() || isAppleWebKit() || !hasSR) {
+      document.documentElement.dataset.micEngine = "media-recorder";
       startMediaRecorderFallback();
       return;
     }
 
     starting = true;
     mode = "sr";
+    document.documentElement.dataset.micEngine = "speech-recognition";
     setLiveUi(true);
     postChatUpdate("Avvio microfono…");
 
@@ -3352,18 +3424,21 @@ function setupMic(button, onText) {
     startWatchTimer = setTimeout(() => {
       if (!starting) return;
       hardStop({ skipUpload: true });
-      postChatUpdate("Microfono web non partito — passo a registrazione…", "warn");
-      startMediaRecorderFallback();
+      postChatUpdate("Microfono web non partito. Ritocca MIC.", "warn");
     }, 1000);
 
-    acquireMicStream().then((perm) => {
-      if (!perm.ok) {
-        postChatUpdate(micErrorMessage(perm.code), "warn");
-        return;
-      }
-      if (state.micLive || starting) micStream = perm.stream || null;
-      else releaseMicStream(perm.stream);
-    });
+    const capture = gestureMicPromise;
+    gestureMicPromise = null;
+    if (capture) {
+      capture.then((perm) => {
+        if (!perm?.ok) {
+          if (perm?.code) postChatUpdate(micErrorMessage(perm.code), "warn");
+          return;
+        }
+        if (state.micLive || starting) micStream = perm.stream || null;
+        else if (perm.stream) releaseMicStream(perm.stream);
+      });
+    }
   };
 
   const toggle = () => {
@@ -3372,53 +3447,78 @@ function setupMic(button, onText) {
 
   const beginGestureMicCapture = () => {
     // CRITICAL (Safari iPad): unlock TTS + start getUserMedia inside the same user gesture.
-    unlockVoiceOutput({ speakPending: true });
+    unlockVoiceOutput();
     ensureAudioSessionPlayAndRecord();
     getPrimedAudioContext();
-    if (
-      !gestureMicPromise &&
-      window.isSecureContext &&
-      navigator.mediaDevices?.getUserMedia &&
-      !(state.micLive || starting || (mediaRecorder && mediaRecorder.state === "recording"))
-    ) {
-      gestureMicPromise = navigator.mediaDevices
-        .getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-          video: false,
-        })
-        .catch((err) => {
-          gestureMicPromise = null;
-          throw err;
-        });
+    const recording =
+      state.micLive || starting || (mediaRecorder && mediaRecorder.state === "recording");
+    if (!gestureMicPromise && !recording) {
+      gestureMicPromise = beginUserMediaCapture();
     }
   };
 
   const onPointerDown = (e) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     handledByPointer = true;
+    // Unlock + getUserMedia before preventDefault so Safari keeps this as a user gesture.
+    beginGestureMicCapture();
     e.preventDefault();
     e.stopPropagation();
-    beginGestureMicCapture();
     toggle();
   };
 
   const onClick = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
     if (handledByPointer) {
       handledByPointer = false;
+      e.preventDefault();
+      e.stopPropagation();
       return;
     }
     beginGestureMicCapture();
+    e.preventDefault();
+    e.stopPropagation();
     toggle();
   };
 
   button.addEventListener("pointerdown", onPointerDown);
   button.addEventListener("click", onClick);
 
+  const releaseForTts = () => {
+    ensureAudioSessionPlayAndRecord();
+    const live = Boolean(mediaRecorder && mediaRecorder.state === "recording");
+    if (live) {
+      try {
+        mediaRecorder.requestData?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        mediaRecorder.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    releaseMicStream(micStream);
+    micStream = null;
+    if (rec) {
+      try {
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        rec.onstart = null;
+        rec.abort?.();
+      } catch {
+        /* ignore */
+      }
+      rec = null;
+    }
+    if (!live) stopUi();
+  };
+
   const control = {
     toggle,
     stop: () => hardStop({ skipUpload: true }),
+    releaseForTts,
     attachButton(btn) {
       if (!btn || uiButtons.has(btn)) return;
       uiButtons.add(btn);
@@ -3469,7 +3569,7 @@ async function initPaidAi() {
       postChatUpdate(`[proactive:${ev.kind}] ${toast}`, "ok");
       showToast(toast, "ok");
     },
-    speak: (text) => speak(text, { force: true }),
+    speak: (text) => speak(text),
   });
   try {
     state.aiStatus = await fetchAiStatus();
@@ -3875,16 +3975,7 @@ function wireModuleZoom() {
 async function boot() {
   silenceVoice();
   document.documentElement.dataset.tts = "0";
-  // iOS/iPad: unlock TTS + AudioContext on the first real user gesture.
-  const unlockOnce = () => {
-    unlockVoiceOutput({ speakPending: true });
-    window.removeEventListener("pointerdown", unlockOnce, true);
-    window.removeEventListener("touchend", unlockOnce, true);
-    window.removeEventListener("keydown", unlockOnce, true);
-  };
-  window.addEventListener("pointerdown", unlockOnce, true);
-  window.addEventListener("touchend", unlockOnce, true);
-  window.addEventListener("keydown", unlockOnce, true);
+  document.documentElement.dataset.micEngine = "";
 
   // Auto low-GPU profile + accent restore
   try {

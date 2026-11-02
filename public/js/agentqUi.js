@@ -218,7 +218,7 @@ export async function runHands(objective, { runHoloAction, postChatUpdate, speak
   const actions = data.actions || [];
   if (data.speak) {
     postChatUpdate?.(`Agent Q: ${data.speak}`);
-    speak?.(data.speak, { force: true });
+    speak?.(data.speak);
   }
   for (const id of actions) {
     postChatUpdate?.(`Mani · ${id}`);
@@ -280,7 +280,7 @@ export async function wireAgentqUi(ctx) {
           `Memoria Agent Q aggiornata (${data.count} note). Id: ${data.entry?.id || "—"}`,
           "ok",
         );
-        ctx.speak?.(`Memoria aggiornata. Ora ho ${data.count} note.`, { force: true });
+        ctx.speak?.(`Memoria aggiornata. Ora ho ${data.count} note.`);
       } catch (err) {
         ctx.postChatUpdate?.(err?.message || "Memoria non aggiornata", "warn");
       }
