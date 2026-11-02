@@ -288,9 +288,9 @@ async function main() {
   // leaves data-tts at "0".
   const puppeteer = await loadPuppeteer();
   if (!puppeteer) {
-    soft("MIC browser (soft)", "puppeteer absent — skipped");
+    soft("MIC call session (soft)", "puppeteer absent — skipped");
   } else if (!cookie) {
-    soft("MIC browser (soft)", "skipped — login failed");
+    soft("MIC call session (soft)", "skipped — login failed");
   } else {
     let browser;
     try {
@@ -341,35 +341,69 @@ async function main() {
           m.style.display = "none";
         }
       });
-      await page.evaluate(() => {
+      const tapMic = async () => {
+        await page.evaluate(() => {
+          const btn = document.getElementById("globalMic");
+          const opts = { bubbles: true, cancelable: true, pointerId: 1, pointerType: "touch", button: 0 };
+          btn.dispatchEvent(new PointerEvent("pointerdown", opts));
+          btn.dispatchEvent(new PointerEvent("pointerup", opts));
+          btn.click();
+        });
+      };
+      await tapMic();
+      await new Promise((r) => setTimeout(r, 2800));
+      const mid = await page.evaluate(() => {
         const btn = document.getElementById("globalMic");
-        const opts = { bubbles: true, cancelable: true, pointerId: 1, pointerType: "touch", button: 0 };
-        btn.dispatchEvent(new PointerEvent("pointerdown", opts));
-        btn.dispatchEvent(new PointerEvent("pointerup", opts));
+        const span = btn?.querySelector("span");
+        return {
+          tts: document.documentElement.dataset.tts || "",
+          call: document.documentElement.dataset.voiceCall || "",
+          phase: document.documentElement.dataset.voicePhase || "",
+          micLive: document.body.classList.contains("mic-live"),
+          engine: document.documentElement.dataset.micEngine || "",
+          label: (span?.textContent || btn?.textContent || "").trim().slice(0, 12),
+          wired: btn?.dataset.micWired || "",
+          pressed: btn?.getAttribute("aria-pressed") || "",
+          bubbles: [...document.querySelectorAll(".bubble, .toast")]
+            .map((n) => (n.textContent || "").trim())
+            .filter(Boolean)
+            .slice(-4),
+        };
       });
-      await new Promise((r) => setTimeout(r, 2500));
-      const mid = await page.evaluate(() => ({
-        tts: document.documentElement.dataset.tts || "",
-        call: document.documentElement.dataset.voiceCall || "",
-        micLive: document.body.classList.contains("mic-live"),
-        engine: document.documentElement.dataset.micEngine || "",
-        wired: document.getElementById("globalMic")?.dataset.micWired || "",
-        pressed: document.getElementById("globalMic")?.getAttribute("aria-pressed") || "",
-        bubbles: [...document.querySelectorAll(".bubble, .toast")]
-          .map((n) => (n.textContent || "").trim())
-          .filter(Boolean)
-          .slice(-4),
-      }));
-      const heard = (mid.bubbles || []).some((b) => /Chiamata|Ascolto|microfono|Voce/i.test(b));
-      const unlocked = mid.tts === "1" || mid.micLive || mid.call === "1" || mid.pressed === "true" || heard;
-      const detail = JSON.stringify(mid).slice(0, 400);
-      if (unlocked) ok("MIC browser (soft)", detail);
-      else if (process.env.MONITOR_STRICT_MIC === "1") bad("MIC browser (soft)", detail);
-      else soft("MIC browser (soft)", detail);
+      // rail-24 continuous call: first tap must open voiceCall + media-recorder-call.
+      const callOpen =
+        mid.call === "1" &&
+        /call/i.test(mid.engine) &&
+        mid.tts === "1" &&
+        (/END/i.test(mid.label) ||
+          (mid.bubbles || []).some((b) => /Chiamata aperta/i.test(b)));
+      const detail = JSON.stringify(mid).slice(0, 420);
+      if (callOpen) {
+        ok("MIC call session (soft)", detail);
+        // Hang up and confirm END → MIC.
+        await tapMic();
+        await new Promise((r) => setTimeout(r, 1000));
+        const ended = await page.evaluate(() => ({
+          call: document.documentElement.dataset.voiceCall || "",
+          label: (
+            document.getElementById("globalMic")?.querySelector("span")?.textContent ||
+            document.getElementById("globalMic")?.textContent ||
+            ""
+          )
+            .trim()
+            .slice(0, 12),
+        }));
+        if (ended.call === "0") ok("MIC call hangup (soft)", JSON.stringify(ended));
+        else soft("MIC call hangup (soft)", JSON.stringify(ended));
+      } else if (process.env.MONITOR_STRICT_MIC === "1") {
+        bad("MIC call session (soft)", detail);
+      } else {
+        soft("MIC call session (soft)", detail);
+      }
     } catch (e) {
       const detail = String(e?.message || e);
-      if (process.env.MONITOR_STRICT_MIC === "1") bad("MIC browser (soft)", detail);
-      else soft("MIC browser (soft)", detail);
+      if (process.env.MONITOR_STRICT_MIC === "1") bad("MIC call session (soft)", detail);
+      else soft("MIC call session (soft)", detail);
     } finally {
       if (browser) await browser.close().catch(() => {});
     }
