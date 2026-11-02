@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-19";
+} from "./mapGlobe.js?v=rail-20";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,16 +33,16 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-19";
+} from "./aiAgentUi.js?v=rail-20";
 import {
   noteAiFunctionReports,
   openFunctionBoardPanel,
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-19";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-19";
+} from "./functionBoardUi.js?v=rail-20";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-20";
 
-const BUILD_ID = "rail-19";
+const BUILD_ID = "rail-20";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1571,6 +1571,8 @@ function pickItalianVoice(synth) {
 }
 
 function speakViaSpeechSynthesis(line) {
+  // iPad: never use SpeechSynthesis. Playback is server audio on the primed AudioContext.
+  if (isIpadLike()) return false;
   const synth = window.speechSynthesis;
   if (!synth || !line) return false;
   try {
@@ -1705,6 +1707,11 @@ function speak(text, opts = {}) {
   const preferServer = isIpadLike() || opts.force === "server" || opts.via === "server";
   const failSpeak = (err) => {
     const msg = err?.message || String(err || "TTS fallita");
+    if (isIpadLike()) {
+      postChatUpdate?.(`Voce non riprodotta: ${msg}`, "warn");
+      showToast?.(`TTS: ${msg}`, "warn");
+      return;
+    }
     const local = speakViaSpeechSynthesis(line);
     const extra = local
       ? " Provo la voce del browser."
