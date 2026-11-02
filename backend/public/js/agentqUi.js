@@ -122,6 +122,8 @@ export async function showEntryUpdates({ postChatUpdate, showToast } = {}) {
     }
   } catch (err) {
     console.warn("[agentq] problems", err?.message || err);
+    showToast?.(`Monitoraggio non caricato: ${err?.message || err}`, "warn");
+    postChatUpdate?.(`Monitoraggio ingresso fallito: ${err?.message || err}`, "warn");
   }
 }
 

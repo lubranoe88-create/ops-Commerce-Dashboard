@@ -95,7 +95,7 @@ export async function transcribeAudio({
     err.status = 503;
     throw err;
   }
-  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length < 32) {
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length < 16) {
     const err = new Error("Audio vuoto o troppo corto");
     err.status = 400;
     throw err;
@@ -106,41 +106,91 @@ export async function transcribeAudio({
     throw err;
   }
 
-  const form = new FormData();
-  const blob = new Blob([buffer], { type: mimeType || "application/octet-stream" });
-  form.append("file", blob, filename || "mic.webm");
-  form.append("model", "openai/whisper-1");
-  if (language) form.append("language", language);
+  const primary = sttFormat(mimeType, filename);
+  const formats = primary === "m4a" ? ["m4a", "aac", "mp4"] : [primary];
+  const models = [
+    "openai/whisper-1",
+    "openai/whisper-large-v3",
+    "openai/whisper-large-v3-turbo",
+  ];
+  let lastErr = null;
 
+  for (const model of models) {
+    const tryFormats = model === models[0] ? formats : [primary];
+    let modelMissing = false;
+    for (const format of tryFormats) {
+      const { response, payload } = await postTranscription({
+        key,
+        model,
+        format,
+        buffer,
+        language,
+      });
+      if (!response.ok) {
+        const detail =
+          payload?.error?.message ||
+          payload?.message ||
+          `OpenRouter transcribe HTTP ${response.status}`;
+        lastErr = new Error(`${detail} (model ${model}, format ${format}, ${buffer.length} byte)`);
+        lastErr.status = response.status >= 400 && response.status < 600 ? response.status : 502;
+        lastErr.upstream = true;
+        if (
+          response.status === 404 ||
+          /model|not found|no endpoint|unavailable|does not exist/i.test(detail)
+        ) {
+          modelMissing = true;
+          break;
+        }
+        if (/format|audio|unsupported|invalid|mime/i.test(detail)) continue;
+        if (response.status >= 500) continue;
+        throw lastErr;
+      }
+      const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+      if (text) return { text, model: payload?.model || model, format };
+      lastErr = new Error(
+        `Whisper ${model} ha restituito testo vuoto (${buffer.length} byte, format ${format})`,
+      );
+      lastErr.status = 422;
+      lastErr.upstream = true;
+    }
+    if (modelMissing) continue;
+    if (lastErr?.status === 422) break;
+  }
+
+  throw lastErr || new Error("Trascrizione non riuscita");
+}
+
+function sttFormat(mimeType = "", filename = "") {
+  const s = `${mimeType} ${filename}`.toLowerCase();
+  if (s.includes("wav")) return "wav";
+  if (s.includes("mp3") || s.includes("mpeg")) return "mp3";
+  if (s.includes("flac")) return "flac";
+  if (s.includes("ogg")) return "ogg";
+  if (s.includes("webm")) return "webm";
+  if (/\baac\b/.test(s) && !s.includes("mp4") && !s.includes("m4a")) return "aac";
+  return "m4a";
+}
+
+async function postTranscription({ key, model, format, buffer, language }) {
   const response = await fetch(OPENROUTER_TRANSCRIBE_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
       "HTTP-Referer": config.openRouterHttpReferer,
       "X-Title": config.openRouterAppTitle,
     },
-    body: form,
+    body: JSON.stringify({
+      model,
+      input_audio: {
+        data: buffer.toString("base64"),
+        format,
+      },
+      ...(language ? { language } : {}),
+    }),
   });
-
   const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    const detail =
-      payload?.error?.message ||
-      payload?.message ||
-      `OpenRouter transcribe HTTP ${response.status}`;
-    const err = new Error(detail);
-    err.status = response.status >= 400 && response.status < 600 ? response.status : 502;
-    err.upstream = true;
-    throw err;
-  }
-
-  const text = typeof payload?.text === "string" ? payload.text.trim() : "";
-  if (!text) {
-    const err = new Error("Nessuna trascrizione (audio silenzioso?)");
-    err.status = 422;
-    throw err;
-  }
-  return { text, model: payload?.model || "openai/whisper-1" };
+  return { response, payload };
 }
 
 const OPENROUTER_SPEECH_URL = "https://openrouter.ai/api/v1/audio/speech";

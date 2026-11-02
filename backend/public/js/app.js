@@ -1502,11 +1502,32 @@ function primeAudioContextInGesture(ctx) {
  * Must NOT be deferred after await/fetch — Safari drops the gesture otherwise.
  * Does not speak: TTS while the mic is opening ducks playback on iPad.
  */
+function primeHtmlAudioElement() {
+  try {
+    if (!state._ttsAudio) {
+      const audio = new Audio();
+      audio.setAttribute("playsinline", "true");
+      audio.preload = "auto";
+      state._ttsAudio = audio;
+    }
+    if (state._htmlAudioPrimed) return;
+    // Silent WAV inside the MIC gesture so a later data: URL play() is allowed.
+    state._ttsAudio.src =
+      "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+    const pending = state._ttsAudio.play?.();
+    state._htmlAudioPrimed = true;
+    pending?.catch?.(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
 function unlockVoiceOutput() {
   voiceUnlocked = true;
   document.documentElement.dataset.tts = "1";
   ensureAudioSessionPlayAndRecord();
   primeAudioContextInGesture(getPrimedAudioContext());
+  primeHtmlAudioElement();
   // iPadOS 26 SpeechSynthesis can break the audio session. iPad playback is server + AudioContext.
   if (!isIpadLike()) {
     try {
@@ -1550,8 +1571,6 @@ function pickItalianVoice(synth) {
 }
 
 function speakViaSpeechSynthesis(line) {
-  // iPad playback is server TTS through AudioContext only.
-  if (isIpadLike()) return false;
   const synth = window.speechSynthesis;
   if (!synth || !line) return false;
   try {
@@ -1576,57 +1595,69 @@ function speakViaSpeechSynthesis(line) {
   }
 }
 
-/** Play server audio on the single AudioContext primed during MIC pointerdown. */
+/** Play server audio on the AudioContext primed during MIC pointerdown; HTMLAudio fallback. */
 async function speakViaServerAudio(line) {
   ensureAudioSessionPlayAndRecord();
   const ctx = getPrimedAudioContext();
-  if (!ctx) throw new Error("AudioContext assente");
   const data = await api("/api/ai/speak", {
     method: "POST",
     body: JSON.stringify({ text: line }),
   });
   const b64 = data?.audioBase64;
+  const mime = data?.mime || "audio/mpeg";
   if (!b64) throw new Error("TTS server senza audio");
   try {
     state._ttsAudio?.pause?.();
   } catch {
     /* ignore */
   }
-  ensureAudioSessionPlayAndRecord();
-  await ctx.resume?.();
-  const raw = atob(b64);
-  const bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
-  const copy = bytes.buffer.slice(0);
-  const audioBuf = await new Promise((resolve, reject) => {
-    let settled = false;
-    const ok = (buf) => {
-      if (settled) return;
-      settled = true;
-      resolve(buf);
-    };
-    const bad = (err) => {
-      if (settled) return;
-      settled = true;
-      reject(err || new Error("decodeAudioData fallita"));
-    };
+  if (ctx) {
     try {
-      const result = ctx.decodeAudioData(copy.slice(0), ok, bad);
-      if (result && typeof result.then === "function") result.then(ok, bad);
-    } catch (err) {
-      bad(err);
+      ensureAudioSessionPlayAndRecord();
+      await ctx.resume?.();
+      const raw = atob(b64);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+      const copy = bytes.buffer.slice(0);
+      const audioBuf = await new Promise((resolve, reject) => {
+        let settled = false;
+        const ok = (buf) => {
+          if (settled) return;
+          settled = true;
+          resolve(buf);
+        };
+        const bad = (err) => {
+          if (settled) return;
+          settled = true;
+          reject(err || new Error("decodeAudioData fallita"));
+        };
+        try {
+          const result = ctx.decodeAudioData(copy.slice(0), ok, bad);
+          if (result && typeof result.then === "function") result.then(ok, bad);
+        } catch (err) {
+          bad(err);
+        }
+      });
+      try {
+        state._ttsSource?.stop?.();
+      } catch {
+        /* ignore */
+      }
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuf;
+      source.connect(ctx.destination);
+      state._ttsSource = source;
+      source.start(0);
+      return true;
+    } catch {
+      /* fall through to HTMLAudioElement */
     }
-  });
-  try {
-    state._ttsSource?.stop?.();
-  } catch {
-    /* ignore */
   }
-  const source = ctx.createBufferSource();
-  source.buffer = audioBuf;
-  source.connect(ctx.destination);
-  state._ttsSource = source;
-  source.start(0);
+  const audio = new Audio(`data:${mime};base64,${b64}`);
+  audio.setAttribute("playsinline", "true");
+  audio.preload = "auto";
+  state._ttsAudio = audio;
+  await audio.play();
   return true;
 }
 
@@ -1659,9 +1690,12 @@ function speak(text, opts = {}) {
   const preferServer = isIpadLike() || opts.force === "server" || opts.via === "server";
   const failSpeak = (err) => {
     const msg = err?.message || String(err || "TTS fallita");
-    postChatUpdate?.(`Voce non riprodotta: ${msg}`, "warn");
+    const local = speakViaSpeechSynthesis(line);
+    const extra = local
+      ? " Provo la voce del browser."
+      : " Anche la voce del browser non è partita.";
+    postChatUpdate?.(`Voce non riprodotta: ${msg}.${extra}`, "warn");
     showToast?.(`TTS: ${msg}`, "warn");
-    if (!isIpadLike()) speakViaSpeechSynthesis(line);
   };
   if (preferServer) {
     speakViaServerAudio(line).catch(failSpeak);
@@ -2931,12 +2965,20 @@ function beginUserMediaCapture() {
   }
   ensureAudioSessionPlayAndRecord();
   try {
+    const apple = isIpadLike() || isAppleWebKit();
     const pending = gum.call(navigator.mediaDevices, {
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
+      audio: apple
+        ? {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: true,
+            channelCount: 1,
+          }
+        : {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
       video: false,
     });
     return Promise.resolve(pending).then(
@@ -3038,7 +3080,7 @@ function setupMic(button, onText) {
   /** getUserMedia promise started inside pointerdown (Safari requires gesture). */
   let gestureMicPromise = null;
   const uiButtons = new Set([button]);
-  const MIN_RECORD_MS = 1500;
+  const MIN_RECORD_MS = 2200;
 
   const clearStartWatch = () => {
     if (startWatchTimer) {
@@ -3118,10 +3160,10 @@ function setupMic(button, onText) {
   const finishRecordingUpload = async (blob) => {
     const mime = blob?.type || recordMime || "audio/mp4";
     const size = blob?.size || 0;
-    // Safari often yields small but valid m4a/aac frames; 64 was too aggressive → false "nessuna voce".
-    if (!blob || size < 256) {
+    // Only reject an empty capture. Short m4a frames still go to Whisper.
+    if (!blob || size < 16) {
       postChatUpdate(
-        `Registrazione troppo corta (${size} byte, ${mime || "mime?"}). Tieni premuto/parla ~2s, poi ritocca MIC.`,
+        `Registrazione vuota (${size} byte, ${mime || "mime?"}). Parla circa 2 secondi, poi ritocca MIC.`,
         "warn",
       );
       return;
@@ -3141,8 +3183,9 @@ function setupMic(button, onText) {
       });
       const heard = String(data?.text || "").trim();
       if (!heard) {
+        const why = data?.error || data?.detail || data?.model || "testo vuoto";
         postChatUpdate(
-          `Whisper non ha letto voce (file ${Math.round(size / 1024)} KB). Ripeti più vicino al microfono.`,
+          `Trascrizione vuota (${why}, ${size} byte, ${mime}). Non è un silenzio generico.`,
           "warn",
         );
         return;
@@ -3265,19 +3308,25 @@ function setupMic(button, onText) {
       postChatUpdate("Errore registrazione microfono", "warn");
     };
     mediaRecorder.onstop = async () => {
-      const blob = new Blob(recordChunks, { type: recordMime || recordChunks[0]?.type || "audio/webm" });
-      recordChunks = [];
+      // Last Safari chunk can arrive just after stop. Keep the array until then.
+      await new Promise((resolve) => setTimeout(resolve, 160));
+      const chunks = recordChunks.splice(0, recordChunks.length);
+      const blob = new Blob(chunks, {
+        type: recordMime || chunks[0]?.type || "audio/mp4",
+      });
       mediaRecorder = null;
-      // Close mic BEFORE any TTS reply (Safari ducks SpeechSynthesis while capture is live).
       releaseMicStream(micStream);
       micStream = null;
       stopUi();
       await finishRecordingUpload(blob);
     };
     try {
-      // Safari iPad: timeslice can yield empty/fragmented blobs — start without timeslice.
-      if (isIpadLike() || isAppleWebKit()) mediaRecorder.start();
-      else mediaRecorder.start(250);
+      // Timeslice makes iPad emit chunks before stop. Some mp4 recorders reject it.
+      try {
+        mediaRecorder.start(1000);
+      } catch {
+        mediaRecorder.start();
+      }
       recordStartedAt = Date.now();
       starting = false;
     } catch (err) {
@@ -3285,13 +3334,12 @@ function setupMic(button, onText) {
       postChatUpdate(`Impossibile registrare: ${err?.name || err}`, "warn");
       return;
     }
-    // Auto-stop after 10s so a single tap still yields audio on iPad.
     clearRecordTimer();
     recordTimer = setTimeout(() => {
       if (mediaRecorder && mediaRecorder.state === "recording") {
         stopRecordingForUpload();
       }
-    }, 10000);
+    }, 12000);
   };
 
   const bindRec = (instance) => {
@@ -3485,18 +3533,9 @@ function setupMic(button, onText) {
 
   const releaseForTts = () => {
     ensureAudioSessionPlayAndRecord();
-    const live = Boolean(mediaRecorder && mediaRecorder.state === "recording");
-    if (live) {
-      try {
-        mediaRecorder.requestData?.();
-      } catch {
-        /* ignore */
-      }
-      try {
-        mediaRecorder.stop();
-      } catch {
-        /* ignore */
-      }
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+      stopRecordingForUpload();
+      return;
     }
     releaseMicStream(micStream);
     micStream = null;
@@ -3512,7 +3551,7 @@ function setupMic(button, onText) {
       }
       rec = null;
     }
-    if (!live) stopUi();
+    stopUi();
   };
 
   const control = {
@@ -4005,14 +4044,27 @@ async function boot() {
   syncHoloActive(state.module);
   flashHoloLabels(7000);
 
+  const bootNote = (e, fallback) => {
+    const msg = e?.message || fallback;
+    showToast(msg, "warn");
+    const legend = $("moduleLegend");
+    if (legend) legend.textContent = `Load failed: ${msg}`;
+  };
   try {
-    // Always refresh latest data on open
     await refresh();
+  } catch (e) {
+    bootNote(e, "Refresh fallito");
+  }
+  try {
     await initPaidAi();
     startAutoSystems();
     maybeVoiceOnboarding();
     saveLastView(state.module);
-    // Agent Q: aggiornamenti ingresso + comandi on-demand (ricerca/mani/documenti)
+  } catch (e) {
+    bootNote(e, "Avvio plancia incompleto");
+  }
+  // Ingress updates must run even when dashboard refresh was rate-limited.
+  try {
     await wireAgentqUi({
       postChatUpdate,
       showToast,
@@ -4020,7 +4072,8 @@ async function boot() {
       speak,
     });
   } catch (e) {
-    $("moduleLegend").textContent = `Load failed: ${e.message}`;
+    bootNote(e, "Agent Q non collegato");
+    postChatUpdate(`Agent Q ingresso fallito: ${e?.message || e}`, "warn");
   }
 }
 
