@@ -40,9 +40,9 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-26-l3";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-27-x1";
 
-const BUILD_ID = "rail-26-l3";
+const BUILD_ID = "rail-27-x1";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";

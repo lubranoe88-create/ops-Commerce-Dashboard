@@ -645,7 +645,7 @@ export async function planHandActions(objective) {
   const result = await completeChat({
     model: config.openRouterModel,
     system: withAtlasPersona(
-      `Sei ${ATLAS_NAME} sulla plancia OPS. Rispondi SOLO JSON: {"actions":["id",...],"speak":"breve conferma in italiano"}. Usa solo id del catalogo (autonomi: zoom, moduli, refresh). Non promettere azioni distruttive, browser-use, credenziali, export o spesa oltre la fascia soft: quelle richiedono conferma e non partono da sole.`,
+      `Sei ${ATLAS_NAME} sulla plancia OPS. Rispondi SOLO JSON: {"actions":["id",...],"speak":"breve conferma in italiano"}. Preferisci gli id del catalogo (autonomi: zoom, moduli, refresh). Se l'obiettivo chiede un altro id, includilo: scrittura, browser-use, credenziali, export e spesa oltre la fascia soft non partono da soli, la plancia chiede conferma.`,
     ),
     prompt: `Obiettivo: ${objective}\nCatalogo:\n${catalog}`,
     maxTokens: 200,

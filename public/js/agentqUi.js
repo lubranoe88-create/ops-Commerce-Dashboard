@@ -213,9 +213,11 @@ export async function openSandboxDoc(uri, { postChatUpdate } = {}) {
 }
 
 /**
- * Client mirror of atlasAutonomyPolicy AUTO ids (L3).
- * Dangerous classes always ask, even if a payload says mode "auto".
- * Unknown ids ask. Keep this set aligned with backend AUTO_MATRIX.
+ * Client mirror of atlasAutonomyPolicy AUTO ids (L3 + X1).
+ * Dangerous classes always ask, even if a payload says mode "auto",
+ * unless the server gate set reason "promoted" after repeated confirms
+ * of that same action id. Unknown ids ask.
+ * Keep AUTO_HANDS aligned with backend AUTO_MATRIX.
  */
 const AUTO_HANDS = new Set([
   "map", "pipeline", "memory", "chat",
@@ -265,6 +267,10 @@ function approvalReason(id) {
 function stepNeedsApproval(step) {
   const id = step?.id || "";
   if (!id) return true;
+  // X1: only the server gate may skip a confirm, and only after it counted
+  // explicit approvals for this id. A payload that merely says mode "auto"
+  // for credentials or a destructive write still asks.
+  if (step.mode === "auto" && step.reason === "promoted") return false;
   if (approvalReason(id) !== "unknown") return true;
   if (step.mode === "ask" || step.fromAskList) return true;
   if (step.mode === "auto" && isAutoHand(id)) return false;
@@ -324,7 +330,20 @@ export async function runHands(objective, { runHoloAction, postChatUpdate, speak
         postChatUpdate?.(`Atlas ha bisogno di approvazione per «${step.id}» (${reason}). Azione non eseguita.`, "warn");
         continue;
       }
-      postChatUpdate?.(`Mani · ${step.id} · approvata`);
+      let trustNote = "";
+      try {
+        const trust = await api("/api/ai/agentq/autonomy/approve", {
+          method: "POST",
+          body: JSON.stringify({ actionId: step.id }),
+        });
+        if (trust?.justPromoted) {
+          const n = trust.threshold || 3;
+          trustNote = ` · autonoma dopo ${n} approvazioni`;
+        }
+      } catch {
+        postChatUpdate?.(`Atlas: approvazione di «${step.id}» non registrata.`, "warn");
+      }
+      postChatUpdate?.(`Mani · ${step.id} · approvata${trustNote}`);
     } else {
       postChatUpdate?.(`Mani · ${step.id}`);
     }

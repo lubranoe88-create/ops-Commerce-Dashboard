@@ -45,6 +45,7 @@ import {
   appendExpandableMemory,
   getAgentqProblems,
 } from "../services/agentqBridge.js";
+import { recordAskApproval } from "../services/atlasAutonomyPolicy.js";
 
 export const aiRouter = Router();
 
@@ -118,6 +119,25 @@ aiRouter.post("/agentq/hands", requireAiPaid, async (req, res) => {
 
 aiRouter.get("/agentq/hands/catalog", requireAiPaid, (_req, res) => {
   res.json({ ok: true, actions: AGENTQ_HAND_ACTIONS });
+});
+
+/**
+ * X1: one explicit confirm of an ASK action id.
+ * The third confirm of that same id promotes it into the AUTO overlay.
+ */
+aiRouter.post("/agentq/autonomy/approve", requireAiPaid, (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const actionId = body.actionId ?? body.id ?? body.action;
+    if (actionId == null || (typeof actionId === "string" && !actionId.trim())) {
+      return res.status(400).json({ error: "actionId richiesto" });
+    }
+    const result = recordAskApproval(actionId);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "autonomy approve failed" });
+  }
 });
 
 /** Memoria espandibile Agent Q — lista / append nel tempo. */
