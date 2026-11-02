@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-20";
+} from "./mapGlobe.js?v=rail-21";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,16 +33,16 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-20";
+} from "./aiAgentUi.js?v=rail-21";
 import {
   noteAiFunctionReports,
   openFunctionBoardPanel,
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-20";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-20";
+} from "./functionBoardUi.js?v=rail-21";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-21";
 
-const BUILD_ID = "rail-20";
+const BUILD_ID = "rail-21";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1409,10 +1409,20 @@ function isAppleWebKit() {
 
 function isIpadLike() {
   const ua = navigator.userAgent || "";
-  if (/iPad/i.test(ua)) return true;
+  if (/iPad|iPhone|iPod/i.test(ua)) return true;
   // iPadOS desktop UA: Macintosh + touch
-  if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return true;
+  if (/Macintosh/i.test(ua) && Number(navigator.maxTouchPoints || 0) > 1) return true;
   return isAppleWebKit() && /Mobile/i.test(ua);
+}
+
+/** Prefer MediaRecorder+Whisper over SpeechRecognition (avoids false «nessuna voce»). */
+function preferWhisperMic() {
+  return (
+    isIpadLike() ||
+    isAppleWebKit() ||
+    Number(navigator.maxTouchPoints || 0) > 0 ||
+    /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent || "")
+  );
 }
 
 /** iPadOS 26 SpeechSynthesis can hard-break on angle brackets — strip them always. */
@@ -1597,7 +1607,7 @@ function speakViaSpeechSynthesis(line) {
   }
 }
 
-/** Play server audio on the AudioContext primed during MIC pointerdown; HTMLAudio fallback. */
+/** Play server MP3: on iPad prefer HTMLAudio (mpeg decodeAudioData is flaky), else AudioContext. */
 async function speakViaServerAudio(line) {
   ensureAudioSessionPlayAndRecord();
   const ctx = getPrimedAudioContext();
@@ -1613,53 +1623,9 @@ async function speakViaServerAudio(line) {
   } catch {
     /* ignore */
   }
-  let decodeError = null;
-  if (ctx) {
-    try {
-      ensureAudioSessionPlayAndRecord();
-      await ctx.resume?.();
-      const raw = atob(b64);
-      const bytes = new Uint8Array(raw.length);
-      for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
-      const copy = bytes.buffer.slice(0);
-      const audioBuf = await new Promise((resolve, reject) => {
-        let settled = false;
-        const ok = (buf) => {
-          if (settled) return;
-          settled = true;
-          resolve(buf);
-        };
-        const bad = (err) => {
-          if (settled) return;
-          settled = true;
-          reject(err || new Error("decodeAudioData fallita"));
-        };
-        try {
-          const result = ctx.decodeAudioData(copy.slice(0), ok, bad);
-          if (result && typeof result.then === "function") result.then(ok, bad);
-        } catch (err) {
-          bad(err);
-        }
-      });
-      try {
-        state._ttsSource?.stop?.();
-      } catch {
-        /* ignore */
-      }
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuf;
-      source.connect(ctx.destination);
-      state._ttsSource = source;
-      source.start(0);
-      return true;
-    } catch (err) {
-      decodeError = err;
-    }
-  } else {
-    decodeError = new Error("AudioContext assente");
-  }
-  try {
-    primeHtmlAudioElement();
+
+  const playHtml = async () => {
+    primeHtmlAudioElement?.();
     const audio = state._ttsAudio || new Audio();
     try {
       audio.pause?.();
@@ -1672,10 +1638,59 @@ async function speakViaServerAudio(line) {
     state._ttsAudio = audio;
     await audio.play();
     return true;
-  } catch (err) {
-    const decodeMsg = decodeError?.message || String(decodeError || "decode saltato");
-    throw new Error(`decode: ${decodeMsg} · audio: ${err?.message || err}`);
+  };
+
+  const playCtx = async () => {
+    if (!ctx) throw new Error("AudioContext assente");
+    ensureAudioSessionPlayAndRecord();
+    await ctx.resume?.();
+    const raw = atob(b64);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+    const copy = bytes.buffer.slice(0);
+    const audioBuf = await new Promise((resolve, reject) => {
+      let settled = false;
+      const ok = (buf) => {
+        if (settled) return;
+        settled = true;
+        resolve(buf);
+      };
+      const bad = (err) => {
+        if (settled) return;
+        settled = true;
+        reject(err || new Error("decodeAudioData fallita"));
+      };
+      try {
+        const result = ctx.decodeAudioData(copy.slice(0), ok, bad);
+        if (result && typeof result.then === "function") result.then(ok, bad);
+      } catch (err) {
+        bad(err);
+      }
+    });
+    try {
+      state._ttsSource?.stop?.();
+    } catch {
+      /* ignore */
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuf;
+    source.connect(ctx.destination);
+    state._ttsSource = source;
+    source.start(0);
+    return true;
+  };
+
+  // iPad: HTMLAudio first (unlocked by MIC gesture). Desktop: AudioContext first.
+  const order = isIpadLike() ? [playHtml, playCtx] : [playCtx, playHtml];
+  let lastErr = null;
+  for (const step of order) {
+    try {
+      return await step();
+    } catch (err) {
+      lastErr = err;
+    }
   }
+  throw new Error(lastErr?.message || String(lastErr || "TTS playback fallita"));
 }
 
 /**
@@ -2952,7 +2967,7 @@ function micErrorMessage(code) {
     case "network":
       return "Riconoscimento vocale: errore di rete. Controlla la connessione.";
     case "no-speech":
-      return "Nessuna voce rilevata. Ritocca MIC e parla vicino al microfono.";
+      return "Nessuna voce nel riconoscimento web. Ritocca MIC: su iPad usiamo registrazione + Whisper.";
     case "aborted":
       return "";
     case "language-not-supported":
@@ -3098,11 +3113,16 @@ function setupMic(button, onText) {
   let recordMime = "";
   let recordTimer = null;
   let recordStartedAt = 0;
-  let mode = null; // "sr" | "rec"
+  let mode = null; // "sr" | "rec" | "call"
   /** getUserMedia promise started inside pointerdown (Safari requires gesture). */
   let gestureMicPromise = null;
+  /** Continuous call session: stays open until explicit MIC end. */
+  let callLive = false;
+  let callGen = 0;
   const uiButtons = new Set([button]);
-  const MIN_RECORD_MS = 2200;
+  // Safari mp4 needs contiguous capture (no timeslice) before stop yields a decodable file.
+  const MIN_RECORD_MS = 3200;
+  const CALL_SEGMENT_MS = 3800;
 
   const clearStartWatch = () => {
     if (startWatchTimer) {
@@ -3121,9 +3141,16 @@ function setupMic(button, onText) {
   const setLiveUi = (live) => {
     state.micLive = live;
     document.body.classList.toggle("mic-live", live);
+    document.body.classList.toggle("voice-call", Boolean(callLive));
+    document.documentElement.dataset.voiceCall = callLive ? "1" : "0";
     for (const btn of uiButtons) {
       btn.classList.toggle("live", live);
       btn.setAttribute("aria-pressed", live ? "true" : "false");
+      btn.title = callLive
+        ? "Chiamata attiva — ritocca per chiudere"
+        : hasSR
+          ? "Tocca per parlare (it-IT)"
+          : "Tocca per avviare la chiamata vocale";
     }
   };
 
@@ -3136,6 +3163,8 @@ function setupMic(button, onText) {
   };
 
   const hardStop = ({ skipUpload = false } = {}) => {
+    callLive = false;
+    callGen += 1;
     clearStartWatch();
     clearRecordTimer();
     if (mediaRecorder && mediaRecorder.state !== "inactive") {
@@ -3169,6 +3198,27 @@ function setupMic(button, onText) {
     stopUi();
   };
 
+  const endVoiceCall = (msg = "Chiamata chiusa") => {
+    callLive = false;
+    callGen += 1;
+    clearRecordTimer();
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+      try {
+        mediaRecorder.onstop = null;
+        mediaRecorder.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    mediaRecorder = null;
+    recordChunks = [];
+    releaseMicStream(micStream);
+    micStream = null;
+    stopUi();
+    postChatUpdate(msg);
+    showToast(msg, "ok");
+  };
+
   const micDiagHint = () => {
     const parts = [
       window.isSecureContext ? "HTTPS ok" : "contesto non sicuro",
@@ -3179,57 +3229,118 @@ function setupMic(button, onText) {
     return parts.join(" · ");
   };
 
-  const finishRecordingUpload = async (blob) => {
+  const transcribeBlob = async (blob) => {
     const mime = blob?.type || recordMime || "audio/mp4";
     const size = blob?.size || 0;
-    // Only reject an empty capture. Short m4a frames still go to Whisper.
-    if (!blob || size < 16) {
-      postChatUpdate(
-        `Registrazione vuota (${size} byte, ${mime || "mime?"}). Parla circa 2 secondi, poi ritocca MIC.`,
-        "warn",
-      );
-      return;
+    const minBytes = /mp4|aac|m4a/i.test(mime) ? 600 : 64;
+    if (!blob || size < minBytes) {
+      return { ok: false, empty: true, size, mime };
     }
-    postChatUpdate(`Trascrizione in corso… (${Math.round(size / 1024)} KB)`);
-    try {
-      const audioBase64 = await blobToBase64(blob);
-      const isMp4 = /mp4|aac|m4a|caf/i.test(mime);
-      const data = await api("/api/ai/transcribe", {
-        method: "POST",
-        body: JSON.stringify({
-          audioBase64,
-          mimeType: mime || (isMp4 ? "audio/mp4" : "audio/webm"),
-          filename: isMp4 ? "mic.m4a" : "mic.webm",
-          language: "it",
-        }),
-      });
-      const heard = String(data?.text || "").trim();
-      if (!heard) {
-        const why = data?.error || data?.detail || data?.model || "testo vuoto";
-        postChatUpdate(
-          `Trascrizione vuota (${why}, ${size} byte, ${mime}). Non è un silenzio generico.`,
-          "warn",
-        );
-        return;
-      }
-      postChatUpdate(`Voce rilevata: ${heard}`);
-      showToast("Voce rilevata", "ok");
-      onText(heard);
-    } catch (err) {
-      // Never collapse upstream errors into generic "nessuna voce".
-      postChatUpdate(err?.message || "Trascrizione fallita", "warn");
-      showToast(err?.message || "Trascrizione fallita", "warn");
-    }
+    const audioBase64 = await blobToBase64(blob);
+    const isMp4 = /mp4|aac|m4a|caf/i.test(mime);
+    const data = await api("/api/ai/transcribe", {
+      method: "POST",
+      body: JSON.stringify({
+        audioBase64,
+        mimeType: mime || (isMp4 ? "audio/mp4" : "audio/webm"),
+        filename: isMp4 ? "mic.m4a" : "mic.webm",
+        language: "it",
+      }),
+    });
+    const heard = String(data?.text || "").trim();
+    return { ok: Boolean(heard), text: heard, size, mime, model: data?.model };
   };
 
-  const stopRecordingForUpload = () => {
-    if (!(mediaRecorder && mediaRecorder.state === "recording")) return false;
-    const elapsed = Date.now() - (recordStartedAt || 0);
-    if (elapsed < MIN_RECORD_MS) {
-      postChatUpdate(`Ancora in ascolto… parla ancora ${Math.ceil((MIN_RECORD_MS - elapsed) / 1000)}s`, "ok");
-      // Defer stop until minimum duration so Safari has real samples.
-      clearRecordTimer();
-      recordTimer = setTimeout(() => {
+  const scheduleCallSegment = (delayMs = 0) => {
+    clearRecordTimer();
+    if (!callLive || !micStream) return;
+    recordTimer = setTimeout(() => {
+      if (callLive) armCallSegment();
+    }, delayMs);
+  };
+
+  /** One Safari-safe segment: start() without timeslice → stop after CALL_SEGMENT_MS → Whisper. */
+  const armCallSegment = () => {
+    if (!callLive || !micStream) return;
+    if (mediaRecorder && mediaRecorder.state === "recording") return;
+    ensureAudioSessionPlayAndRecord();
+    recordMime = recordMime || pickRecorderMime();
+    try {
+      mediaRecorder = recordMime
+        ? new MediaRecorder(micStream, { mimeType: recordMime })
+        : new MediaRecorder(micStream);
+    } catch (err) {
+      endVoiceCall(`MediaRecorder non avviabile: ${err?.name || err}`);
+      return;
+    }
+    recordChunks = [];
+    const gen = callGen;
+    mediaRecorder.ondataavailable = (ev) => {
+      if (ev.data && ev.data.size) recordChunks.push(ev.data);
+    };
+    mediaRecorder.onerror = () => {
+      if (callLive && gen === callGen) scheduleCallSegment(600);
+    };
+    mediaRecorder.onstop = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      const chunks = recordChunks.splice(0, recordChunks.length);
+      const blob = new Blob(chunks, {
+        type: recordMime || chunks[0]?.type || "audio/mp4",
+      });
+      mediaRecorder = null;
+      if (!callLive || gen !== callGen) return;
+      try {
+        const result = await transcribeBlob(blob);
+        if (!callLive || gen !== callGen) return;
+        if (result.empty) {
+          scheduleCallSegment(200);
+          return;
+        }
+        if (!result.ok) {
+          // Silence / no speech: keep the call open, listen again.
+          scheduleCallSegment(250);
+          return;
+        }
+        postChatUpdate(`Voce rilevata: ${result.text}`);
+        showToast("Voce rilevata", "ok");
+        // Pause capture while the assistant replies (iPad ducks mic during TTS).
+        try {
+          await Promise.resolve(onText(result.text));
+        } catch (err) {
+          postChatUpdate(err?.message || "Risposta vocale fallita", "warn");
+        }
+        // Brief gap so TTS can play on the primed session, then listen again.
+        if (callLive && gen === callGen) scheduleCallSegment(2800);
+      } catch (err) {
+        if (!callLive || gen !== callGen) return;
+        postChatUpdate(err?.message || "Trascrizione fallita", "warn");
+        scheduleCallSegment(1200);
+      }
+    };
+    try {
+      // Never timeslice on Apple — mp4 fragments arrive empty/corrupt.
+      if (isIpadLike() || isAppleWebKit()) mediaRecorder.start();
+      else {
+        try {
+          mediaRecorder.start(250);
+        } catch {
+          mediaRecorder.start();
+        }
+      }
+      recordStartedAt = Date.now();
+      starting = false;
+      mode = "call";
+      setLiveUi(true);
+    } catch (err) {
+      endVoiceCall(`Impossibile registrare: ${err?.name || err}`);
+      return;
+    }
+    clearRecordTimer();
+    recordTimer = setTimeout(() => {
+      if (!(callLive && mediaRecorder && mediaRecorder.state === "recording")) return;
+      const elapsed = Date.now() - (recordStartedAt || 0);
+      const waitMore = Math.max(0, MIN_RECORD_MS - elapsed);
+      const stopNow = () => {
         try {
           mediaRecorder.requestData?.();
         } catch {
@@ -3238,38 +3349,20 @@ function setupMic(button, onText) {
         try {
           mediaRecorder.stop();
         } catch {
-          hardStop({ skipUpload: true });
+          scheduleCallSegment(500);
         }
-      }, MIN_RECORD_MS - elapsed);
-      return true;
-    }
-    try {
-      mediaRecorder.requestData?.();
-    } catch {
-      /* ignore */
-    }
-    try {
-      mediaRecorder.stop();
-    } catch {
-      hardStop({ skipUpload: true });
-    }
-    return true;
+      };
+      if (waitMore > 0) {
+        recordTimer = setTimeout(stopNow, waitMore);
+      } else {
+        stopNow();
+      }
+    }, CALL_SEGMENT_MS);
   };
 
-  const startMediaRecorderFallback = async () => {
-    // Unlock must already have run synchronously in pointerdown — do not re-unlock after awaits.
+  const startVoiceCall = async () => {
     markUserInput?.();
     ensureAudioSessionPlayAndRecord();
-    if (state.micLive || starting) {
-      // Second tap while recording: flush + stop and upload.
-      if (mode === "rec" && mediaRecorder && mediaRecorder.state === "recording") {
-        stopRecordingForUpload();
-        return;
-      }
-      hardStop({ skipUpload: true });
-      postChatUpdate("Ascolto interrotto");
-      return;
-    }
     if (!window.isSecureContext) {
       gestureMicPromise = null;
       postChatUpdate(micErrorMessage("secure-context"), "warn");
@@ -3291,12 +3384,8 @@ function setupMic(button, onText) {
     }
 
     starting = true;
-    mode = "rec";
-    setLiveUi(true);
-    postChatUpdate("Registrazione iPad — parla 2–8 secondi, poi ritocca MIC per inviare…");
-
-    document.documentElement.dataset.micEngine = "media-recorder";
-    // getUserMedia only from the MIC gesture. Never open a second capture here.
+    mode = "call";
+    document.documentElement.dataset.micEngine = "media-recorder-call";
     const capture = gestureMicPromise;
     gestureMicPromise = null;
     if (!capture) {
@@ -3312,56 +3401,35 @@ function setupMic(button, onText) {
     }
     micStream = perm.stream;
     recordMime = pickRecorderMime();
-    try {
-      mediaRecorder = recordMime
-        ? new MediaRecorder(micStream, { mimeType: recordMime })
-        : new MediaRecorder(micStream);
-    } catch (err) {
-      hardStop({ skipUpload: true });
-      postChatUpdate(`MediaRecorder non avviabile: ${err?.name || err}`, "warn");
+    callLive = true;
+    callGen += 1;
+    starting = false;
+    setLiveUi(true);
+    postChatUpdate(
+      "Chiamata aperta — parla liberamente. Rimango in ascolto e rispondo. Ritocca MIC per chiudere.",
+    );
+    showToast("Chiamata attiva", "ok");
+    armCallSegment();
+  };
+
+  /** Legacy one-shot path kept for non-call desktop SpeechRecognition fallback only. */
+  const startMediaRecorderFallback = async () => {
+    // Continuous call is the default for touch / Safari / iPad.
+    if (preferWhisperMic()) {
+      if (callLive || state.micLive || starting || mode === "call") {
+        endVoiceCall("Chiamata chiusa");
+        return;
+      }
+      await startVoiceCall();
       return;
     }
-    recordChunks = [];
-    mediaRecorder.ondataavailable = (ev) => {
-      if (ev.data && ev.data.size) recordChunks.push(ev.data);
-    };
-    mediaRecorder.onerror = () => {
-      hardStop({ skipUpload: true });
-      postChatUpdate("Errore registrazione microfono", "warn");
-    };
-    mediaRecorder.onstop = async () => {
-      // Last Safari chunk can arrive just after stop. Keep the array until then.
-      await new Promise((resolve) => setTimeout(resolve, 160));
-      const chunks = recordChunks.splice(0, recordChunks.length);
-      const blob = new Blob(chunks, {
-        type: recordMime || chunks[0]?.type || "audio/mp4",
-      });
-      mediaRecorder = null;
-      releaseMicStream(micStream);
-      micStream = null;
-      stopUi();
-      await finishRecordingUpload(blob);
-    };
-    try {
-      // Timeslice makes iPad emit chunks before stop. Some mp4 recorders reject it.
-      try {
-        mediaRecorder.start(1000);
-      } catch {
-        mediaRecorder.start();
-      }
-      recordStartedAt = Date.now();
-      starting = false;
-    } catch (err) {
-      hardStop({ skipUpload: true });
-      postChatUpdate(`Impossibile registrare: ${err?.name || err}`, "warn");
+    markUserInput?.();
+    ensureAudioSessionPlayAndRecord();
+    if (state.micLive || starting) {
+      endVoiceCall("Ascolto interrotto");
       return;
     }
-    clearRecordTimer();
-    recordTimer = setTimeout(() => {
-      if (mediaRecorder && mediaRecorder.state === "recording") {
-        stopRecordingForUpload();
-      }
-    }, 12000);
+    await startVoiceCall();
   };
 
   const bindRec = (instance) => {
@@ -3435,8 +3503,20 @@ function setupMic(button, onText) {
   const startRecognition = () => {
     // TTS unlock is done in onPointerDown (sync). Keep session primed here only if already unlocked.
     if (voiceUnlocked) ensureAudioSessionPlayAndRecord();
-    silenceVoice();
     markUserInput?.();
+
+    // Explicit end: second MIC tap closes the continuous call.
+    if (callLive || mode === "call" || (state.micLive && preferWhisperMic())) {
+      if (gestureMicPromise) {
+        const leftover = gestureMicPromise;
+        gestureMicPromise = null;
+        leftover.then((perm) => {
+          if (perm?.stream) releaseMicStream(perm.stream);
+        }).catch(() => {});
+      }
+      endVoiceCall("Chiamata chiusa");
+      return;
+    }
 
     if (state.micLive || starting) {
       if (gestureMicPromise) {
@@ -3446,15 +3526,16 @@ function setupMic(button, onText) {
           if (perm?.stream) releaseMicStream(perm.stream);
         }).catch(() => {});
       }
-      if (mode === "rec" && stopRecordingForUpload()) return;
       hardStop({ skipUpload: true });
       postChatUpdate("Ascolto interrotto");
       return;
     }
 
-    // iPad / Apple WebKit / PWA: never use Web SpeechRecognition — MediaRecorder + Whisper only.
-    if (isIpadLike() || isAppleWebKit() || !hasSR) {
-      document.documentElement.dataset.micEngine = "media-recorder";
+    silenceVoice();
+
+    // Touch / Apple / no-SR: continuous MediaRecorder call + Whisper (no SpeechRecognition).
+    if (preferWhisperMic() || !hasSR) {
+      document.documentElement.dataset.micEngine = "media-recorder-call";
       startMediaRecorderFallback();
       return;
     }
@@ -3520,6 +3601,8 @@ function setupMic(button, onText) {
     unlockVoiceOutput();
     ensureAudioSessionPlayAndRecord();
     getPrimedAudioContext();
+    // While a call is already live we keep the existing stream — do not re-getUserMedia.
+    if (callLive && micStream) return;
     const recording =
       state.micLive || starting || (mediaRecorder && mediaRecorder.state === "recording");
     if (!gestureMicPromise && !recording) {
@@ -3555,9 +3638,31 @@ function setupMic(button, onText) {
 
   const releaseForTts = () => {
     ensureAudioSessionPlayAndRecord();
-    if (mediaRecorder && mediaRecorder.state === "recording") {
-      stopRecordingForUpload();
+    // Call mode: pause the current segment only; keep the stream for the next listen turn.
+    if (callLive) {
+      clearRecordTimer();
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        try {
+          mediaRecorder.requestData?.();
+        } catch {
+          /* ignore */
+        }
+        try {
+          mediaRecorder.stop();
+        } catch {
+          /* ignore */
+        }
+      }
       return;
+    }
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+      try {
+        mediaRecorder.onstop = null;
+        mediaRecorder.stop();
+      } catch {
+        /* ignore */
+      }
+      mediaRecorder = null;
     }
     releaseMicStream(micStream);
     micStream = null;
@@ -3578,7 +3683,8 @@ function setupMic(button, onText) {
 
   const control = {
     toggle,
-    stop: () => hardStop({ skipUpload: true }),
+    stop: () => (callLive ? endVoiceCall("Chiamata chiusa") : hardStop({ skipUpload: true })),
+    endCall: () => endVoiceCall("Chiamata chiusa"),
     releaseForTts,
     attachButton(btn) {
       if (!btn || uiButtons.has(btn)) return;
@@ -3842,18 +3948,22 @@ function wireUi() {
   wireGestureShortcuts();
   wireModuleZoom();
   globalMicControl = setupMic($("globalMic"), (text) => {
-    if (handleVoiceCommand(text)) return;
+    if (handleVoiceCommand(text)) {
+      // Allow short TTS for local commands before the next listen segment.
+      return new Promise((r) => setTimeout(r, 1600));
+    }
     // Agent Q on-demand (cerca / mani) prima della chat vocale
-    const maybeAgentq = window.__opsAgentqHandle?.(text);
-    Promise.resolve(maybeAgentq).then((handled) => {
-      if (handled) return;
+    return Promise.resolve(window.__opsAgentqHandle?.(text)).then((handled) => {
+      if (handled) return new Promise((r) => setTimeout(r, 2200));
       // Do NOT auto-switch to chat module: that reloaded the whole thread (concordato +
       // first old user line like «Riassumi i top di oggi») over the plancia. Persist in
       // the background; show a toast; user opens CHAT deliberately when they want history.
-      sendChat(text, { voice: true }).then(() => {
+      return sendChat(text, { voice: true }).then(() => {
         if (state.module !== "chat") {
-          showToast(`Ascoltato · risposta in corso (apri CHAT per lo storico)`, "ok");
+          showToast(`In chiamata · risposta in corso`, "ok");
         }
+        // Hold the listen loop so server TTS can play on the primed AudioContext.
+        return new Promise((r) => setTimeout(r, 3200));
       });
     });
   });
