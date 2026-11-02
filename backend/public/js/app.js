@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-10";
+} from "./mapGlobe.js?v=rail-11";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,14 +33,14 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-10";
+} from "./aiAgentUi.js?v=rail-11";
 import {
   noteAiFunctionReports,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-10";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-10";
+} from "./functionBoardUi.js?v=rail-11";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-11";
 
-const BUILD_ID = "rail-10";
+const BUILD_ID = "rail-11";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
