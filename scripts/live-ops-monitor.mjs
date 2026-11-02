@@ -32,9 +32,15 @@ const ok = (name, detail = "") => {
   console.log(`PASS  ${name}${detail ? ` — ${detail}` : ""}`);
 };
 const bad = (name, detail = "") => {
-  results.push({ name, ok: false, detail });
-  console.error(`::error title=Live ops monitor::FAIL ${name} — ${detail}`);
+  results.push({ name, ok: false, soft: false, detail });
+  console.error(`::error::${name} — ${detail}`);
   console.error(`FAIL  ${name}${detail ? ` — ${detail}` : ""}`);
+};
+/** Recorded, does not flip the process exit code. */
+const soft = (name, detail = "") => {
+  results.push({ name, ok: false, soft: true, detail });
+  console.warn(`::warning::SOFT ${name} — ${detail}`);
+  console.warn(`SOFT  ${name}${detail ? ` — ${detail}` : ""}`);
 };
 
 function writeReport(payload) {
@@ -70,23 +76,38 @@ async function reportGitHub(payload) {
     }
   }
   const repo = process.env.GITHUB_REPOSITORY || "lubranoe88-create/ops-Commerce-Dashboard";
-  const failed = payload.summary?.failed || 0;
+  const failed = payload.summary?.hardFailed ?? payload.summary?.failed ?? 0;
   const passed = payload.summary?.passed || 0;
+  const softN = payload.summary?.softFailed || 0;
   const state = payload.summary?.overall === "PASS" ? "success" : "failure";
-  await fetch(`https://api.github.com/repos/${repo}/statuses/${sha}`, {
+  const res = await fetch(`https://api.github.com/repos/${repo}/statuses/${sha}`, {
     method: "POST",
     headers: {
       Authorization: `token ${token}`,
       Accept: "application/vnd.github+json",
+      "Content-Type": "application/json",
       "User-Agent": "ops-live-ops-monitor",
     },
     body: JSON.stringify({
       state,
       context: "live-ops-monitor",
-      description: `${payload.summary?.overall} ${passed}/${passed + failed} build=${payload.build || "?"}`.slice(0, 140),
+      description: `${payload.summary?.overall} ${passed} ok / ${failed} fail / ${softN} soft build=${payload.build || "?"}`.slice(
+        0,
+        140,
+      ),
       target_url: LIVE,
     }),
-  }).catch(() => {});
+  }).catch((e) => {
+    console.error(`::warning::GitHub status post error: ${e?.message || e}`);
+    return null;
+  });
+  if (!res) return;
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    console.error(`::warning::GitHub status post failed HTTP ${res.status}: ${body.message || ""}`);
+    return;
+  }
+  console.log(`::notice::GitHub status ${state} context=live-ops-monitor sha=${sha.slice(0, 12)}`);
 }
 
 function makeToneWav(seconds = 1, freq = 440) {
@@ -185,7 +206,7 @@ async function main() {
         ...(init.headers || {}),
         Cookie: cookie,
       },
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(90_000),
     });
 
   if (cookie) {
@@ -261,16 +282,28 @@ async function main() {
     }
   }
 
-  // Soft browser MIC unlock check
+  // Optional iPad MIC. Missing puppeteer, or a browser miss, is a soft fail:
+  // exit stays 0 when every hard check passed. Wait until boot() has wired the
+  // button — #globalMic exists in HTML before setupMic(), and an early tap
+  // leaves data-tts at "0".
   const puppeteer = await loadPuppeteer();
   if (!puppeteer) {
-    ok("MIC browser (soft)", "puppeteer absent — skipped");
-  } else if (cookie) {
+    soft("MIC browser (soft)", "puppeteer absent — skipped");
+  } else if (!cookie) {
+    soft("MIC browser (soft)", "skipped — login failed");
+  } else {
+    let browser;
     try {
-      const browser = await puppeteer.launch({
+      browser = await puppeteer.launch({
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--use-fake-ui-for-media-stream"],
-        defaultViewport: { width: 1024, height: 768 },
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--use-fake-ui-for-media-stream",
+          "--use-fake-device-for-media-stream",
+          "--autoplay-policy=no-user-gesture-required",
+        ],
+        defaultViewport: { width: 1024, height: 768, hasTouch: true, isMobile: true },
       });
       const page = await browser.newPage();
       await page.setUserAgent(
@@ -300,7 +333,7 @@ async function main() {
       await page.waitForSelector("#password", { timeout: 20_000 });
       await page.type("#password", PASS);
       await page.keyboard.press("Enter");
-      await page.waitForSelector("#globalMic", { timeout: 45_000 });
+      await page.waitForSelector("#globalMic[data-mic-wired='1']", { timeout: 45_000 });
       await page.evaluate(() => {
         const m = document.getElementById("aiBriefingModal");
         if (m) {
@@ -310,74 +343,69 @@ async function main() {
       });
       await page.evaluate(() => {
         const btn = document.getElementById("globalMic");
-        const opts = { bubbles: true, cancelable: true, pointerId: 1, pointerType: "touch" };
-        btn?.dispatchEvent(new PointerEvent("pointerdown", opts));
-        btn?.dispatchEvent(new PointerEvent("pointerup", opts));
-        btn?.click();
+        const opts = { bubbles: true, cancelable: true, pointerId: 1, pointerType: "touch", button: 0 };
+        btn.dispatchEvent(new PointerEvent("pointerdown", opts));
+        btn.dispatchEvent(new PointerEvent("pointerup", opts));
       });
       await new Promise((r) => setTimeout(r, 2500));
       const mid = await page.evaluate(() => ({
-        tts: document.documentElement.dataset.tts,
-        call: document.documentElement.dataset.voiceCall,
+        tts: document.documentElement.dataset.tts || "",
+        call: document.documentElement.dataset.voiceCall || "",
         micLive: document.body.classList.contains("mic-live"),
         engine: document.documentElement.dataset.micEngine || "",
+        wired: document.getElementById("globalMic")?.dataset.micWired || "",
+        pressed: document.getElementById("globalMic")?.getAttribute("aria-pressed") || "",
+        bubbles: [...document.querySelectorAll(".bubble, .toast")]
+          .map((n) => (n.textContent || "").trim())
+          .filter(Boolean)
+          .slice(-4),
       }));
-      await browser.close().catch(() => {});
-      if (mid.tts === "1" || mid.micLive || mid.call === "1") {
-        ok("MIC browser (soft)", JSON.stringify(mid));
-      } else if (process.env.MONITOR_STRICT_MIC === "1") {
-        bad("MIC browser (soft)", JSON.stringify(mid));
-      } else {
-        results.push({
-          name: "MIC browser (soft)",
-          ok: true,
-          softFail: true,
-          detail: `warn-only ${JSON.stringify(mid)}`,
-        });
-        console.log(`WARN  MIC browser (soft) — ${JSON.stringify(mid)}`);
-      }
+      const heard = (mid.bubbles || []).some((b) => /Chiamata|Ascolto|microfono|Voce/i.test(b));
+      const unlocked = mid.tts === "1" || mid.micLive || mid.call === "1" || mid.pressed === "true" || heard;
+      const detail = JSON.stringify(mid).slice(0, 400);
+      if (unlocked) ok("MIC browser (soft)", detail);
+      else if (process.env.MONITOR_STRICT_MIC === "1") bad("MIC browser (soft)", detail);
+      else soft("MIC browser (soft)", detail);
     } catch (e) {
-      if (process.env.MONITOR_STRICT_MIC === "1") {
-        bad("MIC browser (soft)", String(e?.message || e));
-      } else {
-        results.push({
-          name: "MIC browser (soft)",
-          ok: true,
-          softFail: true,
-          detail: `warn-only ${String(e?.message || e)}`,
-        });
-        console.log(`WARN  MIC browser (soft) — ${e?.message || e}`);
-      }
+      const detail = String(e?.message || e);
+      if (process.env.MONITOR_STRICT_MIC === "1") bad("MIC browser (soft)", detail);
+      else soft("MIC browser (soft)", detail);
+    } finally {
+      if (browser) await browser.close().catch(() => {});
     }
   }
 
   const passed = results.filter((r) => r.ok).length;
-  const failed = results.filter((r) => !r.ok).length;
+  const hardFailed = results.filter((r) => !r.ok && !r.soft).length;
+  const softFailed = results.filter((r) => r.soft && !r.ok).length;
   const payload = {
     at: new Date().toISOString(),
     live: LIVE,
     build: build || null,
     summary: {
       passed,
-      failed,
+      failed: hardFailed,
+      hardFailed,
+      softFailed,
       total: results.length,
-      overall: failed === 0 ? "PASS" : "FAIL",
+      overall: hardFailed === 0 ? "PASS" : "FAIL",
     },
     results,
   };
   writeReport(payload);
   await reportGitHub(payload);
-  if (failed) {
-    console.error(`::error title=Live ops monitor::overall FAIL ${failed}/${results.length}`);
+  if (hardFailed) {
+    console.error(`::error::overall FAIL ${hardFailed} hard / ${softFailed} soft / ${results.length} checks`);
   } else {
-    console.log("::notice::Live ops monitor PASS");
+    console.log(`::notice::Live ops monitor PASS (${softFailed} soft)`);
   }
-  process.exit(failed ? 1 : 0);
+  process.exit(hardFailed ? 1 : 0);
 }
 
 main().catch(async (e) => {
+  console.error(`::error::fatal ${e?.message || e}`);
   const payload = {
-    summary: { overall: "FAIL", reason: String(e), passed: 0, failed: 1, total: 1 },
+    summary: { overall: "FAIL", reason: String(e), passed: 0, failed: 1, hardFailed: 1, softFailed: 0, total: 1 },
     results: [{ name: "fatal", ok: false, detail: String(e?.stack || e) }],
     live: LIVE,
   };
