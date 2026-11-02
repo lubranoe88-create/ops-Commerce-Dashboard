@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-13";
+} from "./mapGlobe.js?v=rail-14";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,14 +33,14 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-13";
+} from "./aiAgentUi.js?v=rail-14";
 import {
   noteAiFunctionReports,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-13";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-13";
+} from "./functionBoardUi.js?v=rail-14";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-14";
 
-const BUILD_ID = "rail-13";
+const BUILD_ID = "rail-14";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2664,17 +2664,30 @@ async function loadChat() {
     };
     list.appendChild(b);
   });
+  // Resume last thread for the session only; do not surprise-jump to an ancient first message.
   if (!state.threadId && threads?.[0]) state.threadId = threads[0].id;
   const msgs = $("messageList");
   msgs.innerHTML = "";
-  // Sempre in cima: riepilogo concordato visibile a ogni ingresso/sessione chat.
+  // Concordato: compact note once — not a sticky wall that makes old history look "stuck" on screen.
   renderPinnedBriefing(msgs);
   if (!state.threadId) {
     msgs.scrollTop = 0;
     return;
   }
   const { messages } = await api(`/api/chat/threads/${state.threadId}`);
-  (messages || []).forEach((m) => {
+  const list = Array.isArray(messages) ? messages : [];
+  // Tablet UX: show only the recent tail so an old first prompt (e.g. «Riassumi i top…»)
+  // does not dominate the viewport when re-entering chat from the plancia.
+  const RECENT_TAIL = 12;
+  const start = Math.max(0, list.length - RECENT_TAIL);
+  if (start > 0) {
+    const more = document.createElement("div");
+    more.className = "bubble system";
+    more.dataset.historyTrim = "1";
+    more.textContent = `… ${start} messaggi precedenti nascosti · apri Export o New per gestione completa`;
+    msgs.appendChild(more);
+  }
+  list.slice(start).forEach((m) => {
     const d = document.createElement("div");
     d.className = `bubble ${m.role}`;
     const attach = m.attachment_name
@@ -2684,7 +2697,10 @@ async function loadChat() {
     if (m.speech_input) d.dataset.speech = "1";
     msgs.appendChild(d);
   });
-  msgs.scrollTop = 0;
+  // Always land on the latest messages — scrollTop=0 was resurfacing the oldest user line.
+  requestAnimationFrame(() => {
+    msgs.scrollTop = msgs.scrollHeight;
+  });
 }
 
 async function sendChat(text, { voice = false } = {}) {
@@ -3559,7 +3575,14 @@ function wireUi() {
     const maybeAgentq = window.__opsAgentqHandle?.(text);
     Promise.resolve(maybeAgentq).then((handled) => {
       if (handled) return;
-      runHoloAction("chat", { fromVoice: true }).then(() => sendChat(text, { voice: true }));
+      // Do NOT auto-switch to chat module: that reloaded the whole thread (concordato +
+      // first old user line like «Riassumi i top di oggi») over the plancia. Persist in
+      // the background; show a toast; user opens CHAT deliberately when they want history.
+      sendChat(text, { voice: true }).then(() => {
+        if (state.module !== "chat") {
+          showToast(`Ascoltato · risposta in corso (apri CHAT per lo storico)`, "ok");
+        }
+      });
     });
   });
   // Same controller for chat MIC — avoids a second SpeechRecognition fighting the first

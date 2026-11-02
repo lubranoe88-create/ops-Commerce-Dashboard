@@ -1435,9 +1435,13 @@ body[data-module="chat"] .analizza-bar { z-index: 50; }
   font-family: var(--mono);
   font-size: 11px;
   line-height: 1.45;
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  /* Not sticky: sticky pin kept the concordato + first old user line glued to the
+     viewport whenever chat re-opened from the plancia (looked like a stuck message). */
+  position: relative;
+  top: auto;
+  z-index: 1;
+  max-height: 9.5em;
+  overflow: auto;
 }
 #glCanvas.cesium-ops,
 #glCanvas .cesium-viewer,
