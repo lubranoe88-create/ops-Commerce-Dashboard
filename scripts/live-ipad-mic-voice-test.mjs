@@ -76,6 +76,56 @@ function writeReport(payload) {
   console.log(json);
 }
 
+/** Push a commit status so the caller sees PASS/FAIL on the GitHub commit automatically. */
+async function reportToGitHub(payload) {
+  const token =
+    process.env.GITHUB_TOKEN ||
+    process.env.GH_TOKEN ||
+    (fs.existsSync("/tmp/.gh_token") ? fs.readFileSync("/tmp/.gh_token", "utf8").trim() : "");
+  if (!token) return { skipped: true, reason: "no token" };
+  const repo =
+    process.env.GITHUB_REPOSITORY || "lubranoe88-create/ops-Commerce-Dashboard";
+  let sha = process.env.GITHUB_SHA || process.env.LIVE_STATUS_SHA || "";
+  if (!sha) {
+    try {
+      const { execSync } = await import("node:child_process");
+      sha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+    } catch {
+      return { skipped: true, reason: "no sha" };
+    }
+  }
+  const failed = payload?.summary?.failed || 0;
+  const passed = payload?.summary?.passed || 0;
+  const overall = payload?.summary?.overall || (failed ? "FAIL" : "PASS");
+  const state = overall === "PASS" ? "success" : "failure";
+  const description = `${overall} ${passed}/${passed + failed} ${payload?.observedBuild || ""} MIC→Whisper→TTS`.slice(
+    0,
+    140,
+  );
+  const res = await fetch(`https://api.github.com/repos/${repo}/statuses/${sha}`, {
+    method: "POST",
+    headers: {
+      Authorization: `token ${token}`,
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json",
+      "User-Agent": "ops-live-ipad-mic-test",
+    },
+    body: JSON.stringify({
+      state,
+      context: "live-ipad-mic/safari-whisper-tts",
+      description,
+      target_url: payload?.live || LIVE,
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.error(`::warning::GitHub status post failed HTTP ${res.status}: ${body.message || ""}`);
+    return { ok: false, status: res.status, message: body.message };
+  }
+  console.log(`::notice::GitHub status ${state} posted for ${sha.slice(0, 12)}`);
+  return { ok: true, state, sha, id: body.id };
+}
+
 async function waitForBuild() {
   const deadline = Date.now() + WAIT_DEPLOY_MS;
   let last = "";
@@ -369,6 +419,9 @@ async function main() {
     consTail: cons.filter((c) => /error|429|mic|tts|whisper/i.test(c)).slice(0, 20),
   };
   writeReport(payload);
+  await reportToGitHub(payload).catch((e) =>
+    console.error(`::warning::GitHub status error: ${e?.message || e}`),
+  );
   if (failed) {
     console.error(`::error title=Live iPad MIC::overall FAIL ${failed}/${results.length} checks`);
   } else {
@@ -377,11 +430,14 @@ async function main() {
   process.exit(failed ? 1 : 0);
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
   console.error(`::error title=Live iPad MIC::fatal ${e}`);
-  writeReport({
-    summary: { overall: "FAIL", reason: String(e) },
+  const payload = {
+    summary: { overall: "FAIL", reason: String(e), passed: 0, failed: 1, total: 1 },
     results: [{ name: "fatal", ok: false, detail: String(e?.stack || e) }],
-  });
+    live: LIVE,
+  };
+  writeReport(payload);
+  await reportToGitHub(payload).catch(() => {});
   process.exit(1);
 });
