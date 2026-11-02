@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-21";
+} from "./mapGlobe.js?v=rail-22";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,16 +33,16 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-21";
+} from "./aiAgentUi.js?v=rail-22";
 import {
   noteAiFunctionReports,
   openFunctionBoardPanel,
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-21";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-21";
+} from "./functionBoardUi.js?v=rail-22";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-22";
 
-const BUILD_ID = "rail-21";
+const BUILD_ID = "rail-22";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -3746,7 +3746,11 @@ async function initPaidAi() {
       await loadAiNewsPins();
       await syncClientMemoryToServer().catch(() => {});
       startProactivePolling(45000);
-      if (shouldPromptBriefing(state.aiStatus)) openBriefingModal();
+      // Defer briefing so MIC gesture + rail are usable immediately after login.
+      // Modal backdrop uses pointer-events:none; Escape / Dopo / backdrop skip the day.
+      if (shouldPromptBriefing(state.aiStatus)) {
+        setTimeout(() => openBriefingModal(), 1800);
+      }
     }
   } catch (err) {
     console.warn("[ai] status", err?.message || err);

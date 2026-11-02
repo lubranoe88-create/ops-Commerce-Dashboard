@@ -222,7 +222,12 @@ export function openBriefingModal() {
   if (q2) q2.value = goals.q2 || "";
   if (q3) q3.value = goals.q3 || "";
   modal.hidden = false;
-  q1?.focus();
+  // Don't steal focus from MIC / rail — user can fill later or dismiss.
+  try {
+    q1?.blur?.();
+  } catch {
+    /* ignore */
+  }
 }
 
 export function closeBriefingModal() {
@@ -230,9 +235,15 @@ export function closeBriefingModal() {
   if (modal) modal.hidden = true;
 }
 
+function skipBriefingForToday() {
+  writeJson(SKIP_KEY, { dayKey: todayKey() });
+  closeBriefingModal();
+}
+
 export function wireBriefingForm() {
   const form = document.getElementById("aiBriefingForm");
   const skip = document.getElementById("aiBriefingSkip");
+  const modal = document.getElementById("aiBriefingModal");
   if (form && !form.dataset.wired) {
     form.dataset.wired = "1";
     form.addEventListener("submit", async (e) => {
@@ -266,9 +277,19 @@ export function wireBriefingForm() {
   }
   if (skip && !skip.dataset.wired) {
     skip.dataset.wired = "1";
-    skip.addEventListener("click", () => {
-      writeJson(SKIP_KEY, { dayKey: todayKey() });
-      closeBriefingModal();
+    skip.addEventListener("click", () => skipBriefingForToday());
+  }
+  if (modal && !modal.dataset.dismissWired) {
+    modal.dataset.dismissWired = "1";
+    // Backdrop click (panel stops propagation).
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) skipBriefingForToday();
+    });
+    form?.addEventListener("click", (e) => e.stopPropagation());
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if (modal.hidden) return;
+      skipBriefingForToday();
     });
   }
 }

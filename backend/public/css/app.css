@@ -770,8 +770,10 @@ body[data-ai-busy="1"] .analizza-send { opacity: 0.72; }
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(2, 6, 10, 0.55);
-  backdrop-filter: blur(2px);
+  background: rgba(2, 6, 10, 0.45);
+  backdrop-filter: blur(1px);
+  /* Let left rail + MIC receive clicks through the dimmed backdrop. */
+  pointer-events: none;
 }
 .ai-briefing[hidden] { display: none !important; }
 .ai-briefing-panel {
@@ -784,6 +786,7 @@ body[data-ai-busy="1"] .analizza-send { opacity: 0.72; }
   border: 1px solid rgba(180, 200, 220, 0.18);
   color: rgba(230, 236, 244, 0.92);
   font-family: var(--font);
+  pointer-events: auto;
 }
 .ai-briefing-title {
   margin: 0;
