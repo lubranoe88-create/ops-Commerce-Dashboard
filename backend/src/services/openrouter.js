@@ -173,44 +173,74 @@ export async function synthesizeSpeech({
     throw err;
   }
 
-  const response = await fetch(OPENROUTER_SPEECH_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": config.openRouterHttpReferer,
-      "X-Title": config.openRouterAppTitle,
+  const attempts = [
+    { model, voice, response_format: responseFormat || "mp3" },
+    // Fallbacks if the configured model is unavailable on the account.
+    {
+      model: "deepgram/aura-2",
+      voice: "aura-2-cinzia-it",
+      response_format: "mp3",
     },
-    body: JSON.stringify({
-      model,
-      input,
-      voice,
-      response_format: responseFormat || "mp3",
-    }),
-  });
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    const detail =
-      payload?.error?.message ||
-      payload?.message ||
-      `OpenRouter TTS HTTP ${response.status}`;
-    const err = new Error(detail);
-    err.status = response.status >= 400 && response.status < 600 ? response.status : 502;
-    err.upstream = true;
-    throw err;
+    {
+      model: "microsoft/mai-voice-2.1-flash",
+      voice: "it-IT-Rosa:MAI-Voice-2.1-Flash",
+      response_format: "mp3",
+    },
+  ];
+  // Deduplicate identical attempts
+  const seen = new Set();
+  const queue = [];
+  for (const a of attempts) {
+    const k = `${a.model}|${a.voice}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    queue.push(a);
   }
 
-  const buf = Buffer.from(await response.arrayBuffer());
-  if (!buf.length) {
-    const err = new Error("TTS audio vuoto");
-    err.status = 502;
-    throw err;
+  let lastErr = null;
+  for (const attempt of queue) {
+    const response = await fetch(OPENROUTER_SPEECH_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": config.openRouterHttpReferer,
+        "X-Title": config.openRouterAppTitle,
+      },
+      body: JSON.stringify({
+        model: attempt.model,
+        input,
+        voice: attempt.voice,
+        response_format: attempt.response_format,
+      }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      const detail =
+        payload?.error?.message ||
+        payload?.message ||
+        `OpenRouter TTS HTTP ${response.status}`;
+      lastErr = new Error(detail);
+      lastErr.status =
+        response.status >= 400 && response.status < 600 ? response.status : 502;
+      lastErr.upstream = true;
+      continue;
+    }
+
+    const buf = Buffer.from(await response.arrayBuffer());
+    if (!buf.length) {
+      lastErr = new Error("TTS audio vuoto");
+      lastErr.status = 502;
+      continue;
+    }
+    return {
+      buffer: buf,
+      mime: attempt.response_format === "pcm" ? "audio/pcm" : "audio/mpeg",
+      model: attempt.model,
+      voice: attempt.voice,
+    };
   }
-  return {
-    buffer: buf,
-    mime: responseFormat === "pcm" ? "audio/pcm" : "audio/mpeg",
-    model,
-    voice,
-  };
+
+  throw lastErr || new Error("TTS fallita");
 }

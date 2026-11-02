@@ -52,8 +52,9 @@ export const config = {
   rateLimitMax: intEnv("RATE_LIMIT_MAX", 300),
   /** OpenRouter TTS model for iPad AudioContext playback fallback. */
   openRouterTtsModel:
-    process.env.OPENROUTER_TTS_MODEL?.trim() || "openai/gpt-4o-mini-tts",
-  openRouterTtsVoice: process.env.OPENROUTER_TTS_VOICE?.trim() || "alloy",
+    process.env.OPENROUTER_TTS_MODEL?.trim() || "microsoft/mai-voice-2.1-flash",
+  openRouterTtsVoice:
+    process.env.OPENROUTER_TTS_VOICE?.trim() || "it-IT-Rosa:MAI-Voice-2.1-Flash",
   maxPromptChars: intEnv("MAX_PROMPT_CHARS", 8000),
   maxSystemChars: intEnv("MAX_SYSTEM_CHARS", 2000),
   maxTokens: intEnv("MAX_TOKENS", 1024),

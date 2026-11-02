@@ -87,7 +87,7 @@ const chatLimiter = rateLimit({
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    build: "rail-12",
+    build: "rail-13",
     browserProbe: "example-1",
     model: config.openRouterModel,
     routerModel: config.aiRouterModel,
