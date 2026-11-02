@@ -30,6 +30,10 @@ import { gateHandActions } from "./atlasAutonomyPolicy.js";
 import { onResidentIngress } from "./atlasResidentBus.js";
 import { explainNewsForOperator } from "./atlasNewsLiteracy.js";
 import { runStartupIntegrity } from "./atlasStartupIntegrity.js";
+import { answerFromBundle } from "./atlasStateAnswer.js";
+import { readAtlasSession, rememberWake, restoredFrom } from "./atlasSessionStore.js";
+import { assessLiveSpend } from "./atlasSpend.js";
+import { trustLineForResult } from "./atlasTrust.js";
 
 const RESIDENT_RULES = [
   "You are resident inside the plancia: this is not an on-demand chat turn.",
@@ -459,10 +463,52 @@ function toPublic(reaction) {
     actions: reaction.actions || [],
     ask: reaction.ask || [],
     tagged: reaction.tagged || [],
+    trustLine: trustLineForResult(reaction.tagged, { empty: "lettura" }),
     fallback: reaction.fallback || null,
     model: reaction.model || null,
     at: reaction.at,
   };
+}
+
+function attachContinuity(row, collected, { requested = "", preferStored = false } = {}) {
+  let previous = null;
+  try {
+    previous = readAtlasSession();
+  } catch {
+    previous = null;
+  }
+  row.restored = restoredFrom(previous, {
+    applyModule: Boolean(preferStored && !requested && previous?.module),
+  });
+  try {
+    row.stateReply = answerFromBundle("stato della plancia", collected || {}).reply;
+  } catch {
+    row.stateReply = "";
+  }
+  try {
+    const spend = assessLiveSpend({ tier: "router" });
+    row.budgetLine = spend.relevant ? asAtlasLine(spend.line) : "";
+  } catch {
+    row.budgetLine = "";
+  }
+  try {
+    rememberWake({
+      wakeSummary: row.summary,
+      module: collected?.module || requested || previous?.module || "map",
+      pendingAsk: row.ask || [],
+    });
+  } catch {
+    /* the wake still returns if the session file cannot be written */
+  }
+  return row;
+}
+
+export function answerResidentState(question, { module } = {}) {
+  if (!session.lastBundle) return null;
+  const answered = answerFromBundle(question, session.lastBundle, {
+    module: module || session.lastBundle.module,
+  });
+  return { ...answered, source: "resident", live: false };
 }
 
 function publicState(bundle) {
@@ -579,7 +625,17 @@ async function doWake(input = {}) {
   try {
     integrity = await readWakeIntegrity();
     session.integrityOk = integrity?.ok !== false;
-    const moduleName = input.module || input.uiState?.module || "map";
+    const requested = clip(input.module || input.uiState?.module || "", 40);
+    const preferStored = input.preferStored === true || input.preferStoredModule === true;
+    let storedModule = "";
+    if (!requested) {
+      try {
+        storedModule = readAtlasSession().module || "";
+      } catch {
+        storedModule = "";
+      }
+    }
+    const moduleName = requested || (preferStored ? storedModule : "") || "map";
     const collected = await collectWakeBundle({ module: moduleName });
     if (!Array.isArray(collected.news)) collected.news = [];
     const queued = mergeQueued(collected, pending.splice(0, pending.length));
@@ -626,14 +682,22 @@ async function doWake(input = {}) {
         at: new Date().toISOString(),
       };
       session.lastWakeAt = reaction.at;
-      const row = { ...toPublic(reaction), shot: "once", state: publicState(collected) };
+      const row = attachContinuity(
+        { ...toPublic(reaction), shot: "once", state: publicState(collected) },
+        collected,
+        { requested, preferStored },
+      );
       publish(row);
       return row;
     }
     const reaction = await createReaction("wake", collected, null);
     reaction.integrity = integrityStamp(integrity, false);
     session.lastWakeAt = reaction.at;
-    const row = { ...toPublic(reaction), shot: "once", state: publicState(collected) };
+    const row = attachContinuity(
+      { ...toPublic(reaction), shot: "once", state: publicState(collected) },
+      collected,
+      { requested, preferStored },
+    );
     publish(row);
     return row;
   } finally {

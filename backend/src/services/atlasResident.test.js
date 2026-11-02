@@ -541,12 +541,12 @@ describe("Atlas resident, L1 wake, L2 ingress", { concurrency: false }, () => {
     const unlockAt = appJs.indexOf("opts.ifUnlocked", speakAt);
     const releaseAt = appJs.indexOf("releaseForTts", speakAt);
     assert.ok(speakAt > 0 && yieldAt > speakAt && unlockAt > yieldAt && releaseAt > unlockAt);
-    assert.equal(appJs.includes('const BUILD_ID = "rail-30-actuate"'), true);
+    assert.equal(appJs.includes('const BUILD_ID = "rail-31-capabilities"'), true);
     assert.equal(appJs.includes("module: () => state.module"), true);
-    assert.equal(read("backend/src/server.js").includes('build: "rail-30-actuate"'), true);
+    assert.equal(read("backend/src/server.js").includes('build: "rail-31-capabilities"'), true);
     assert.equal(read("public/index.html").includes("rail-28-c1"), false);
     assert.equal(read("public/index.html").includes("rail-29-resident"), false);
-    assert.equal(read("backend/public/index.html").includes("rail-30-actuate"), true);
+    assert.equal(read("backend/public/index.html").includes("rail-31-capabilities"), true);
     assert.match(read("public/css/app.css"), /data-atlas-resident/);
   });
 });

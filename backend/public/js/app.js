@@ -40,15 +40,15 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { openSandboxDoc, wireAgentqUi } from "./agentqUi.js?v=rail-30-actuate";
-import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-30-actuate";
+import { openSandboxDoc, rememberOpenModule, wireAgentqUi } from "./agentqUi.js?v=rail-31-capabilities";
+import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-31-capabilities";
 import {
   dispatchAtlasHand,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
-} from "./atlasHoloDispatch.js?v=rail-30-actuate";
+} from "./atlasHoloDispatch.js?v=rail-31-capabilities";
 
-const BUILD_ID = "rail-30-actuate";
+const BUILD_ID = "rail-31-capabilities";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1867,8 +1867,15 @@ function chatExportRole(role) {
   return (r || "msg").toUpperCase();
 }
 
+function trustModeFromText(text) {
+  const t = String(text || "");
+  if (/Affidabilità\s·\sASK|Atlas\.\sASK\b/.test(t)) return "ask";
+  if (/Affidabilità\s·\sAUTO|Atlas\.\sAUTO\b/.test(t)) return "auto";
+  return "";
+}
+
 /** Status / onboarding / command acks → chat panel (and toast), never TTS. */
-function postChatUpdate(text, kind = "ok") {
+function postChatUpdate(text, kind = "ok", meta = null) {
   const line = presentChatText(text, "system").trim();
   if (!line) return;
   const toast = line.length > 180 ? `${line.slice(0, 176).replace(/\s+\S*$/, "")}…` : line;
@@ -1877,7 +1884,16 @@ function postChatUpdate(text, kind = "ok") {
   if (!msgs) return;
   const d = document.createElement("div");
   d.className = "bubble system";
+  const trust = meta?.trust || trustModeFromText(line);
+  if (trust === "auto" || trust === "ask") d.dataset.trust = trust;
   d.textContent = line;
+  const trustLine = meta?.trustLine && !line.includes(meta.trustLine) ? String(meta.trustLine) : "";
+  if (trustLine) {
+    const span = document.createElement("span");
+    span.className = "atlas-trust";
+    span.textContent = trustLine;
+    d.appendChild(span);
+  }
   msgs.appendChild(d);
   msgs.scrollTop = msgs.scrollHeight;
 }
@@ -1918,6 +1934,7 @@ function saveLastView(mod) {
   } catch {
     /* ignore */
   }
+  rememberOpenModule(mod || state.module);
 }
 
 function readLastView() {
@@ -2977,6 +2994,8 @@ async function loadChat({ introduce = false } = {}) {
       ? `\n[allegato: ${m.attachment_name}]`
       : "";
     d.textContent = `${presentChatText(m.content || "", role)}${attach}`;
+    const trust = trustModeFromText(d.textContent);
+    if (trust) d.dataset.trust = trust;
     if (m.speech_input) d.dataset.speech = "1";
     msgs.appendChild(d);
   });
@@ -3020,12 +3039,31 @@ async function sendChat(text, { voice = false } = {}) {
 
     // Paid AI agent path: busy ✓ while working, actions[] applied, reply in chat
     if (state.aiPaid) {
-      const result = await runPaidAiTurn({
+      let result = await runPaidAiTurn({
         message: text,
         uiState: { module: state.module, focusedTopId: state.focusedTopId },
       });
+      if (result?.needSpendConfirm) {
+        let ok = false;
+        try {
+          ok = window.confirm(`${result.reply}\n\nAutorizzare il turno oltre la fascia soft?`);
+        } catch {
+          ok = false;
+        }
+        if (ok) {
+          result = await runPaidAiTurn({
+            message: text,
+            uiState: { module: state.module, focusedTopId: state.focusedTopId },
+            confirmSpend: true,
+          });
+        }
+      }
       $("chatInput").value = "";
-      const reply = result.reply || "Atlas. Nessuna risposta.";
+      const trustLine =
+        result.trustLine && !String(result.reply || "").includes(result.trustLine)
+          ? `\n${result.trustLine}`
+          : "";
+      const reply = `${result.reply || "Atlas. Nessuna risposta."}${trustLine}`;
       // Store assistant reply on the same thread
       try {
         await api(`/api/chat/threads/${state.threadId}/messages`, {
@@ -4532,6 +4570,8 @@ async function boot() {
       runHoloAction,
       speak,
       module: () => state.module,
+      restoreModule: !fromHash && !last?.module,
+      applyModule: (mod) => showModule(mod),
     });
   } catch (e) {
     bootNote(e, "Atlas non collegato");

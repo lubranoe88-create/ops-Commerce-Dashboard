@@ -14,11 +14,15 @@ import { completeChat } from "./openrouter.js";
 import { buildFunctionBoard } from "./functionBoard.js";
 import { getDb } from "../memory/db.js";
 import { getDashboardSnapshot } from "../memory/store.js";
-import { ATLAS_NAME, withAtlasPersona } from "./atlasPersonality.js";
+import { ATLAS_NAME, presentAtlasChatText, withAtlasPersona } from "./atlasPersonality.js";
 import { describePolicy, gateHandActions } from "./atlasAutonomyPolicy.js";
 import { noteResidentIngress } from "./atlasResidentBus.js";
 import { planHandsFromUtterance } from "./atlasHandsPlan.js";
 import { problemsFromIntegrityReport, readIntegrityReport } from "./atlasIntegrityStore.js";
+import { stripUnrequestedReads, searchRefusal } from "./atlasSearchGate.js";
+import { collectAutoFixes, proposeResolutions } from "./atlasProblemResolve.js";
+import { trustLineForResult } from "./atlasTrust.js";
+import { getBudgetStatus } from "./aiBudget.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(__dirname, "../../data");
@@ -35,6 +39,16 @@ function updatesFile() {
   return updatesPathOverride || UPDATES_PATH;
 }
 const MEMORY_EXPAND_PATH = path.resolve(DATA_ROOT, "agentq-memory/expandable.json");
+let memoryPathOverride = "";
+
+/** Tests point expandable memory at a temp file. */
+export function setMemoryExpandPathForTests(filePath) {
+  memoryPathOverride = filePath ? path.resolve(filePath) : "";
+}
+
+function memoryFile() {
+  return memoryPathOverride || MEMORY_EXPAND_PATH;
+}
 
 /** Solo SELECT su queste tabelle — nessuna scrittura via ricerca. */
 const DB_SEARCH_ALLOWLIST = Object.freeze({
@@ -133,7 +147,7 @@ function migrateStoredDisplayNames() {
       if (typeof row.detail === "string") row.detail = fix(row.detail);
     }
   });
-  rewriteJsonDisplayFields(MEMORY_EXPAND_PATH, (data, fix) => {
+  rewriteJsonDisplayFields(memoryFile(), (data, fix) => {
     const entries = Array.isArray(data?.entries) ? data.entries : [];
     for (const entry of entries) {
       if (!entry || typeof entry !== "object") continue;
@@ -421,20 +435,27 @@ export async function runAgentqSearch(
   hits.sort((a, b) => (b.score || 0) - (a.score || 0));
   return {
     ok: true,
+    name: ATLAS_NAME,
     query: q,
-    hits,
+    hits: hits.map((hit) => ({
+      ...hit,
+      title: presentAtlasChatText(hit.title),
+      snippet: presentAtlasChatText(hit.snippet),
+    })),
     errors,
     sandboxRoot: "backend/data/agentq-sandbox",
     dbAllowlist: Object.keys(DB_SEARCH_ALLOWLIST),
     onDemand: true,
+    searched: true,
   };
 }
 
 function ensureMemoryExpand() {
-  fs.mkdirSync(path.dirname(MEMORY_EXPAND_PATH), { recursive: true });
-  if (!fs.existsSync(MEMORY_EXPAND_PATH)) {
+  const file = memoryFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (!fs.existsSync(file)) {
     fs.writeFileSync(
-      MEMORY_EXPAND_PATH,
+      file,
       JSON.stringify(
         {
           version: 1,
@@ -459,13 +480,7 @@ function ensureMemoryExpand() {
 
 /** Memoria espandibile Atlas (append-only JSON sotto data/). Internal file name stays agentq-memory. */
 export function listExpandableMemory({ limit = 40, query = "" } = {}) {
-  ensureMemoryExpand();
-  let data = { entries: [] };
-  try {
-    data = JSON.parse(fs.readFileSync(MEMORY_EXPAND_PATH, "utf8"));
-  } catch {
-    data = { entries: [] };
-  }
+  const data = readMemoryFile();
   let entries = Array.isArray(data.entries) ? data.entries : [];
   const q = String(query || "").trim().toLowerCase();
   if (q) {
@@ -475,39 +490,86 @@ export function listExpandableMemory({ limit = 40, query = "" } = {}) {
   }
   return {
     ok: true,
+    name: ATLAS_NAME,
     expandable: true,
     count: entries.length,
-    entries: entries.slice(0, limit),
+    entries: entries.slice(0, limit).map(presentMemoryEntry),
     path: "backend/data/agentq-memory/expandable.json",
   };
 }
 
-export function appendExpandableMemory({ title, text, tags } = {}) {
+function presentMemoryEntry(entry) {
+  return {
+    ...entry,
+    title: presentAtlasChatText(entry?.title),
+    text: presentAtlasChatText(entry?.text),
+  };
+}
+
+function readMemoryFile() {
   ensureMemoryExpand();
-  let data = { version: 1, entries: [] };
   try {
-    data = JSON.parse(fs.readFileSync(MEMORY_EXPAND_PATH, "utf8"));
+    const data = JSON.parse(fs.readFileSync(memoryFile(), "utf8"));
+    if (!data || typeof data !== "object") return { version: 1, entries: [] };
+    if (!Array.isArray(data.entries)) data.entries = [];
+    return data;
   } catch {
-    /* fresh */
+    return { version: 1, entries: [] };
   }
-  if (!Array.isArray(data.entries)) data.entries = [];
+}
+
+function writeMemoryFile(data) {
+  fs.writeFileSync(memoryFile(), JSON.stringify(data, null, 2), "utf8");
+}
+
+export function appendExpandableMemory({ title, text, tags } = {}) {
+  const data = readMemoryFile();
   const entry = {
     id: `m-${Date.now().toString(36)}`,
     at: new Date().toISOString(),
     title: String(title || "Nota Atlas").slice(0, 160),
     text: String(text || "").slice(0, 4000),
-    tags: Array.isArray(tags)
-      ? tags.map((t) => String(t).slice(0, 40)).slice(0, 12)
-      : String(tags || "")
-          .split(/[,\s]+/)
-          .filter(Boolean)
-          .slice(0, 12),
+    tags: normalizeTags(tags),
   };
   data.entries.unshift(entry);
   data.entries = data.entries.slice(0, 500);
   data.version = 1;
-  fs.writeFileSync(MEMORY_EXPAND_PATH, JSON.stringify(data, null, 2), "utf8");
-  return { ok: true, entry, count: data.entries.length };
+  writeMemoryFile(data);
+  return { ok: true, name: ATLAS_NAME, entry: presentMemoryEntry(entry), count: data.entries.length };
+}
+
+function normalizeTags(tags) {
+  const list = Array.isArray(tags)
+    ? tags.map((tag) => String(tag).slice(0, 40)).slice(0, 12)
+    : String(tags || "")
+        .split(/[,\s]+/)
+        .filter(Boolean)
+        .slice(0, 12);
+  return list;
+}
+
+/** Replace the single note with this tag. Used by the Atlas session mirror. */
+export function upsertTaggedMemory({ tag, title, text } = {}) {
+  const key = String(tag || "").trim().slice(0, 40);
+  if (!key) {
+    const err = new Error("tag richiesto");
+    err.status = 400;
+    throw err;
+  }
+  const data = readMemoryFile();
+  const idx = data.entries.findIndex((entry) => (entry?.tags || []).includes(key));
+  const entry = {
+    id: idx >= 0 ? data.entries[idx].id : `m-${Date.now().toString(36)}`,
+    at: new Date().toISOString(),
+    title: String(title || "Nota Atlas").slice(0, 160),
+    text: String(text || "").slice(0, 4000),
+    tags: normalizeTags([key, "atlas"]),
+  };
+  if (idx >= 0) data.entries[idx] = entry;
+  else data.entries.unshift(entry);
+  data.version = 1;
+  writeMemoryFile(data);
+  return { ok: true, name: ATLAS_NAME, entry: presentMemoryEntry(entry), count: data.entries.length };
 }
 
 export function searchExpandableMemory(query, { limit = 8 } = {}) {
@@ -580,10 +642,27 @@ export async function getAgentqProblems({ limit = 24 } = {}) {
     problems.push(problem);
   }
   problems.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "high" ? -1 : 1));
+  const listed = problems.slice(0, limit);
+  let budget = null;
+  try {
+    const status = getBudgetStatus();
+    budget = {
+      remainingEur: status.remainingEur,
+      spentEur: status.spentEur,
+      capEur: status.capEur,
+      minRemainingEur: config.aiBrowserUseMinRemainingEur,
+    };
+  } catch {
+    budget = null;
+  }
+  const resolutions = proposeResolutions(listed, { budget });
   return {
     ok: true,
+    name: ATLAS_NAME,
     count: problems.length,
-    problems: problems.slice(0, limit),
+    problems: listed,
+    resolutions,
+    autoFixes: collectAutoFixes(resolutions),
     functionBoard: boardSummary,
     generatedAt: new Date().toISOString(),
   };
@@ -669,12 +748,15 @@ export function readSandboxDocument(relPath) {
  * usando il modello già configurato (OpenRouter env).
  */
 function handsResult(gated, extra = {}) {
+  const trustLine = trustLineForResult(gated.tagged || [], { empty: "mani" });
   return {
     ok: true,
     actions: gated.actions,
     ask: gated.ask,
     tagged: gated.tagged,
     speak: extra.speak || "",
+    trustLine,
+    trust: { mode: (gated.ask || []).length ? "ask" : "auto", reason: "hands" },
     document: extra.document || "",
     briefing: Boolean(extra.briefing),
     model: extra.model || null,
@@ -687,9 +769,11 @@ export async function planHandActions(objective) {
   if (local.matched) {
     // Known zoom / module / document / briefing commands do not need a model.
     // L3 still gates the ids before the client runs them.
-    const gated = gateHandActions(local.actions);
+    const stripped = stripUnrequestedReads(local.actions, objective);
+    const gated = gateHandActions(stripped.actions);
+    const speak = stripped.refused ? [local.speak, searchRefusal()].filter(Boolean).join(" ") : local.speak;
     return handsResult(gated, {
-      speak: local.speak,
+      speak,
       document: local.document,
       briefing: local.briefing,
       engine: "atlas-hands-plan",
@@ -714,8 +798,13 @@ export async function planHandActions(objective) {
   }
   // L3: only AUTO ids are returned in `actions` (safe to run).
   // ASK is flagged on `ask` / `tagged` and is not executed here.
-  const gated = gateHandActions(parsed.actions);
-  return handsResult(gated, { speak: parsed.speak || "", model: result.model, engine: "agentq-hands" });
+  // Sandbox/memory reads stay out unless the utterance asked for them.
+  const stripped = stripUnrequestedReads(parsed.actions, objective);
+  const gated = gateHandActions(stripped.actions);
+  const speak = stripped.refused
+    ? [parsed.speak, searchRefusal()].filter(Boolean).join(" ")
+    : parsed.speak || "";
+  return handsResult(gated, { speak, model: result.model, engine: "agentq-hands" });
 }
 
 export async function agentqStatus() {

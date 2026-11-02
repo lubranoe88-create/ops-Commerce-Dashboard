@@ -51,8 +51,13 @@ import {
   residentStatus,
   subscribeResidentStream,
   wakeResident,
+  answerResidentState,
 } from "../services/atlasResident.js";
 import { readIntegrityReport } from "../services/atlasIntegrityStore.js";
+import { isPlanciaStateQuestion, answerPlanciaStateLive } from "../services/atlasStateAnswer.js";
+import { searchRefusal } from "../services/atlasSearchGate.js";
+import { patchAtlasSession, publicAtlasSession, readAtlasSession } from "../services/atlasSessionStore.js";
+import { asAtlasLine } from "../services/atlasPersonality.js";
 
 installAtlasResident();
 
@@ -113,8 +118,24 @@ aiRouter.get("/agentq/resident/events", (req, res) => {
  */
 aiRouter.post("/agentq/search", requireAiPaid, async (req, res) => {
   try {
+    if (req.body?.explicit === false) {
+      const reply = searchRefusal();
+      return res.status(409).json({
+        ok: false,
+        searched: false,
+        name: "Atlas",
+        onDemand: true,
+        reply,
+        error: reply,
+      });
+    }
     if (!req.body?.query && !req.body?.q) {
-      return res.status(400).json({ error: "query richiesta (ricerca solo on-demand)" });
+      return res.status(400).json({
+        ok: false,
+        searched: false,
+        name: "Atlas",
+        error: "query richiesta (ricerca solo on-demand)",
+      });
     }
     const result = await runAgentqSearch(req.body.query || req.body.q, {
       sources: req.body.sources || ["filesystem", "database", "memory", "api", "web_hint"],
@@ -209,6 +230,53 @@ aiRouter.post("/agentq/memory", requireAiPaid, (req, res) => {
   );
 });
 
+/**
+ * C2: factual plancia answer. No model. Resident bundle when it is already awake
+ * and the caller asks via "resident"; otherwise a live snapshot / board / updates read.
+ */
+aiRouter.post("/agentq/state", async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const question = String(body.question || body.message || "").trim();
+    if (!isPlanciaStateQuestion(question)) {
+      return res.status(400).json({
+        ok: false,
+        answered: false,
+        name: "Atlas",
+        reply: asAtlasLine("Non è una domanda sullo stato della plancia."),
+      });
+    }
+    const moduleName = String(body.module || "").trim();
+    if (body.via === "resident") {
+      const fromResident = answerResidentState(question, { module: moduleName });
+      if (fromResident) return res.json(fromResident);
+    }
+    const live = await answerPlanciaStateLive({ question, module: moduleName || "map" });
+    res.json(live);
+  } catch (err) {
+    res.status(500).json({ ok: false, answered: false, error: err.message || "state failed" });
+  }
+});
+
+/** C9: last wake, preferred module, pending ASK. Password gate only. */
+aiRouter.get("/agentq/session", (_req, res) => {
+  res.json(publicAtlasSession(readAtlasSession()));
+});
+
+aiRouter.post("/agentq/session", (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const saved = patchAtlasSession({
+      module: body.module,
+      pendingAskAdd: body.pendingAskAdd,
+      pendingAskDrop: body.pendingAskDrop,
+    });
+    res.json(publicAtlasSession(saved));
+  } catch (err) {
+    res.status(500).json({ error: err.message || "session failed" });
+  }
+});
+
 /** Monitoraggio errori/problemi da sistemare (function-board + pipeline open). */
 aiRouter.get("/agentq/problems", requireAiPaid, async (req, res) => {
   try {
@@ -293,18 +361,23 @@ aiRouter.post("/turn", requireAiPaid, async (req, res) => {
       q3: String(body.q3 || "").slice(0, 500),
       uiState: body.uiState || {},
       forceTier: body.forceTier || null,
+      confirmSpend: body.confirmSpend === true,
     });
     // Canonical JSON: route / reply / actions / escalate_reason
     res.json({
       route: result.route || result.tier || "answer_local",
       reply: result.reply,
       actions: result.actions || [],
+      ask: result.ask || [],
       escalate_reason: result.escalate_reason ?? result.escalateReason ?? null,
       tier: result.tier,
       model: result.model,
       needQuestions: result.needQuestions || false,
+      needSpendConfirm: Boolean(result.needSpendConfirm),
       blocked: result.blocked || false,
       code: result.code,
+      trust: result.trust || null,
+      trustLine: result.trustLine || "",
       budget: result.budget || getBudgetStatus(),
     });
   } catch (err) {

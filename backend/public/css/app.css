@@ -1443,6 +1443,18 @@ body[data-module="chat"] .analizza-bar { z-index: 50; }
   letter-spacing: 0.02em;
   white-space: pre-wrap;
 }
+.bubble[data-trust="auto"] { border-color: rgba(143, 227, 196, 0.55); }
+.bubble[data-trust="ask"] { border-color: rgba(232, 184, 74, 0.75); }
+.atlas-trust {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+.bubble[data-trust="ask"] .atlas-trust { color: #e8b84a; }
 .bubble.assistant::before,
 .bubble.system:not([data-history-trim]):not([data-atlas-greet])::before {
   content: "Atlas";

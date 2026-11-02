@@ -167,7 +167,7 @@ async function applyActions(actions) {
   await applyAiActions(actions, { runUi: applyActionFn });
 }
 
-export async function runPaidAiTurn({ message, uiState = {} } = {}) {
+export async function runPaidAiTurn({ message, uiState = {}, confirmSpend = false } = {}) {
   const goals = getStoredGoals();
   setAiBusy(true);
   try {
@@ -179,6 +179,7 @@ export async function runPaidAiTurn({ message, uiState = {} } = {}) {
         q2: goals.q2,
         q3: goals.q3,
         uiState,
+        confirmSpend: Boolean(confirmSpend),
       }),
     });
     await applyActions(result.actions);

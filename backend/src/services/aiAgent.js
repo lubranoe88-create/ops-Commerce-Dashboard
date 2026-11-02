@@ -8,6 +8,10 @@ import { assertCanCall, recordCompletion, getBudgetStatus } from "./aiBudget.js"
 import { PANEL_CATALOG, SYSTEM_CARD, sanitizeActions } from "./panelCatalog.js";
 import { asAtlasLine } from "./atlasPersonality.js";
 import { getDashboardSnapshot, searchCrossThreadMemory } from "../memory/store.js";
+import { isPlanciaStateQuestion, answerPlanciaStateLive } from "./atlasStateAnswer.js";
+import { userAskedForMemory } from "./atlasSearchGate.js";
+import { assessLiveSpend, spendAskId, withBudgetLine } from "./atlasSpend.js";
+import { trustLineForResult } from "./atlasTrust.js";
 import {
   saveBriefingSession,
   insertSuggestions,
@@ -57,6 +61,50 @@ async function callTier(tier, { system, prompt, maxTokens, temperature }) {
  * Router decides: answer_local | escalate_main | escalate_grok | opening_questions
  * Grok override: when task needs more power, spend from daily hard cap and log reason.
  */
+function spendGate(tier, confirmSpend) {
+  const spend = assessLiveSpend({ tier, confirm: confirmSpend === true });
+  if (spend.ask) {
+    const id = spendAskId(tier);
+    return {
+      hold: true,
+      result: {
+        route: "ask_before_spend",
+        reply: asAtlasLine(spend.line),
+        actions: [],
+        ask: [{ id, mode: "ask", reason: "spend-past-soft-band" }],
+        tier: "router",
+        model: null,
+        escalate_reason: "ask_before_crossing_soft_band",
+        escalateReason: "ask_before_crossing_soft_band",
+        budget: spend.budget,
+        needSpendConfirm: true,
+        trust: { mode: "ask", reason: "spend-past-soft-band" },
+        trustLine: trustLineForResult([{ id, mode: "ask" }], { empty: "spesa" }),
+      },
+    };
+  }
+  if (spend.blocked) {
+    return {
+      hold: true,
+      result: {
+        route: spend.unreadable ? "budget_unreadable" : "answer_local",
+        reply: asAtlasLine(spend.line),
+        actions: [],
+        ask: [],
+        tier: "router",
+        model: null,
+        escalate_reason: spend.reason,
+        escalateReason: spend.reason,
+        budget: spend.budget || getBudgetStatus(),
+        blocked: true,
+        trust: { mode: "ask", reason: spend.reason },
+        trustLine: "Affidabilità · ASK · spesa",
+      },
+    };
+  }
+  return { hold: false, spend };
+}
+
 export async function runAiTurn({
   message,
   q1 = "",
@@ -64,7 +112,29 @@ export async function runAiTurn({
   q3 = "",
   uiState = {},
   forceTier = null,
+  confirmSpend = false,
 } = {}) {
+  if (isPlanciaStateQuestion(message)) {
+    const answered = await answerPlanciaStateLive({
+      question: message,
+      module: uiState?.module || "map",
+    });
+    return {
+      route: "state",
+      reply: answered.reply,
+      actions: [],
+      ask: [],
+      tier: "none",
+      model: null,
+      escalate_reason: null,
+      escalateReason: null,
+      budget: getBudgetStatus(),
+      trust: answered.trust,
+      trustLine: answered.trustLine,
+      state: answered.facts,
+    };
+  }
+
   // Free tier: no models at all — mechanical data only
   if (!isAiPaid()) {
     return {
@@ -87,6 +157,11 @@ export async function runAiTurn({
 
   if (forceTier === "grok" || forceTier === "main" || forceTier === "router") {
     const tier = forceTier;
+    if (tier === "main" || tier === "grok") {
+      const gate = spendGate(tier, confirmSpend);
+      if (gate.hold) return gate.result;
+    }
+    const spend = assessLiveSpend({ tier, confirm: confirmSpend === true });
     const out = await callTier(tier, {
       system: `${SYSTEM_CARD}\nPanels: ${catalogBrief}`,
       prompt: message || "Status",
@@ -94,13 +169,15 @@ export async function runAiTurn({
     });
     return {
       route: `force_${tier}`,
-      reply: out.content,
+      reply: withBudgetLine(out.content, spend, { force: tier !== "router" }),
       actions: [],
       tier: out.tier,
       model: out.model,
       escalate_reason: forceTier !== "router" ? `force_${forceTier}` : null,
       escalateReason: forceTier !== "router" ? `force_${forceTier}` : null,
-      budget: getBudgetStatus(),
+      budget: spend.budget || getBudgetStatus(),
+      trust: { mode: "auto", reason: spend.reason || "within-soft-band" },
+      trustLine: trustLineForResult([{ id: tier, mode: "auto" }], { empty: "turno" }),
     };
   }
 
@@ -178,15 +255,18 @@ export async function runAiTurn({
   }
 
   if (route === "answer_local" || (!route.includes("escalate") && parsed.reply)) {
+    const localSpend = assessLiveSpend({ tier: "router" });
     return {
       route: "answer_local",
-      reply: parsed.reply || routerRaw.content,
+      reply: withBudgetLine(parsed.reply || routerRaw.content, localSpend),
       actions,
       tier: "router",
       model: routerRaw.model,
       escalate_reason: null,
       escalateReason: null,
-      budget: getBudgetStatus(),
+      budget: localSpend.budget || getBudgetStatus(),
+      trust: { mode: "auto", reason: "within-soft-band" },
+      trustLine: trustLineForResult([], { empty: "turno" }),
     };
   }
 
@@ -196,6 +276,11 @@ export async function runAiTurn({
     (wantGrok ? "router_judged_needs_grok" : "router_judged_needs_main");
 
   let tier = wantGrok ? "grok" : "main";
+  const gate = spendGate(tier, confirmSpend);
+  if (gate.hold) {
+    return { ...gate.result, actions, model: gate.result.model || routerRaw.model };
+  }
+  const spend = gate.spend;
   try {
     assertCanCall(tier);
   } catch (err) {
@@ -207,12 +292,15 @@ export async function runAiTurn({
       } catch {
         return {
           route: "answer_local",
-          reply:
+          reply: withBudgetLine(
             parsed.reply ||
-            routerRaw.content ||
-            asAtlasLine(
-              "Budget AI in fascia soft: resto sul modello economico. Riprova domani per un’analisi più ampia.",
-            ),
+              routerRaw.content ||
+              asAtlasLine(
+                "Budget AI in fascia soft: resto sul modello economico. Riprova domani per un’analisi più ampia.",
+              ),
+            spend,
+            { force: true },
+          ),
           actions,
           tier: "router",
           model: routerRaw.model,
@@ -220,16 +308,21 @@ export async function runAiTurn({
           escalateReason: `blocked_${err.code}`,
           budget: getBudgetStatus(),
           blocked: true,
+          trust: { mode: "ask", reason: "spend-past-soft-band" },
+          trustLine: "Affidabilità · ASK · spesa",
         };
       }
     } else if (err.code === "AI_BUDGET_SOFT" || err.code === "AI_BUDGET_HARD") {
       return {
         route: "answer_local",
-        reply:
+        reply: withBudgetLine(
           parsed.reply ||
-          asAtlasLine(
-            "Cap o fascia budget: nessuna escalation. Usa i pannelli meccanici della plancia.",
-          ),
+            asAtlasLine(
+              "Cap o fascia budget: nessuna escalation. Usa i pannelli meccanici della plancia.",
+            ),
+          spend,
+          { force: true },
+        ),
         actions,
         tier: "router",
         model: routerRaw.model,
@@ -237,6 +330,8 @@ export async function runAiTurn({
         escalateReason: `blocked_${err.code}`,
         budget: getBudgetStatus(),
         blocked: true,
+        trust: { mode: "ask", reason: "spend-past-soft-band" },
+        trustLine: "Affidabilità · ASK · spesa",
       };
     } else {
       throw err;
@@ -245,10 +340,12 @@ export async function runAiTurn({
 
   const snap = getDashboardSnapshot();
   const news = getCachedNews(8);
-  const crossMem = searchCrossThreadMemory(message, { limit: 8 });
+  const memoryRequested = userAskedForMemory(message);
+  const crossMem = memoryRequested ? searchCrossThreadMemory(message, { limit: 8 }) : [];
   const mainSystem = [
     SYSTEM_CARD,
     "Rispondi in italiano, conciso. Analizza solo il contesto fornito.",
+    "Non citare risultati di sandbox o memoria espandibile se memory_requested è false.",
     "Puoi proporre improvements come JSON opzionale in coda:",
     '<!--SUGGESTIONS:[{"area":"...","issue":"...","evidence":"...","effort":"l|m|h","action":"refresh"|{}}]-->',
     `Escalate path: ${tier} reason: ${escalateReason}`,
@@ -264,6 +361,7 @@ export async function runAiTurn({
     coverage: snap.coverage,
     consistency: (snap.consistency || []).slice(0, 6),
     memory_concepts: (snap.memory?.concepts || []).slice(0, 12),
+    memory_requested: memoryRequested,
     cross_thread_memory: crossMem.map((m) => ({
       thread: m.thread_title,
       role: m.role,
@@ -291,13 +389,15 @@ export async function runAiTurn({
 
   return {
     route: wantGrok ? "escalate_grok" : "escalate_main",
-    reply: powered.content,
+    reply: withBudgetLine(powered.content, spend, { force: true }),
     actions,
     tier: powered.tier,
     model: powered.model,
     escalate_reason: escalateReason,
     escalateReason,
     budget: getBudgetStatus(),
+    trust: { mode: "auto", reason: "within-soft-band" },
+    trustLine: trustLineForResult([{ id: tier, mode: "auto" }], { empty: "turno" }),
   };
 }
 

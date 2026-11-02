@@ -95,8 +95,8 @@ export async function showEntryUpdates({ postChatUpdate, showToast } = {}) {
     const updates = data.updates || [];
     if (updates.length) {
       const lines = updates.slice(0, 5).map((u, i) => `${i + 1}. ${u.title}: ${u.detail || ""}`);
-      const msg = `Aggiornamenti recenti Atlas\n${lines.join("\n")}`;
-      postChatUpdate?.(msg, "ok");
+      const msg = atlasLine(`Aggiornamenti recenti\n${lines.join("\n")}`);
+      postChatUpdate?.(msg, "ok", { trust: "auto", trustLine: trustLineFor("auto", "aggiornamenti") });
       showToast?.(`Atlas · ${updates.length} aggiornamenti`, "ok");
     } else {
       showToast?.("Atlas · nessun aggiornamento nuovo", "ok");
@@ -114,12 +114,16 @@ export async function showEntryUpdates({ postChatUpdate, showToast } = {}) {
         .slice(0, 5)
         .map((p, i) => `${i + 1}. [${p.severity}] ${p.title}: ${p.detail || ""}`);
       postChatUpdate?.(
-        `Monitoraggio Atlas · ${n} problemi da sistemare\n${lines.join("\n")}`,
+        atlasLine(`Monitoraggio · ${n} problemi da sistemare\n${lines.join("\n")}\nChiedi «problemi» per i passi, «risolvi» per i fix AUTO.`),
         "warn",
+        { trust: "auto", trustLine: trustLineFor("auto", "problemi") },
       );
       showToast?.(`Atlas · ${n} problemi`, "warn");
     } else {
-      postChatUpdate?.("Monitoraggio Atlas · nessun problema aperto.", "ok");
+      postChatUpdate?.(atlasLine("Monitoraggio · nessun problema aperto."), "ok", {
+        trust: "auto",
+        trustLine: trustLineFor("auto", "problemi"),
+      });
     }
   } catch (err) {
     console.warn("[agentq] problems", err?.message || err);
@@ -128,17 +132,49 @@ export async function showEntryUpdates({ postChatUpdate, showToast } = {}) {
   }
 }
 
-export async function showProblems({ postChatUpdate } = {}) {
+function formatProblemReport(probs) {
+  const list = probs?.problems || [];
+  if (!list.length) return atlasLine("Nessun errore o problema aperto sulla plancia.");
+  const byId = new Map((probs.resolutions || []).map((row) => [row.problemId, row]));
+  const lines = [atlasLine(`Problemi aperti: ${probs.count ?? list.length}.`)];
+  list.forEach((problem, index) => {
+    lines.push(
+      `${index + 1}. [${problem.kind}/${problem.severity}] ${problem.title} — ${problem.detail || problem.status || ""}`,
+    );
+    const resolution = byId.get(problem.id);
+    (resolution?.steps || []).forEach((step, stepIndex) => {
+      lines.push(`   ${stepIndex + 1}) ${step}`);
+    });
+    if (resolution?.auto?.length) lines.push(`   AUTO: ${resolution.auto.join(", ")}`);
+    if (resolution?.ask?.length) {
+      lines.push(`   ASK: ${resolution.ask.map((step) => step.id || step).join(", ")}`);
+    }
+  });
+  return lines.join("\n");
+}
+
+export async function showProblems({ postChatUpdate, runHoloAction, resolve = false } = {}) {
   const probs = await api("/api/ai/agentq/problems");
-  const list = probs.problems || [];
-  if (!list.length) {
-    postChatUpdate?.("Nessun errore o problema aperto sulla plancia.", "ok");
-    return probs;
-  }
-  const lines = list.map(
-    (p, i) => `${i + 1}. [${p.kind}/${p.severity}] ${p.title} — ${p.detail || p.status}`,
+  const report = formatProblemReport(probs);
+  const fixes = Array.isArray(probs.autoFixes) ? probs.autoFixes : [];
+  const trustLine = fixes.length
+    ? `Affidabilità · AUTO ${fixes.join(", ")}`
+    : trustLineFor("auto", "problemi");
+  postChatUpdate?.(
+    resolve && fixes.length ? `${report}\nEseguo i passi AUTO: ${fixes.join(", ")}.` : report,
+    probs.count ? "warn" : "ok",
+    { trust: "auto", trustLine },
   );
-  postChatUpdate?.(`Problemi plancia (${list.length})\n${lines.join("\n")}`, "warn");
+  if (resolve && fixes.length) {
+    await executeHandPlan(
+      {
+        actions: fixes,
+        tagged: fixes.map((id) => ({ id, mode: "auto", reason: "read" })),
+      },
+      { postChatUpdate, runHoloAction },
+      { quietIfEmpty: true },
+    );
+  }
   return probs;
 }
 
@@ -157,32 +193,157 @@ export function extractSearchQuery(text) {
     .trim();
 }
 
+export function isMemoryWrite(text) {
+  return /^(memorizza|ricorda|salva\s+in\s+memoria)\b/i.test(String(text || "").trim());
+}
+
+export function isMemoryRecall(text) {
+  const t = String(text || "").trim().toLowerCase();
+  if (!t) return false;
+  return /^(memoria|cosa\s+ricordi|leggi\s+memoria|note\s+in\s+memoria)\b/.test(t) || /\bcerca\s+in\s+memoria\b/.test(t);
+}
+
+const IMPLICIT_SEARCH =
+  /\b(sandbox|filesystem|nei\s+file|sul\s+disco|nel\s+database|memoria\s+espandibile|cerca\s+nei\s+file|ricerca\s+libera)\b/i;
+
+export function refusesImplicitSearch(text) {
+  if (isSearchRequest(text) || isMemoryWrite(text) || isMemoryRecall(text)) return false;
+  return IMPLICIT_SEARCH.test(String(text || ""));
+}
+
+const STATE_BLOCKED =
+  /^(cerca|ricerca|search|memorizza|ricorda|salva\s+in\s+memoria|problemi|errori|monitoraggio|risolvi|sistema|apri|vai|mostra|zoom)\b/;
+const STATE_HINT =
+  /\b(stato|istantanea|snapshot|salute|health|come\s+sta|quadro(?:\s+funzioni)?|function\s*board|pins?|tops?|classifica|problemi\s+aperti|quanti\s+problemi|numero\s+di\s+problemi|quanti\s+errori|errori\s+aperti|aggiornamenti|modulo\s+aperto|quale\s+modulo|che\s+modulo|modulo\s+è\s+aperto|modulo\s+e\s+aperto)\b/i;
+const STATE_QUESTION =
+  /[?]|(?:^|\s)(qual[ei]|quanti|quante|come|dimmi|stato|salute|riepilogo|snapshot|istantanea|tops?|pins?|quadro|aggiornamenti|classifica)\b/i;
+
+/** Same gate as the server state answerer. Commands and search stay on their own paths. */
+export function isPlanciaStateQuestion(text) {
+  const t = String(text || "").trim().toLowerCase();
+  if (!t || t.length > 500) return false;
+  if (STATE_BLOCKED.test(t)) return false;
+  if (!STATE_HINT.test(t)) return false;
+  if (!STATE_QUESTION.test(t)) return false;
+  return true;
+}
+
+export function isProblemsRequest(text) {
+  return /^(problemi|errori|monitoraggio|cosa\s+da\s+sistemare|risolvi|sistema)\b/i.test(String(text || "").trim());
+}
+
+export function wantsResolution(text) {
+  return /^(risolvi|sistema)\b/i.test(String(text || "").trim());
+}
+
+export const ATLAS_SEARCH_REFUSAL =
+  "Atlas. Non cerco nella sandbox né in memoria finché non me lo chiedi. Dimmi «cerca …» oppure «memoria …».";
+
+function atlasLine(text) {
+  const body = String(text || "")
+    .replace(/\bAgente Q\b|\bAgent Q\b|\bAgentQ\b/g, "Atlas")
+    .trim();
+  if (!body) return "Atlas.";
+  if (/^atlas\b/i.test(body)) return body;
+  return `Atlas. ${body}`;
+}
+
+function trustLineFor(mode, id) {
+  const label = mode === "ask" ? "ASK" : "AUTO";
+  return `Affidabilità · ${label} · ${id}`;
+}
+
+function trustLineFromPlan(plan) {
+  const autos = [];
+  const asks = [];
+  for (const step of plan || []) {
+    if (!step?.id) continue;
+    if (step.mode === "ask") asks.push(step.id);
+    else autos.push(step.id);
+  }
+  const parts = [];
+  if (autos.length) parts.push(`AUTO ${autos.join(", ")}`);
+  if (asks.length) parts.push(`ASK ${asks.join(", ")}`);
+  return parts.length ? `Affidabilità · ${parts.join(" · ")}` : "";
+}
+
+let lastRememberedModule = "";
+let sessionWritesOpen = false;
+
+/** Wake reads the stored module before later view saves overwrite it. */
+export function enableSessionWrites() {
+  sessionWritesOpen = true;
+}
+
+export async function rememberOpenModule(mod) {
+  if (!sessionWritesOpen) return;
+  const name = String(mod || "").trim();
+  if (!name || name === lastRememberedModule) return;
+  lastRememberedModule = name;
+  try {
+    await api("/api/ai/agentq/session", {
+      method: "POST",
+      body: JSON.stringify({ module: name }),
+    });
+  } catch {
+    lastRememberedModule = "";
+  }
+}
+
+async function rememberPendingAsk(step, { drop = false } = {}) {
+  const id = String(step?.id || "").trim();
+  if (!id) return;
+  try {
+    await api("/api/ai/agentq/session", {
+      method: "POST",
+      body: JSON.stringify(
+        drop
+          ? { pendingAskDrop: id }
+          : { pendingAskAdd: { id, reason: step.reason || "ask" } },
+      ),
+    });
+  } catch {
+    /* the confirm path still stands */
+  }
+}
+
 export async function runOnDemandSearch(query, { postChatUpdate, openDoc } = {}) {
   const q = String(query || "").trim();
   if (!q) {
-    postChatUpdate?.("Per la ricerca Atlas indica cosa cercare (es. «cerca budget»).", "warn");
+    postChatUpdate?.(atlasLine("Per la ricerca indica cosa cercare (es. «cerca budget»)."), "warn", {
+      trust: "ask",
+      trustLine: trustLineFor("ask", "ricerca"),
+    });
     return null;
   }
-  postChatUpdate?.(`Atlas · ricerca on-demand: ${q}`);
+  postChatUpdate?.(atlasLine(`Ricerca on-demand: ${q}`), "ok", {
+    trust: "auto",
+    trustLine: trustLineFor("auto", "ricerca"),
+  });
   const data = await api("/api/ai/agentq/search", {
     method: "POST",
     body: JSON.stringify({
       query: q,
+      explicit: true,
       sources: ["filesystem", "database", "memory", "api", "web_hint"],
     }),
   });
   const hits = data.hits || [];
   if (!hits.length) {
     postChatUpdate?.(
-      `Nessun risultato.${(data.errors || []).length ? " " + data.errors.join("; ") : ""}`,
+      atlasLine(`Nessun risultato.${(data.errors || []).length ? ` ${data.errors.join("; ")}` : ""}`),
       "warn",
+      { trust: "auto", trustLine: trustLineFor("auto", "ricerca") },
     );
     return data;
   }
   const lines = hits.slice(0, 8).map((h, i) => {
     return `${i + 1}. [${h.source}] ${h.title} — ${h.snippet || ""}${h.uri ? ` · ${h.uri}` : ""}`;
   });
-  postChatUpdate?.(`Risultati Atlas (${hits.length})\n${lines.join("\n")}`);
+  postChatUpdate?.(atlasLine(`Risultati (${hits.length})\n${lines.join("\n")}`), "ok", {
+    trust: "auto",
+    trustLine: trustLineFor("auto", "ricerca"),
+  });
 
   // Auto-open first sandbox/text or http hint in popup if requested via openDoc
   const firstDoc = hits.find((h) => String(h.uri || "").startsWith("sandbox://"));
@@ -316,16 +477,27 @@ function voiceCallOpen() {
 export async function executeHandPlan(data, ctx = {}, { respectCall = false, quietIfEmpty = false } = {}) {
   const { runHoloAction, postChatUpdate } = ctx;
   const plan = planFromHands(data);
+  const planTrust = trustLineFromPlan(plan) || data?.trustLine || "";
   if (!plan.length) {
-    if (!quietIfEmpty) postChatUpdate?.("Atlas: nessuna azione plancia proposta per questo obiettivo.", "warn");
+    if (!quietIfEmpty) {
+      postChatUpdate?.(atlasLine("Nessuna azione plancia proposta per questo obiettivo."), "warn", {
+        trust: "ask",
+        trustLine: planTrust || trustLineFor("ask", "mani"),
+      });
+    }
     return data;
   }
   if (respectCall && voiceCallOpen()) {
     const ids = plan.map((step) => step.id).join(", ");
-    postChatUpdate?.(`Atlas lascia in sospeso durante la chiamata: ${ids}.`, "ok");
+    postChatUpdate?.(atlasLine(`Lascio in sospeso durante la chiamata: ${ids}.`), "ok", {
+      trust: "ask",
+      trustLine: planTrust || trustLineFor("ask", "mani"),
+    });
     return data;
   }
   for (const step of plan) {
+    const mode = step.mode === "ask" || stepNeedsApproval(step) ? "ask" : "auto";
+    const line = trustLineFor(mode, step.id);
     if (stepNeedsApproval(step)) {
       const reason = step.reason || approvalReason(step.id);
       let ok = false;
@@ -335,7 +507,12 @@ export async function executeHandPlan(data, ctx = {}, { respectCall = false, qui
         ok = false;
       }
       if (!ok) {
-        postChatUpdate?.(`Atlas ha bisogno di approvazione per «${step.id}» (${reason}). Azione non eseguita.`, "warn");
+        await rememberPendingAsk(step);
+        postChatUpdate?.(
+          atlasLine(`ASK · «${step.id}» (${reason}). Azione non eseguita.`),
+          "warn",
+          { trust: "ask", trustLine: line },
+        );
         continue;
       }
       let trustNote = "";
@@ -349,11 +526,18 @@ export async function executeHandPlan(data, ctx = {}, { respectCall = false, qui
           trustNote = ` · autonoma dopo ${n} approvazioni`;
         }
       } catch {
-        postChatUpdate?.(`Atlas: approvazione di «${step.id}» non registrata.`, "warn");
+        postChatUpdate?.(atlasLine(`Approvazione di «${step.id}» non registrata.`), "warn", {
+          trust: "ask",
+          trustLine: line,
+        });
       }
-      postChatUpdate?.(`Mani · ${step.id} · approvata${trustNote}`);
+      await rememberPendingAsk(step, { drop: true });
+      postChatUpdate?.(atlasLine(`ASK · «${step.id}» approvata${trustNote}.`), "ok", {
+        trust: "ask",
+        trustLine: line,
+      });
     } else {
-      postChatUpdate?.(`Mani · ${step.id}`);
+      postChatUpdate?.(atlasLine(`AUTO · ${step.id}.`), "ok", { trust: "auto", trustLine: line });
     }
     await runHoloAction?.(step.id, {
       fromVoice: Boolean(ctx.fromVoice),
@@ -379,9 +563,25 @@ const seenResidentIds = new Set();
 let residentStarted = false;
 let residentSource = null;
 
+function formatRestore(restored) {
+  if (!restored) return "";
+  const bits = [];
+  if (restored.wakeSummary) {
+    bits.push(`Ultima sintesi: ${String(restored.wakeSummary).replace(/\s+/g, " ").slice(0, 280)}`);
+  }
+  if (restored.module) bits.push(`Modulo preferito: ${restored.module}`);
+  const pending = Array.isArray(restored.pendingAsk) ? restored.pendingAsk : [];
+  if (pending.length) {
+    bits.push(`Approvazioni in attesa: ${pending.map((item) => item.id).filter(Boolean).join(", ")}`);
+  }
+  if (!bits.length) return "";
+  return atlasLine(`Riprendo la sessione. ${bits.join(". ")}.`);
+}
+
 function residentBubble(data) {
   const literacy = data?.literacy?.text || data?.newsLiteracy || "";
-  return [data?.summary, literacy]
+  const trust = data?.trustLine || "";
+  return [data?.summary, literacy, trust]
     .map((part) => String(part || "").trim())
     .filter(Boolean)
     .join("\n\n");
@@ -403,8 +603,31 @@ async function presentResident(data, ctx) {
   const key = data.id || data.seq || residentBubble(data);
   if (!key || seenResidentIds.has(key)) return;
   seenResidentIds.add(key);
+  if (data.shot === "once" || data.kind === "wake") {
+    const restored = formatRestore(data.restored);
+    if (restored) {
+      ctx.postChatUpdate?.(restored, "ok", {
+        trust: "auto",
+        trustLine: trustLineFor("auto", "sessione"),
+      });
+    }
+    if (data.restored?.applyModule && data.restored.module && typeof ctx.applyModule === "function") {
+      try {
+        await ctx.applyModule(data.restored.module);
+      } catch (err) {
+        ctx.postChatUpdate?.(atlasLine(err?.message || "Modulo preferito non ripristinato."), "warn");
+      }
+    }
+    if (data.budgetLine) {
+      ctx.postChatUpdate?.(data.budgetLine, "ok", {
+        trust: "auto",
+        trustLine: trustLineFor("auto", "spesa"),
+      });
+    }
+  }
   const line = residentBubble(data);
-  if (line) ctx.postChatUpdate?.(line, "ok");
+  const mode = (data.ask || []).length ? "ask" : "auto";
+  if (line) ctx.postChatUpdate?.(line, "ok", { trust: mode, trustLine: data.trustLine || "" });
   if (data.summary) ctx.speak?.(data.summary, { ifUnlocked: true, yieldToCall: true });
   await executeHandPlan(withoutMic(data), ctx, { respectCall: true, quietIfEmpty: true });
 }
@@ -439,16 +662,21 @@ export async function startAtlasResident(ctx = {}) {
   document.documentElement.dataset.atlasResident = "1";
   let data;
   try {
+    const body = ctx.restoreModule
+      ? { module: "", preferStored: true }
+      : { module: moduleName || "map" };
     data = await api("/api/ai/agentq/resident/wake", {
       method: "POST",
-      body: JSON.stringify({ module: moduleName || "map" }),
+      body: JSON.stringify(body),
     });
   } catch (err) {
     document.documentElement.dataset.atlasResident = "0";
+    enableSessionWrites();
     throw err;
   }
   await presentResident(data, ctx);
   openResidentEvents(ctx, data?.seq || 0);
+  enableSessionWrites();
   return data;
 }
 
@@ -468,9 +696,71 @@ async function fetchHandPlan(objective) {
  * runs through the server Atlas plan when it answers, and through the same
  * local plan into runHoloAction when it does not.
  */
+async function answerStateCommand(text, ctx) {
+  const moduleName = typeof ctx.module === "function" ? ctx.module() : ctx.module || "";
+  const residentOn =
+    typeof document !== "undefined" && document.documentElement?.dataset?.atlasResident === "1";
+  const via = ctx.via || (residentOn ? "resident" : "chat");
+  try {
+    const data = await api("/api/ai/agentq/state", {
+      method: "POST",
+      body: JSON.stringify({ question: text, module: moduleName, via }),
+    });
+    if (!data?.answered) {
+      ctx.postChatUpdate?.(data?.reply || atlasLine("Non ho una lettura di stato per questa domanda."), "warn");
+      return;
+    }
+    ctx.postChatUpdate?.(data.reply, "ok", { trust: data.trust?.mode || "auto", trustLine: data.trustLine });
+  } catch (err) {
+    ctx.postChatUpdate?.(atlasLine(err?.message || "Stato plancia non letto."), "warn");
+  }
+}
+
+async function recallMemory(text, ctx) {
+  const q = String(text || "")
+    .replace(/^(memoria|cosa\s+ricordi|leggi\s+memoria|note\s+in\s+memoria)\s*/i, "")
+    .replace(/^cerca\s+in\s+memoria\s*/i, "")
+    .trim();
+  const data = await api(`/api/ai/agentq/memory?limit=8&q=${encodeURIComponent(q)}`);
+  const entries = data.entries || [];
+  if (!entries.length) {
+    ctx.postChatUpdate?.(atlasLine(q ? `Nessuna nota in memoria per «${q}».` : "La memoria non ha ancora note."), "ok", {
+      trust: "auto",
+      trustLine: trustLineFor("auto", "memoria"),
+    });
+    return;
+  }
+  const lines = entries.slice(0, 6).map((entry, index) => {
+    return `${index + 1}. ${entry.title || "Nota"} — ${String(entry.text || "").replace(/\s+/g, " ").slice(0, 160)}`;
+  });
+  ctx.postChatUpdate?.(atlasLine(`Memoria (${data.count ?? entries.length})\n${lines.join("\n")}`), "ok", {
+    trust: "auto",
+    trustLine: trustLineFor("auto", "memoria"),
+  });
+}
+
 export async function handleAtlasCommand(raw, ctx = {}) {
   const text = String(raw || "").trim();
   if (!text) return false;
+  if (isPlanciaStateQuestion(text)) {
+    await answerStateCommand(text, ctx);
+    return true;
+  }
+  if (refusesImplicitSearch(text)) {
+    ctx.postChatUpdate?.(ATLAS_SEARCH_REFUSAL, "warn", {
+      trust: "ask",
+      trustLine: trustLineFor("ask", "ricerca"),
+    });
+    return true;
+  }
+  if (isMemoryRecall(text)) {
+    try {
+      await recallMemory(text, ctx);
+    } catch (err) {
+      ctx.postChatUpdate?.(atlasLine(err?.message || "Memoria non letta"), "warn");
+    }
+    return true;
+  }
   if (isSearchRequest(text)) {
     const q = extractSearchQuery(text);
     await runOnDemandSearch(q, {
@@ -479,18 +769,25 @@ export async function handleAtlasCommand(raw, ctx = {}) {
     });
     return true;
   }
-  if (/^(problemi|errori|monitoraggio|cosa\s+da\s+sistemare)\b/i.test(text)) {
+  if (isProblemsRequest(text)) {
     try {
-      await showProblems({ postChatUpdate: ctx.postChatUpdate });
+      await showProblems({
+        postChatUpdate: ctx.postChatUpdate,
+        runHoloAction: ctx.runHoloAction,
+        resolve: wantsResolution(text),
+      });
     } catch (err) {
-      ctx.postChatUpdate?.(err?.message || "Monitoraggio non disponibile", "warn");
+      ctx.postChatUpdate?.(atlasLine(err?.message || "Monitoraggio non disponibile"), "warn");
     }
     return true;
   }
-  if (/^(memorizza|ricorda|salva\s+in\s+memoria)\b/i.test(text)) {
+  if (isMemoryWrite(text)) {
     const note = text.replace(/^(memorizza|ricorda|salva\s+in\s+memoria)\s*/i, "").trim();
     if (!note) {
-      ctx.postChatUpdate?.("Per espandere la memoria indica cosa salvare (es. «memorizza budget Q4»).", "warn");
+      ctx.postChatUpdate?.(atlasLine("Per espandere la memoria indica cosa salvare (es. «memorizza budget Q4»)."), "warn", {
+        trust: "ask",
+        trustLine: trustLineFor("ask", "memoria"),
+      });
       return true;
     }
     try {
@@ -499,12 +796,13 @@ export async function handleAtlasCommand(raw, ctx = {}) {
         body: JSON.stringify({ title: note.slice(0, 80), text: note, tags: ["voice"] }),
       });
       ctx.postChatUpdate?.(
-        `Memoria Atlas aggiornata (${data.count} note). Id: ${data.entry?.id || "—"}`,
+        atlasLine(`Memoria aggiornata (${data.count} note). Id: ${data.entry?.id || "—"}.`),
         "ok",
+        { trust: "auto", trustLine: trustLineFor("auto", "memoria") },
       );
       ctx.speak?.(`Memoria aggiornata. Ora ho ${data.count} note.`);
     } catch (err) {
-      ctx.postChatUpdate?.(err?.message || "Memoria non aggiornata", "warn");
+      ctx.postChatUpdate?.(atlasLine(err?.message || "Memoria non aggiornata"), "warn");
     }
     return true;
   }
@@ -519,9 +817,9 @@ export async function handleAtlasCommand(raw, ctx = {}) {
   } catch (err) {
     data = null;
     if (local.matched) {
-      ctx.postChatUpdate?.(`Mani Atlas in locale: ${err?.message || "piano server non raggiunto"}.`, "warn");
+      ctx.postChatUpdate?.(atlasLine(`Mani in locale: ${err?.message || "piano server non raggiunto"}.`), "warn");
     } else {
-      ctx.postChatUpdate?.(err?.message || "Atlas: piano mani non disponibile.", "warn");
+      ctx.postChatUpdate?.(atlasLine(err?.message || "Piano mani non disponibile."), "warn");
       return true;
     }
   }
@@ -531,7 +829,10 @@ export async function handleAtlasCommand(raw, ctx = {}) {
   if (!hasSteps) {
     if (local.matched) data = payloadFromLocalPlan(local);
     else {
-      ctx.postChatUpdate?.("Atlas: nessuna azione plancia per questo comando.", "warn");
+      ctx.postChatUpdate?.(atlasLine("Nessuna azione plancia per questo comando."), "warn", {
+        trust: "ask",
+        trustLine: trustLineFor("ask", "mani"),
+      });
       return true;
     }
   }

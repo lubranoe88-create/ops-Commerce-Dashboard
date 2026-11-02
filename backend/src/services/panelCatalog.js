@@ -42,7 +42,8 @@ Tools: emit actions[] for zoom/fly/module switches and paid write tools; browser
 Budget: hard €/day OpenRouter cap — unused budget stays unused.
 Function board: when you detect a broken capability, emit write action
 {"type":"report-function","functionId":"<id>","status":"error","errorType":"CODE","detail":"..."}.
-Use status ok to clear. Known ids include browser-use, openrouter-key, auth-2fa, proactive-mechanical, proactive-ai, auto-router, cross-thread-memory, chat-attachments, budget-openrouter, paid-ai-turn, mic-voice.`;
+Use status ok to clear. Known ids include browser-use, openrouter-key, auth-2fa, proactive-mechanical, proactive-ai, auto-router, cross-thread-memory, chat-attachments, budget-openrouter, paid-ai-turn, mic-voice.
+Sandbox search and expandable memory are absent unless the user explicitly asked (cerca, ricerca, memoria). Do not invent those results.`;
 
 /** Client-side UI actions (safe; no confirm). */
 export const UI_ACTIONS = [
