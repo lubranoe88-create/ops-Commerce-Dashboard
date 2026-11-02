@@ -1428,6 +1428,17 @@ body[data-module="chat"] .analizza-bar { z-index: 50; }
   font-size: 12px;
   letter-spacing: 0.02em;
 }
+.bubble.system.pinned-briefing {
+  white-space: pre-wrap;
+  border-color: rgba(232, 184, 74, 0.45);
+  color: rgba(240, 232, 210, 0.95);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
 #glCanvas.cesium-ops,
 #glCanvas .cesium-viewer,
 #glCanvas .cesium-widget,

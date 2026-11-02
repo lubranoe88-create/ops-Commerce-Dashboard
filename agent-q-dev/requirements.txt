@@ -1,0 +1,43 @@
+# Dipendenze Agent Q — allineate a sentient-engineering/agent-q (pyproject.toml + requirements.txt)
+# Repo ufficiale: https://github.com/sentient-engineering/agent-q
+# Python richiesto: >=3.10,<4.0
+#
+# Installazione consigliata (come da README ufficiale):
+#   poetry install
+# Oppure con pip:
+#   pip install -r requirements.txt
+#   playwright install chromium
+
+# Pacchetto ufficiale Agent Q (nome Poetry: agentq)
+agentq @ git+https://github.com/sentient-engineering/agent-q.git
+
+# Runtime browser / computer use
+playwright==1.46.0
+pytest-playwright==0.5.1
+playwright-stealth==1.0.6
+
+# Modelli LLM (OpenAI + LiteLLM come nel core ufficiale)
+openai==1.41.1
+litellm==1.43.18
+instructor==1.4.0
+tiktoken==0.7.0
+
+# Orchestrazione / API / utilità ufficiali
+pydantic==2.8.2
+python-dotenv==1.0.1
+aiohttp==3.10.5
+numpy==2.1.0
+flask==3.0.3
+langsmith==0.1.104
+colorama==0.4.6
+termcolor==2.4.0
+tabulate==0.9.0
+python-json-logger==2.0.7
+pdfplumber==0.11.2
+nltk==3.9.1
+agentops==0.3.10
+boto3==1.35.1
+rich==13.8.0
+
+# Tracing opzionale citato in .env.example ufficiale (disattivabile, vedi README upstream)
+langfuse>=2.0.0

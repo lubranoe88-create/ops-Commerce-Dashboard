@@ -20,7 +20,7 @@ import {
   updateNewsPins,
   zoomByFactor,
   zoomToHeight,
-} from "./mapGlobe.js?v=rail-7";
+} from "./mapGlobe.js?v=rail-8";
 import {
   fetchAiNews,
   fetchAiStatus,
@@ -33,13 +33,13 @@ import {
   wireBriefingForm,
   wireBriefingHandler,
   wireProactiveHandlers,
-} from "./aiAgentUi.js?v=rail-7";
+} from "./aiAgentUi.js?v=rail-8";
 import {
   noteAiFunctionReports,
   wireFunctionBoardUi,
-} from "./functionBoardUi.js?v=rail-7";
+} from "./functionBoardUi.js?v=rail-8";
 
-const BUILD_ID = "rail-7";
+const BUILD_ID = "rail-8";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2500,6 +2500,27 @@ async function ensureChatModelSelect() {
   }
 }
 
+/** Nota fissa concordata (Agent Q / Jarvis) — reiniettata a ogni ingresso in chat. */
+const PINNED_BRIEFING_LINES = [
+  "CONCORDATO · Agent Q / Jarvis (nota fissa ad ogni apertura chat)",
+  "1) Framework: Agent Q (sentient-engineering) scelto per l’assistente tipo Jarvis in plancia.",
+  "2) Ricerca su richiesta: modulo ricerca su file locali, database e API, oltre al browser Playwright — solo se l’utente lo chiede.",
+  "3) Chiavi API: già presenti in plancia; riutilizzarle, mai hardcodarle.",
+  "4) Client: uso da tablet ora (PC tra settimane/mesi); UI ok su browser tablet.",
+  "5) Sandbox: ricerca locale in sandbox con permessi limitati.",
+  "6) Scope verificato: nessun riferimento istituzionale/intelligence nella repo ufficiale; paper ~95% successi web con Llama-3 70B.",
+];
+
+function renderPinnedBriefing(msgs) {
+  if (!msgs) return;
+  const pin = document.createElement("div");
+  pin.className = "bubble system pinned-briefing";
+  pin.dataset.pinned = "concordato-agentq";
+  pin.setAttribute("role", "note");
+  pin.textContent = PINNED_BRIEFING_LINES.join("\n");
+  msgs.appendChild(pin);
+}
+
 async function loadChat() {
   await ensureChatModelSelect();
   renderChatSuggestions();
@@ -2529,7 +2550,12 @@ async function loadChat() {
   if (!state.threadId && threads?.[0]) state.threadId = threads[0].id;
   const msgs = $("messageList");
   msgs.innerHTML = "";
-  if (!state.threadId) return;
+  // Sempre in cima: riepilogo concordato visibile a ogni ingresso/sessione chat.
+  renderPinnedBriefing(msgs);
+  if (!state.threadId) {
+    msgs.scrollTop = 0;
+    return;
+  }
   const { messages } = await api(`/api/chat/threads/${state.threadId}`);
   (messages || []).forEach((m) => {
     const d = document.createElement("div");
@@ -2541,7 +2567,7 @@ async function loadChat() {
     if (m.speech_input) d.dataset.speech = "1";
     msgs.appendChild(d);
   });
-  msgs.scrollTop = msgs.scrollHeight;
+  msgs.scrollTop = 0;
 }
 
 async function sendChat(text, { voice = false } = {}) {
