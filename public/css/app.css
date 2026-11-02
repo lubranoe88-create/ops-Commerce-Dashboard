@@ -1992,7 +1992,7 @@ body[data-module="map"] #app.clear-globe-layout #glCanvas {
   }
 }
 
-/* Agent Q document / live popup */
+/* Atlas document / live popup (class names stay agentq-doc-*) */
 .agentq-doc-popup {
   position: fixed;
   inset: 0;

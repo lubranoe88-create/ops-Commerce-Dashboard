@@ -40,9 +40,9 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-25-atlas";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-26-l3";
 
-const BUILD_ID = "rail-25-atlas";
+const BUILD_ID = "rail-26-l3";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -2862,10 +2862,10 @@ async function ensureChatModelSelect() {
   }
 }
 
-/** Nota fissa concordata (Atlas / ex Agente Q) — reiniettata a ogni ingresso in chat. */
+/** Nota fissa concordata (Atlas) — reiniettata a ogni ingresso in chat. */
 const PINNED_BRIEFING_LINES = [
   "CONCORDATO · Atlas in plancia (nota fissa ad ogni apertura chat)",
-  "1) Framework: Atlas (ex Agente Q / sentient-engineering) integrato in plancia. Presentarsi sempre come Atlas.",
+  "1) Framework: Atlas integrato in plancia. Nome, chat e voce: sempre Atlas.",
   "2) Ricerca su richiesta: modulo ricerca su file locali, database e API, oltre al browser Playwright — solo se l’utente lo chiede.",
   "3) Chiavi API: già presenti in plancia; riutilizzarle, mai hardcodarle.",
   "4) Client: uso da tablet ora (PC tra settimane/mesi); UI ok su browser tablet.",

@@ -15,6 +15,7 @@ import { buildFunctionBoard } from "./functionBoard.js";
 import { getDb } from "../memory/db.js";
 import { getDashboardSnapshot } from "../memory/store.js";
 import { ATLAS_NAME, withAtlasPersona } from "./atlasPersonality.js";
+import { describePolicy, gateHandActions } from "./atlasAutonomyPolicy.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(__dirname, "../../data");
@@ -83,6 +84,59 @@ export const AGENTQ_HAND_ACTIONS = [
   { id: "strumenti", label: "Apri strumenti", group: "sistema" },
 ];
 
+function replaceAgentDisplayName(text) {
+  return String(text ?? "").replace(/\bAgente Q\b|\bAgent Q\b|\bAgentQ\b/g, ATLAS_NAME);
+}
+
+/** Rewrite stored seed copy that is shown in chat, search, and document popups. */
+function migrateStoredDisplayNames() {
+  const sandboxReadme = path.join(SANDBOX_ROOT, "README.txt");
+  if (fs.existsSync(sandboxReadme)) {
+    try {
+      const cur = fs.readFileSync(sandboxReadme, "utf8");
+      const next = replaceAgentDisplayName(cur);
+      if (next !== cur) fs.writeFileSync(sandboxReadme, next, "utf8");
+    } catch {
+      /* keep the existing seed */
+    }
+  }
+  rewriteJsonDisplayFields(UPDATES_PATH, (list, fix) => {
+    if (!Array.isArray(list)) return;
+    for (const row of list) {
+      if (!row || typeof row !== "object") continue;
+      if (typeof row.title === "string") row.title = fix(row.title);
+      if (typeof row.detail === "string") row.detail = fix(row.detail);
+    }
+  });
+  rewriteJsonDisplayFields(MEMORY_EXPAND_PATH, (data, fix) => {
+    const entries = Array.isArray(data?.entries) ? data.entries : [];
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object") continue;
+      if (typeof entry.title === "string") entry.title = fix(entry.title);
+      if (typeof entry.text === "string") entry.text = fix(entry.text);
+    }
+  });
+}
+
+function rewriteJsonDisplayFields(filePath, visit) {
+  if (!fs.existsSync(filePath)) return;
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return;
+  }
+  let changed = false;
+  const fix = (value) => {
+    if (typeof value !== "string") return value;
+    const next = replaceAgentDisplayName(value);
+    if (next !== value) changed = true;
+    return next;
+  };
+  visit(data, fix);
+  if (changed) fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+}
+
 function ensureDirs() {
   fs.mkdirSync(SANDBOX_ROOT, { recursive: true });
   fs.mkdirSync(path.dirname(UPDATES_PATH), { recursive: true });
@@ -94,6 +148,7 @@ function ensureDirs() {
       "utf8",
     );
   }
+  migrateStoredDisplayNames();
   if (!fs.existsSync(UPDATES_PATH)) {
     fs.writeFileSync(
       UPDATES_PATH,
@@ -378,9 +433,10 @@ function ensureMemoryExpand() {
       "utf8",
     );
   }
+  migrateStoredDisplayNames();
 }
 
-/** Memoria espandibile Agent Q (append-only JSON sotto data/). */
+/** Memoria espandibile Atlas (append-only JSON sotto data/). Internal file name stays agentq-memory. */
 export function listExpandableMemory({ limit = 40, query = "" } = {}) {
   ensureMemoryExpand();
   let data = { entries: [] };
@@ -588,10 +644,9 @@ export async function planHandActions(objective) {
   const catalog = AGENTQ_HAND_ACTIONS.map((a) => `${a.id}: ${a.label}`).join("\n");
   const result = await completeChat({
     model: config.openRouterModel,
-    system:
-      withAtlasPersona(
-        `Sei ${ATLAS_NAME} sulla plancia OPS. Rispondi SOLO JSON: {"actions":["id",...],"speak":"breve conferma in italiano"}. Usa solo id del catalogo.`,
-      ),
+    system: withAtlasPersona(
+      `Sei ${ATLAS_NAME} sulla plancia OPS. Rispondi SOLO JSON: {"actions":["id",...],"speak":"breve conferma in italiano"}. Usa solo id del catalogo (autonomi: zoom, moduli, refresh). Non promettere azioni distruttive, browser-use, credenziali, export o spesa oltre la fascia soft: quelle richiedono conferma e non partono da sole.`,
+    ),
     prompt: `Obiettivo: ${objective}\nCatalogo:\n${catalog}`,
     maxTokens: 200,
     temperature: 0.1,
@@ -603,11 +658,14 @@ export async function planHandActions(objective) {
   } catch {
     /* keep raw */
   }
-  const allowed = new Set(AGENTQ_HAND_ACTIONS.map((a) => a.id));
-  const actions = (parsed.actions || []).filter((id) => allowed.has(id));
+  // L3: only AUTO ids are returned in `actions` (safe to run).
+  // ASK is flagged on `ask` / `tagged` and is not executed here.
+  const gated = gateHandActions(parsed.actions);
   return {
     ok: true,
-    actions,
+    actions: gated.actions,
+    ask: gated.ask,
+    tagged: gated.tagged,
     speak: parsed.speak || "",
     model: result.model,
     engine: "agentq-hands",
@@ -643,6 +701,7 @@ export async function agentqStatus() {
       path: mem.path,
     },
     hands: AGENTQ_HAND_ACTIONS.length,
+    autonomy: describePolicy(),
     functionBoard: board?.summary || board,
     voice: {
       browserTts: true,

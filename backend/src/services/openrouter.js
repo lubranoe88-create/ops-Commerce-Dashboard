@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { resolveChatModel } from "./chatModels.js";
+import { withAtlasPersona } from "./atlasPersonality.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -16,7 +17,8 @@ export async function completeChat({
   messages: priorMessages,
 } = {}) {
   const messages = [];
-  if (system) messages.push({ role: "system", content: system });
+  // Every chat completion (dashboard chat, /api/chat, agent turns, hands) gets Atlas.
+  messages.push({ role: "system", content: withAtlasPersona(system) });
   if (Array.isArray(priorMessages) && priorMessages.length) {
     for (const m of priorMessages) {
       if (m?.role && typeof m.content === "string") messages.push(m);
