@@ -303,18 +303,24 @@ function planFromHands(data) {
   return out;
 }
 
-export async function runHands(objective, { runHoloAction, postChatUpdate, speak } = {}) {
-  const data = await api("/api/ai/agentq/hands", {
-    method: "POST",
-    body: JSON.stringify({ objective }),
-  });
-  if (data.speak) {
-    postChatUpdate?.(`Atlas: ${data.speak}`);
-    speak?.(data.speak);
-  }
+function voiceCallOpen() {
+  return document.documentElement?.dataset?.voiceCall === "1";
+}
+
+/**
+ * Run a gated hand plan. AUTO steps run. ASK steps use the confirm path.
+ * Resident reactions pass respectCall so a live MIC call is not interrupted.
+ */
+export async function executeHandPlan(data, ctx = {}, { respectCall = false, quietIfEmpty = false } = {}) {
+  const { runHoloAction, postChatUpdate } = ctx;
   const plan = planFromHands(data);
   if (!plan.length) {
-    postChatUpdate?.("Atlas: nessuna azione plancia proposta per questo obiettivo.", "warn");
+    if (!quietIfEmpty) postChatUpdate?.("Atlas: nessuna azione plancia proposta per questo obiettivo.", "warn");
+    return data;
+  }
+  if (respectCall && voiceCallOpen()) {
+    const ids = plan.map((step) => step.id).join(", ");
+    postChatUpdate?.(`Atlas lascia in sospeso durante la chiamata: ${ids}.`, "ok");
     return data;
   }
   for (const step of plan) {
@@ -352,6 +358,94 @@ export async function runHands(objective, { runHoloAction, postChatUpdate, speak
   return data;
 }
 
+export async function runHands(objective, ctx = {}) {
+  const data = await api("/api/ai/agentq/hands", {
+    method: "POST",
+    body: JSON.stringify({ objective }),
+  });
+  if (data.speak) {
+    ctx.postChatUpdate?.(`Atlas: ${data.speak}`);
+    ctx.speak?.(data.speak);
+  }
+  return executeHandPlan(data, ctx);
+}
+
+const seenResidentIds = new Set();
+let residentStarted = false;
+let residentSource = null;
+
+function residentBubble(data) {
+  return [data?.summary, data?.newsLiteracy]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(" — ");
+}
+
+function withoutMic(data) {
+  const drop = (list) =>
+    (Array.isArray(list) ? list : []).filter((item) => handId(item).toLowerCase() !== "mic");
+  return {
+    ...data,
+    actions: drop(data?.actions),
+    ask: drop(data?.ask),
+    tagged: drop(data?.tagged),
+  };
+}
+
+async function presentResident(data, ctx) {
+  if (!data) return;
+  const key = data.id || data.seq || residentBubble(data);
+  if (!key || seenResidentIds.has(key)) return;
+  seenResidentIds.add(key);
+  const line = residentBubble(data);
+  if (line) ctx.postChatUpdate?.(line, "ok");
+  if (data.summary) ctx.speak?.(data.summary, { ifUnlocked: true, yieldToCall: true });
+  await executeHandPlan(withoutMic(data), ctx, { respectCall: true, quietIfEmpty: true });
+}
+
+function openResidentEvents(ctx, afterSeq) {
+  if (residentSource || typeof EventSource !== "function") return;
+  const after = Number(afterSeq) || 0;
+  const es = new EventSource(`/api/ai/agentq/resident/events?after=${after}`);
+  residentSource = es;
+  es.onmessage = (ev) => {
+    let data = null;
+    try {
+      data = JSON.parse(ev.data);
+    } catch {
+      return;
+    }
+    if (!data || data.kind === "ping") return;
+    presentResident(data, ctx).catch((err) => {
+      console.warn("[atlas-resident]", err?.message || err);
+    });
+  };
+}
+
+/**
+ * L1: one wake per plancia load. L2: EventSource receives hook pushes.
+ * No setInterval. Speak only when voice is already unlocked, and never during a call.
+ */
+export async function startAtlasResident(ctx = {}) {
+  if (residentStarted) return null;
+  residentStarted = true;
+  const moduleName = typeof ctx.module === "function" ? ctx.module() : ctx.module || "map";
+  document.documentElement.dataset.atlasResident = "1";
+  let data;
+  try {
+    data = await api("/api/ai/agentq/resident/wake", {
+      method: "POST",
+      body: JSON.stringify({ module: moduleName || "map" }),
+    });
+  } catch (err) {
+    document.documentElement.dataset.atlasResident = "0";
+    throw err;
+  }
+  await presentResident(data, ctx);
+  openResidentEvents(ctx, data?.seq || 0);
+  return data;
+}
+
 export function isHandsRequest(text) {
   const t = String(text || "").toLowerCase();
   return /\b(apri|vai|mostra|zoom|mani|controlla modulo|agent\s*q)\b/.test(t);
@@ -359,8 +453,13 @@ export function isHandsRequest(text) {
 
 export async function wireAgentqUi(ctx) {
   ensurePopup();
-  // Aggiornamenti all'ingresso (una volta per boot)
-  await showEntryUpdates(ctx);
+  // Resident wake once per boot. Raw ingress dump only if that one shot fails.
+  try {
+    await startAtlasResident(ctx);
+  } catch (err) {
+    console.warn("[atlas-resident] wake", err?.message || err);
+    await showEntryUpdates(ctx);
+  }
 
   // Comandi dalla barra Analizza: intercept search / hands before normal chat when prefixed
   const input = $("chatInput");

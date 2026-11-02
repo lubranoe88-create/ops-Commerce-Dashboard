@@ -40,9 +40,9 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { wireAgentqUi } from "./agentqUi.js?v=rail-28-c1";
+import { wireAgentqUi } from "./agentqUi.js?v=rail-29-resident";
 
-const BUILD_ID = "rail-28-c1";
+const BUILD_ID = "rail-29-resident";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1746,8 +1746,12 @@ async function speakViaServerAudio(line) {
  * Angle brackets are stripped. `opts.force` must not unlock audio by itself.
  */
 function speak(text, opts = {}) {
+  // Resident summaries yield the MIC call and stay silent until a real unlock.
+  // They must not call getUserMedia and must not take the call's playback slot.
+  if (opts.yieldToCall && document.documentElement.dataset.voiceCall === "1") return;
   const unlocked = voiceUnlocked || document.documentElement.dataset.tts === "1";
   if (!unlocked) {
+    if (opts.ifUnlocked) return;
     const now = Date.now();
     if (now - lastTtsGateMsgAt > 4000) {
       lastTtsGateMsgAt = now;
@@ -4560,6 +4564,7 @@ async function boot() {
       showToast,
       runHoloAction,
       speak,
+      module: () => state.module,
     });
   } catch (e) {
     bootNote(e, "Atlas non collegato");

@@ -1,4 +1,5 @@
 import { getDb } from "./db.js";
+import { noteResidentIngress } from "../services/atlasResidentBus.js";
 
 function dayKeyInTz(tz = "Europe/Berlin", d = new Date()) {
   try {
@@ -359,7 +360,16 @@ export function pushProactiveEvent(dayKey, kind, payload, db = getDb()) {
        VALUES (?, ?, ?, 0)`,
     )
     .run(dayKey, kind, JSON.stringify(payload || {}));
-  return Number(r.lastInsertRowid);
+  const id = Number(r.lastInsertRowid);
+  const body = payload && typeof payload === "object" ? payload : {};
+  noteResidentIngress({
+    kind: "proactive",
+    id,
+    eventKind: kind,
+    toast: typeof body.toast === "string" ? body.toast.slice(0, 240) : "",
+    titles: Array.isArray(body.titles) ? body.titles.slice(0, 4) : [],
+  });
+  return id;
 }
 
 export function listUndeliveredProactive(dayKey, limit = 20, db = getDb()) {
@@ -401,18 +411,41 @@ export function upsertNewsItems(items, db = getDb()) {
        published_at = excluded.published_at,
        fetched_at = datetime('now')`,
   );
+  const select = db.prepare(`SELECT title, summary FROM world_news WHERE external_id = ?`);
+  const changed = [];
   for (const it of items || []) {
+    if (!it?.external_id) continue;
+    const summary = it.summary || "";
+    const prev = select.get(it.external_id);
+    const isNew = !prev;
+    const isChanged = isNew || prev.title !== it.title || (prev.summary || "") !== summary;
     upsert.run(
       it.external_id,
       it.title,
-      it.summary || "",
+      summary,
       it.url || "",
       it.source || "",
       it.lat ?? null,
       it.lon ?? null,
       it.published_at || null,
     );
+    if (isChanged) changed.push({ ...it, summary, change: isNew ? "inserted" : "updated" });
   }
+  if (changed.length) {
+    noteResidentIngress({
+      kind: "news",
+      count: changed.length,
+      items: changed.slice(0, 6).map((n) => ({
+        id: n.external_id,
+        title: n.title,
+        summary: String(n.summary || "").slice(0, 240),
+        source: n.source || "",
+        url: n.url || "",
+        change: n.change,
+      })),
+    });
+  }
+  return { changed };
 }
 
 export function listLatestNews(limit = 12, db = getDb()) {

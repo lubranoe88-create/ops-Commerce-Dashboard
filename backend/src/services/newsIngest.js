@@ -82,6 +82,7 @@ export async function refreshWorldNews({ force = false } = {}) {
     if (!res.ok) throw new Error(`RSS HTTP ${res.status}`);
     const xml = await res.text();
     const items = parseRssItems(xml, 12);
+    // Changed rows notify the Atlas resident from upsertNewsItems (L2 hook, no poll).
     if (items.length) upsertNewsItems(items);
     lastFetchMs = now;
   } catch (err) {

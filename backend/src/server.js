@@ -17,6 +17,7 @@ import { initDashboardStore } from "./memory/store.js";
 import { ensureAiSchema } from "./memory/aiStore.js";
 import { getDb } from "./memory/db.js";
 import { refreshWorldNews } from "./services/newsIngest.js";
+import { installAtlasResident } from "./services/atlasResident.js";
 import { applyBrowserUseRuntimeEnv } from "./services/browserUseRuntime.js";
 
 applyBrowserUseRuntimeEnv();
@@ -38,6 +39,8 @@ const publicDir =
 assertRuntimeSecrets();
 initDashboardStore();
 ensureAiSchema(getDb());
+// Atlas stays resident in-process. News warm below can queue ingress for the first wake.
+installAtlasResident();
 // Mechanical news warm (no AI)
 refreshWorldNews({ force: true }).catch((err) =>
   console.warn("[news] warm failed", err?.message || err),
@@ -87,7 +90,7 @@ const chatLimiter = rateLimit({
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    build: "rail-28-c1",
+    build: "rail-29-resident",
     browserProbe: "example-1",
     model: config.openRouterModel,
     routerModel: config.aiRouterModel,

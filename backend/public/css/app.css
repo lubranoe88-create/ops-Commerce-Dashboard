@@ -571,6 +571,10 @@ body[data-module="chat"] #chatPanel {
   text-transform: uppercase;
   color: var(--cyan);
 }
+html[data-atlas-resident="1"] .chat-who::after {
+  content: " · residente";
+  letter-spacing: 0.08em;
+}
 .chat-model-label {
   font-size: 11px;
   letter-spacing: 0.06em;

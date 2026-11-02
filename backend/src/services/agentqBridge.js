@@ -16,11 +16,22 @@ import { getDb } from "../memory/db.js";
 import { getDashboardSnapshot } from "../memory/store.js";
 import { ATLAS_NAME, withAtlasPersona } from "./atlasPersonality.js";
 import { describePolicy, gateHandActions } from "./atlasAutonomyPolicy.js";
+import { noteResidentIngress } from "./atlasResidentBus.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(__dirname, "../../data");
 const SANDBOX_ROOT = path.resolve(DATA_ROOT, "agentq-sandbox");
 const UPDATES_PATH = path.resolve(DATA_ROOT, "agentq-updates/updates.json");
+let updatesPathOverride = "";
+
+/** Tests point the ingress feed at a temp file. Production uses UPDATES_PATH. */
+export function setUpdatesPathForTests(filePath) {
+  updatesPathOverride = filePath ? path.resolve(filePath) : "";
+}
+
+function updatesFile() {
+  return updatesPathOverride || UPDATES_PATH;
+}
 const MEMORY_EXPAND_PATH = path.resolve(DATA_ROOT, "agentq-memory/expandable.json");
 
 /** Solo SELECT su queste tabelle — nessuna scrittura via ricerca. */
@@ -100,7 +111,7 @@ function migrateStoredDisplayNames() {
       /* keep the existing seed */
     }
   }
-  rewriteJsonDisplayFields(UPDATES_PATH, (list, fix) => {
+  rewriteJsonDisplayFields(updatesFile(), (list, fix) => {
     if (!Array.isArray(list)) return;
     for (const row of list) {
       if (!row || typeof row !== "object") continue;
@@ -139,7 +150,8 @@ function rewriteJsonDisplayFields(filePath, visit) {
 
 function ensureDirs() {
   fs.mkdirSync(SANDBOX_ROOT, { recursive: true });
-  fs.mkdirSync(path.dirname(UPDATES_PATH), { recursive: true });
+  const updatesPath = updatesFile();
+  fs.mkdirSync(path.dirname(updatesPath), { recursive: true });
   const sandboxReadme = path.join(SANDBOX_ROOT, "README.txt");
   if (!fs.existsSync(sandboxReadme)) {
     fs.writeFileSync(
@@ -149,23 +161,18 @@ function ensureDirs() {
     );
   }
   migrateStoredDisplayNames();
-  if (!fs.existsSync(UPDATES_PATH)) {
-    fs.writeFileSync(
-      UPDATES_PATH,
-      JSON.stringify(
-        [
+  if (!fs.existsSync(updatesPath)) {
+    const seed = updatesPathOverride
+      ? []
+      : [
           {
             at: new Date().toISOString(),
             title: "Atlas in plancia",
             detail:
               "Bridge attivo: ricerca on-demand in sandbox, aggiornamenti ingresso, pop-up documenti, mani moduli/zoom.",
           },
-        ],
-        null,
-        2,
-      ),
-      "utf8",
-    );
+        ];
+    fs.writeFileSync(updatesPath, JSON.stringify(seed, null, 2), "utf8");
   }
 }
 
@@ -569,7 +576,7 @@ export function getEntryUpdates({ limit = 12 } = {}) {
   ensureDirs();
   let list = [];
   try {
-    list = JSON.parse(fs.readFileSync(UPDATES_PATH, "utf8"));
+    list = JSON.parse(fs.readFileSync(updatesFile(), "utf8"));
   } catch {
     list = [];
   }
@@ -583,20 +590,24 @@ export function getEntryUpdates({ limit = 12 } = {}) {
 
 export function appendEntryUpdate({ title, detail }) {
   ensureDirs();
+  const updatesPath = updatesFile();
   let list = [];
   try {
-    list = JSON.parse(fs.readFileSync(UPDATES_PATH, "utf8"));
+    list = JSON.parse(fs.readFileSync(updatesPath, "utf8"));
   } catch {
     list = [];
   }
   if (!Array.isArray(list)) list = [];
-  list.unshift({
+  const entry = {
     at: new Date().toISOString(),
     title: String(title || "Aggiornamento").slice(0, 120),
     detail: String(detail || "").slice(0, 500),
-  });
-  fs.writeFileSync(UPDATES_PATH, JSON.stringify(list.slice(0, 50), null, 2));
-  return { ok: true };
+  };
+  list.unshift(entry);
+  fs.writeFileSync(updatesPath, JSON.stringify(list.slice(0, 50), null, 2));
+  // L2: forward the write itself. The resident reacts; callers do not poll.
+  noteResidentIngress({ kind: "updates", update: entry });
+  return { ok: true, update: entry };
 }
 
 /** Legge un file sandbox per pop-up documento (testo). */

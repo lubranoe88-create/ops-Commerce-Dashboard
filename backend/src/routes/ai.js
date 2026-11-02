@@ -46,16 +46,57 @@ import {
   getAgentqProblems,
 } from "../services/agentqBridge.js";
 import { recordAskApproval } from "../services/atlasAutonomyPolicy.js";
+import {
+  installAtlasResident,
+  residentStatus,
+  subscribeResidentStream,
+  wakeResident,
+} from "../services/atlasResident.js";
+
+installAtlasResident();
 
 export const aiRouter = Router();
 
 /** Agent Q — stato integrazione (chiavi da env plancia, mai in chiaro). */
 aiRouter.get("/agentq/status", requireAiPaid, async (_req, res) => {
   try {
-    res.json(await agentqStatus());
+    const status = await agentqStatus();
+    status.resident = residentStatus();
+    res.json(status);
   } catch (err) {
     res.status(500).json({ error: err.message || "agentq status failed" });
   }
+});
+
+/**
+ * Resident runtime. Password gate (mounted in server.js) is the auth check.
+ * The model turn is paid-only inside wakeResident; otherwise the summary is mechanical.
+ * One POST is the L1 wake. The SSE stream only forwards events the hooks already pushed.
+ */
+aiRouter.get("/agentq/resident", (_req, res) => {
+  res.json(residentStatus());
+});
+
+aiRouter.post("/agentq/resident/wake", async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await wakeResident({
+      module: body.module || body.uiState?.module || "map",
+      uiState: body.uiState || {},
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || "resident wake failed" });
+  }
+});
+
+aiRouter.get("/agentq/resident/events", (req, res) => {
+  const header = req.headers["last-event-id"];
+  const after =
+    header != null && header !== ""
+      ? Number(header) || 0
+      : Number(req.query?.after || 0) || 0;
+  subscribeResidentStream(req, res, { after });
 });
 
 /**

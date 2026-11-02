@@ -124,22 +124,23 @@ describe("Atlas C1 chat", () => {
     assert.equal(appJs.includes("loadChat({ introduce: true })"), true);
     assert.equal(appJs.includes('title: "Atlas"'), true);
     assert.equal(appJs.includes('title: "Session"'), false);
-    assert.equal(appJs.includes('const BUILD_ID = "rail-28-c1"'), true);
+    assert.equal(appJs.includes('const BUILD_ID = "rail-29-resident"'), true);
     assert.equal(appJs.includes("rail-27-x1"), false);
+    assert.equal(appJs.includes("rail-28-c1"), false);
 
     assert.match(html, /aria-label="Chat con Atlas"/);
     assert.match(html, /class="chat-who"/);
     assert.match(html, /placeholder="Chiedi ad Atlas…"/);
     assert.match(html, /aria-label="Messaggio per Atlas"/);
-    assert.match(html, /src="\/js\/app\.js\?v=rail-28-c1"/);
-    assert.match(html, /href="\/css\/app\.css\?v=rail-28-c1"/);
+    assert.match(html, /src="\/js\/app\.js\?v=rail-29-resident"/);
+    assert.match(html, /href="\/css\/app\.css\?v=rail-29-resident"/);
     assert.equal(html.includes("poi Atlas apre il giorno"), true);
     assert.equal(html.includes("rail-27-x1"), false);
 
     assert.match(css, /content:\s*"Atlas"/);
     assert.match(css, /\.chat-who/);
 
-    assert.equal(read("backend/src/server.js").includes('build: "rail-28-c1"'), true);
+    assert.equal(read("backend/src/server.js").includes('build: "rail-29-resident"'), true);
 
     function filesUnder(dir) {
       const out = [];
