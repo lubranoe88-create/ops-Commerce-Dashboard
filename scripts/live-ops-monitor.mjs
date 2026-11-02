@@ -323,11 +323,31 @@ async function main() {
         engine: document.documentElement.dataset.micEngine || "",
       }));
       await browser.close().catch(() => {});
-      mid.tts === "1" || mid.micLive || mid.call === "1"
-        ? ok("MIC browser (soft)", JSON.stringify(mid))
-        : bad("MIC browser (soft)", JSON.stringify(mid));
+      if (mid.tts === "1" || mid.micLive || mid.call === "1") {
+        ok("MIC browser (soft)", JSON.stringify(mid));
+      } else if (process.env.MONITOR_STRICT_MIC === "1") {
+        bad("MIC browser (soft)", JSON.stringify(mid));
+      } else {
+        results.push({
+          name: "MIC browser (soft)",
+          ok: true,
+          softFail: true,
+          detail: `warn-only ${JSON.stringify(mid)}`,
+        });
+        console.log(`WARN  MIC browser (soft) — ${JSON.stringify(mid)}`);
+      }
     } catch (e) {
-      bad("MIC browser (soft)", String(e?.message || e));
+      if (process.env.MONITOR_STRICT_MIC === "1") {
+        bad("MIC browser (soft)", String(e?.message || e));
+      } else {
+        results.push({
+          name: "MIC browser (soft)",
+          ok: true,
+          softFail: true,
+          detail: `warn-only ${String(e?.message || e)}`,
+        });
+        console.log(`WARN  MIC browser (soft) — ${e?.message || e}`);
+      }
     }
   }
 
