@@ -22,6 +22,7 @@ import { readIntegrityReport } from "./services/atlasIntegrityStore.js";
 import { runStartupIntegrity } from "./services/atlasStartupIntegrity.js";
 import { attemptSelfHeal } from "./services/atlasSelfHeal.js";
 import { applyBrowserUseRuntimeEnv } from "./services/browserUseRuntime.js";
+import { runtimeProve, summarizeProve } from "./services/atlasProve.js";
 
 applyBrowserUseRuntimeEnv();
 
@@ -90,10 +91,27 @@ const chatLimiter = rateLimit({
   message: { error: "Too many requests — try again later" },
 });
 
-app.get("/health", (_req, res) => {
+app.get("/health", async (_req, res) => {
+  let prove = null;
+  try {
+    prove = summarizeProve(await runtimeProve());
+  } catch (err) {
+    prove = {
+      ok: false,
+      build: "rail-36-prove",
+      depth: "runtime",
+      passed: 0,
+      total: 0,
+      percent: 0,
+      deferred: [],
+      items: [],
+      error: String(err?.message || "prove failed").slice(0, 200),
+    };
+  }
   res.json({
     ok: true,
-    build: "rail-35-voice",
+    build: "rail-36-prove",
+    prove,
     voice: {
       duplex: "barge-cancel",
       alwaysOn: config.voiceAlwaysOn,

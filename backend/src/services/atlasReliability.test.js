@@ -410,8 +410,8 @@ describe("Atlas rail-32 reliability", { concurrency: false }, () => {
     assert.match(ui, /recallLine/);
     assert.match(ui, /decisionLine/);
     assert.match(ui, /decisionSnippet/);
-    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-35-voice"/);
-    assert.match(read("backend/src/server.js"), /build:\s*"rail-35-voice"/);
+    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-36-prove"/);
+    assert.match(read("backend/src/server.js"), /build:\s*"rail-36-prove"/);
     assert.equal(read("public/js/app.js"), read("backend/public/js/app.js"));
     assert.equal(read("public/index.html"), read("backend/public/index.html"));
   });

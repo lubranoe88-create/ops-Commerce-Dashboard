@@ -12,6 +12,7 @@ import { classifyAction, gateHandActions } from "./atlasAutonomyPolicy.js";
 import { asAtlasLine } from "./atlasPersonality.js";
 import { noteToolCall } from "./atlasToolLog.js";
 import { ATLAS_WORKFLOWS } from "./atlasRoute.js";
+import { ATLAS_BUILD } from "../atlasBuild.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PATH = path.resolve(__dirname, "../../data/agentq-memory/atlas-mcp-tools.json");
@@ -241,7 +242,7 @@ export async function handleMcpMessage(message) {
         return rpcResult(id, {
           protocolVersion: PROTOCOL,
           capabilities: { tools: { listChanged: true } },
-          serverInfo: { name: "Atlas", version: "rail-35-voice" },
+          serverInfo: { name: "Atlas", version: ATLAS_BUILD },
           instructions: "Atlas è il nome verso l'operatore. I tool sono le mani e i playbook della plancia.",
         });
       case "notifications/initialized":
