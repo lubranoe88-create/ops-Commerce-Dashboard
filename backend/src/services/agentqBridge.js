@@ -35,8 +35,31 @@ export const AGENTQ_HAND_ACTIONS = [
 function ensureDirs() {
   fs.mkdirSync(SANDBOX_ROOT, { recursive: true });
   fs.mkdirSync(path.dirname(UPDATES_PATH), { recursive: true });
+  const sandboxReadme = path.join(SANDBOX_ROOT, "README.txt");
+  if (!fs.existsSync(sandboxReadme)) {
+    fs.writeFileSync(
+      sandboxReadme,
+      "Sandbox Agent Q — ricerca locale a permessi limitati.\nSolo questa directory è consultabile dalla ricerca filesystem.\n",
+      "utf8",
+    );
+  }
   if (!fs.existsSync(UPDATES_PATH)) {
-    fs.writeFileSync(UPDATES_PATH, "[]", "utf8");
+    fs.writeFileSync(
+      UPDATES_PATH,
+      JSON.stringify(
+        [
+          {
+            at: new Date().toISOString(),
+            title: "Agent Q in plancia",
+            detail:
+              "Bridge attivo: ricerca on-demand in sandbox, aggiornamenti ingresso, pop-up documenti, mani moduli/zoom.",
+          },
+        ],
+        null,
+        2,
+      ),
+      "utf8",
+    );
   }
 }
 
