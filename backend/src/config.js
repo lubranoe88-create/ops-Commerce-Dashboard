@@ -48,7 +48,12 @@ export const config = {
     process.env.SESSION_SECRET?.trim() ||
     secretOrPlaceholder("SITE_PASSWORD", "CHANGE_ME_SITE_PASSWORD") + "-session",
   rateLimitWindowMs: intEnv("RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
-  rateLimitMax: intEnv("RATE_LIMIT_MAX", 60),
+  /** Dashboard + Agent Q voice poll many endpoints; 60 was too tight (429 on iPad QA). */
+  rateLimitMax: intEnv("RATE_LIMIT_MAX", 300),
+  /** OpenRouter TTS model for iPad AudioContext playback fallback. */
+  openRouterTtsModel:
+    process.env.OPENROUTER_TTS_MODEL?.trim() || "openai/gpt-4o-mini-tts",
+  openRouterTtsVoice: process.env.OPENROUTER_TTS_VOICE?.trim() || "alloy",
   maxPromptChars: intEnv("MAX_PROMPT_CHARS", 8000),
   maxSystemChars: intEnv("MAX_SYSTEM_CHARS", 2000),
   maxTokens: intEnv("MAX_TOKENS", 1024),

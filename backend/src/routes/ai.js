@@ -32,7 +32,7 @@ import {
   FUNCTION_CATALOG,
 } from "../services/functionBoard.js";
 import { config } from "../config.js";
-import { transcribeAudio } from "../services/openrouter.js";
+import { transcribeAudio, synthesizeSpeech } from "../services/openrouter.js";
 import {
   agentqStatus,
   runAgentqSearch,
@@ -410,6 +410,36 @@ aiRouter.post("/browser-use", requireAiPaid, async (req, res) => {
       code: err.code,
       budget: err.budget || getBudgetStatus(),
       status: browserUseStatus(),
+    });
+  }
+});
+
+/**
+ * Safari/iPad server TTS → client plays via primed AudioContext.
+ * Body: { text } → { ok, mime, audioBase64, model }
+ */
+aiRouter.post("/speak", requireAiPaid, async (req, res) => {
+  try {
+    const text = String(req.body?.text || req.body?.input || "").trim();
+    if (!text) return res.status(400).json({ error: "text richiesto" });
+    const result = await synthesizeSpeech({
+      text,
+      model: req.body?.model || config.openRouterTtsModel,
+      voice: req.body?.voice || config.openRouterTtsVoice,
+      responseFormat: "mp3",
+    });
+    res.json({
+      ok: true,
+      mime: result.mime,
+      audioBase64: result.buffer.toString("base64"),
+      model: result.model,
+      voice: result.voice,
+    });
+  } catch (err) {
+    const status = err.status && Number.isInteger(err.status) ? err.status : 502;
+    res.status(status).json({
+      error: err.message || "speak failed",
+      code: err.code || null,
     });
   }
 });

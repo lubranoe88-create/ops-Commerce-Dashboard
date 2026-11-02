@@ -87,7 +87,7 @@ const chatLimiter = rateLimit({
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    build: "rail-11",
+    build: "rail-12",
     browserProbe: "example-1",
     model: config.openRouterModel,
     routerModel: config.aiRouterModel,
@@ -109,7 +109,16 @@ app.use("/api/chat", chatLimiter, chatRouter);
 // Function board polls every ~20s; keep it off the tight chat limiter so the
 // 2D grid does not stay empty under interactive QA / multi-tab use.
 app.use("/api/ai", (req, res, next) => {
-  if (String(req.path || "").startsWith("/function-board")) return next();
+  const p = String(req.path || "");
+  // Keep interactive voice + board polling off the tight chat limiter.
+  if (
+    p.startsWith("/function-board") ||
+    p === "/speak" ||
+    p === "/transcribe" ||
+    p.startsWith("/agentq/")
+  ) {
+    return next();
+  }
   return chatLimiter(req, res, next);
 }, aiRouter);
 app.use("/api", chatLimiter, dashboardRouter);

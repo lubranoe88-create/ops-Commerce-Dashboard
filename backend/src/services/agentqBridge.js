@@ -642,9 +642,11 @@ export async function agentqStatus() {
     functionBoard: board?.summary || board,
     voice: {
       browserTts: true,
+      serverTts: true,
       whisperStt: true,
       nativeAgentqTts: false,
-      note: "Repo agent-q non include TTS; plancia usa speechSynthesis + Whisper fallback",
+      note:
+        "iPad: unlock TTS su pointerdown MIC; server TTS→AudioContext; MediaRecorder+Whisper; no SpeechRecognition",
     },
   };
 }

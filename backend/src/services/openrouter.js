@@ -142,3 +142,75 @@ export async function transcribeAudio({
   }
   return { text, model: payload?.model || "openai/whisper-1" };
 }
+
+const OPENROUTER_SPEECH_URL = "https://openrouter.ai/api/v1/audio/speech";
+
+/**
+ * Server TTS for Safari/iPad: returns raw audio bytes (mp3) for AudioContext playback.
+ * Key stays server-side; used when speechSynthesis is gated or silent with mic in use.
+ */
+export async function synthesizeSpeech({
+  text,
+  model = config.openRouterTtsModel,
+  voice = config.openRouterTtsVoice,
+  responseFormat = "mp3",
+} = {}) {
+  const key = config.openRouterApiKey;
+  if (!key || /CHANGE_ME|PLACEHOLDER|your-key/i.test(key)) {
+    const err = new Error("OpenRouter not configured");
+    err.code = "NO_OPENROUTER";
+    err.status = 503;
+    throw err;
+  }
+  const input = String(text || "")
+    .replace(/[<>]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 800);
+  if (!input) {
+    const err = new Error("testo TTS richiesto");
+    err.status = 400;
+    throw err;
+  }
+
+  const response = await fetch(OPENROUTER_SPEECH_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": config.openRouterHttpReferer,
+      "X-Title": config.openRouterAppTitle,
+    },
+    body: JSON.stringify({
+      model,
+      input,
+      voice,
+      response_format: responseFormat || "mp3",
+    }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const detail =
+      payload?.error?.message ||
+      payload?.message ||
+      `OpenRouter TTS HTTP ${response.status}`;
+    const err = new Error(detail);
+    err.status = response.status >= 400 && response.status < 600 ? response.status : 502;
+    err.upstream = true;
+    throw err;
+  }
+
+  const buf = Buffer.from(await response.arrayBuffer());
+  if (!buf.length) {
+    const err = new Error("TTS audio vuoto");
+    err.status = 502;
+    throw err;
+  }
+  return {
+    buffer: buf,
+    mime: responseFormat === "pcm" ? "audio/pcm" : "audio/mpeg",
+    model,
+    voice,
+  };
+}
