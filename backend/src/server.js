@@ -99,7 +99,7 @@ app.get("/health", async (_req, res) => {
   } catch (err) {
     prove = {
       ok: false,
-      build: "rail-39-safari-voice",
+      build: "rail-40-mic-clone",
       depth: "runtime",
       passed: 0,
       total: 0,
@@ -112,7 +112,7 @@ app.get("/health", async (_req, res) => {
   const wake = wakeWordStatus(config.voiceAlwaysOn, { desktop: false });
   res.json({
     ok: true,
-    build: "rail-39-safari-voice",
+    build: "rail-40-mic-clone",
     prove,
     voice: {
       duplex: "barge-cancel",

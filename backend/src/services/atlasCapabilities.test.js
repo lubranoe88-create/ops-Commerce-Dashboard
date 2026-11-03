@@ -290,7 +290,7 @@ describe("Atlas rail-32 capabilities", { concurrency: false }, () => {
     assert.match(read("public/css/app.css"), /\.atlas-trust/);
     assert.match(read("public/css/app.css"), /data-trust="ask"/);
     assert.match(read("backend/src/services/atlasResident.js"), /trustLineForResult/);
-    assert.equal(read("public/js/app.js").includes('const BUILD_ID = "rail-39-safari-voice"'), true);
-    assert.equal(read("backend/src/server.js").includes('build: "rail-39-safari-voice"'), true);
+    assert.equal(read("public/js/app.js").includes('const BUILD_ID = "rail-40-mic-clone"'), true);
+    assert.equal(read("backend/src/server.js").includes('build: "rail-40-mic-clone"'), true);
   });
 });

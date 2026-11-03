@@ -40,17 +40,17 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-39-safari-voice";
-import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-39-safari-voice";
+import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-40-mic-clone";
+import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-40-mic-clone";
 import {
   dispatchAtlasHand,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
-} from "./atlasHoloDispatch.js?v=rail-39-safari-voice";
-import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-39-safari-voice";
-import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-39-safari-voice";
-import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-39-safari-voice";
-import { VOICE_DUPLEX, reduceCall, shouldYieldToCall, wakeWordStatus } from "./atlasCall.js?v=rail-39-safari-voice";
+} from "./atlasHoloDispatch.js?v=rail-40-mic-clone";
+import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-40-mic-clone";
+import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-40-mic-clone";
+import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-40-mic-clone";
+import { VOICE_DUPLEX, reduceCall, shouldYieldToCall, wakeWordStatus } from "./atlasCall.js?v=rail-40-mic-clone";
 import {
   WAKE_WORD,
   canArmAlwaysOn,
@@ -58,9 +58,9 @@ import {
   matchesWakeWord,
   reduceAlwaysOn,
   wakeCommandRemainder,
-} from "./atlasWake.js?v=rail-39-safari-voice";
+} from "./atlasWake.js?v=rail-40-mic-clone";
 
-const BUILD_ID = "rail-39-safari-voice";
+const BUILD_ID = "rail-40-mic-clone";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -3535,6 +3535,39 @@ function containerLooksDecodable(bytes, mime) {
 }
 
 /**
+ * Safari/iPad: MediaRecorder + createMediaStreamSource on the SAME MediaStream
+ * often yields silent Analyser PCM (meter stuck at 0, Whisper empty). Feed the
+ * Web Audio graph cloned tracks; leave the original stream for MediaRecorder.
+ */
+function micStreamForAudioGraph(stream) {
+  if (!stream || typeof stream.getAudioTracks !== "function") return stream;
+  try {
+    const tracks = stream.getAudioTracks();
+    if (!tracks.length) return stream;
+    const clones = tracks.map((track) => (typeof track.clone === "function" ? track.clone() : track));
+    if (!clones.some((clone, index) => clone !== tracks[index])) return stream;
+    return new MediaStream(clones);
+  } catch {
+    return stream;
+  }
+}
+
+function releaseClonedMicStream(graphStream, original) {
+  if (!graphStream || graphStream === original) return;
+  try {
+    graphStream.getTracks?.().forEach((track) => {
+      try {
+        track.stop();
+      } catch {
+        /* ignore */
+      }
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
  * Mic → PCM via AnalyserNode (ScriptProcessor is unreliable / silent on Safari).
  * MediaRecorder mp4 on iPad is often empty; Whisper gets this WAV instead.
  */
@@ -3546,7 +3579,8 @@ function startPcmTap(stream) {
   try {
     ctx.resume?.();
     primeAudioContextInGesture(ctx);
-    const source = ctx.createMediaStreamSource(stream);
+    const graphStream = micStreamForAudioGraph(stream);
+    const source = ctx.createMediaStreamSource(graphStream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0;
@@ -3605,6 +3639,7 @@ function startPcmTap(stream) {
         try { source.disconnect(); } catch { /* ignore */ }
         try { analyser.disconnect(); } catch { /* ignore */ }
         try { mute.disconnect(); } catch { /* ignore */ }
+        releaseClonedMicStream(graphStream, stream);
       },
       snapshot() {
         return measure(chunks);
@@ -4647,8 +4682,9 @@ function setupMic(button, onText) {
     let analyser;
     let mute;
     let timer = null;
+    const graphStream = micStreamForAudioGraph(micStream);
     try {
-      source = ctx.createMediaStreamSource(micStream);
+      source = ctx.createMediaStreamSource(graphStream);
       analyser = ctx.createAnalyser();
       analyser.fftSize = 1024;
       mute = ctx.createGain();
@@ -4684,6 +4720,7 @@ function setupMic(button, onText) {
       try { source?.disconnect(); } catch { /* ignore */ }
       try { analyser?.disconnect(); } catch { /* ignore */ }
       try { mute?.disconnect(); } catch { /* ignore */ }
+      releaseClonedMicStream(graphStream, micStream);
       return;
     }
     bargeWatch = {
@@ -4692,6 +4729,7 @@ function setupMic(button, onText) {
         try { source?.disconnect(); } catch { /* ignore */ }
         try { analyser?.disconnect(); } catch { /* ignore */ }
         try { mute?.disconnect(); } catch { /* ignore */ }
+        releaseClonedMicStream(graphStream, micStream);
       },
     };
   };

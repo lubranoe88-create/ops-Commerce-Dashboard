@@ -908,7 +908,7 @@ async function checkX6() {
 
 async function checkBuild() {
   const build = ATLAS_BUILD;
-  must(build === "rail-39-safari-voice", build);
+  must(build === "rail-40-mic-clone", build);
   const server = read("backend/src/server.js");
   const app = read("public/js/app.js");
   const html = read("public/index.html");

@@ -275,9 +275,22 @@ async function main() {
       micEngine: document.documentElement.dataset.micEngine || "",
     }));
     mid.tts === "1" ? ok("TTS unlocked after MIC tap", mid.tts) : bad("TTS unlocked after MIC tap", JSON.stringify(mid));
-    mid.micLive || mid.bubbles.some((b) => /Registrazione|Ascolto|Avvio microfono/i.test(b))
+    mid.micLive || mid.bubbles.some((b) => /Registrazione|Ascolto|Avvio microfono|Chiamata/i.test(b))
       ? ok("MediaRecorder / listen UI started", mid.bubbles.slice(-3).join(" | ") || mid.micEngine)
       : bad("MediaRecorder / listen UI started", JSON.stringify(mid));
+
+    // Meter + PCM: while the oscillator mic is live, --mic-level / data-mic-flow must rise.
+    await new Promise((r) => setTimeout(r, 900));
+    const meter = await page.evaluate(() => {
+      const css = getComputedStyle(document.documentElement).getPropertyValue("--mic-level").trim();
+      const flow = document.documentElement.dataset.micFlow || "0";
+      const active = document.getElementById("micLevelMeter")?.dataset?.active || "0";
+      const level = Number(css || 0);
+      return { css, level, flow, active };
+    });
+    meter.level > 0.02 || meter.flow === "1" || meter.active === "1"
+      ? ok("mic level meter responds", JSON.stringify(meter))
+      : bad("mic level meter responds", JSON.stringify(meter));
 
     // Keep recording ~2.5s then second tap to stop/upload
     await new Promise((r) => setTimeout(r, 2800));

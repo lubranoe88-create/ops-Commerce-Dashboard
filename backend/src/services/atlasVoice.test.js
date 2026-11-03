@@ -219,7 +219,7 @@ describe("Atlas rail-35 voice", { concurrency: false }, () => {
     assert.equal(call.VOICE_DUPLEX, "barge-cancel");
   });
 
-  test("rail-39-safari-voice is stamped, mirrors match, and the speak path keeps the iPad audio route", () => {
+  test("rail-40-mic-clone is stamped, mirrors match, and the speak path keeps the iPad audio route", () => {
     for (const rel of [
       "js/app.js",
       "js/atlasSpeak.js",
@@ -232,15 +232,18 @@ describe("Atlas rail-35 voice", { concurrency: false }, () => {
     const app = read("public/js/app.js");
     const server = read("backend/src/server.js");
     const route = read("backend/src/routes/ai.js");
-    assert.match(app, /const BUILD_ID = "rail-39-safari-voice"/);
-    assert.match(server, /build:\s*"rail-39-safari-voice"/);
-    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-39-safari-voice"/);
+    assert.match(app, /const BUILD_ID = "rail-40-mic-clone"/);
+    assert.match(server, /build:\s*"rail-40-mic-clone"/);
+    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-40-mic-clone"/);
     assert.match(app, /normalizeSpeakText/);
     assert.match(app, /speakViaServerAudio/);
     assert.match(app, /getPrimedAudioContext/);
     assert.match(app, /decodeAudioData/);
     assert.match(app, /createObjectURL/);
     assert.match(app, /createAnalyser/);
+    assert.match(app, /micStreamForAudioGraph/);
+    assert.match(app, /track\.clone/);
+    assert.match(app, /createMediaStreamSource\(graphStream\)/);
     assert.match(app, /paintMicLevel/);
     assert.match(app, /playsinline/);
     assert.match(app, /cancelPlayback/);
