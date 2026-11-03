@@ -1,0 +1,72 @@
+name: Live ops monitor
+
+on:
+  schedule:
+    # Every 5 hours (18000000 ms). GitHub runs scheduled workflows from the default branch only.
+    - cron: "0 */5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: live-ops-monitor
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  monitor:
+    name: Live dashboard health + voice
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Puppeteer (optional MIC soft check)
+        run: npm install --no-save puppeteer@23
+        continue-on-error: true
+      - name: Run live ops monitor
+        env:
+          LIVE_BASE: https://ops-commerce-dashboard.onrender.com
+          # Required. Store the dashboard password as the SITE_PASSWORD Actions secret.
+          LIVE_PASS: ${{ secrets.SITE_PASSWORD }}
+          SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LIVE_PASS:-}" ]; then
+            echo "::error::SITE_PASSWORD secret missing"
+            exit 1
+          fi
+          node scripts/live-ops-monitor.mjs
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-ops-monitor-report
+          path: |
+            live-ops-monitor-latest.json
+          if-no-files-found: ignore
+      - name: Job summary
+        if: always()
+        run: |
+          echo '## Live ops monitor' >> "$GITHUB_STEP_SUMMARY"
+          REPORT="live-ops-monitor-latest.json"
+          if [ ! -f "$REPORT" ] && [ -f /tmp/live-ops-monitor-latest.json ]; then
+            cp /tmp/live-ops-monitor-latest.json "$REPORT" || true
+          fi
+          if [ -f "$REPORT" ]; then
+            python3 -c 'import json; d=json.load(open("live-ops-monitor-latest.json")); s=d.get("summary") or {}; print("**%s** build=`%s` passed=%s hard_fail=%s soft=%s" % (s.get("overall"), d.get("build"), s.get("passed"), s.get("hardFailed", s.get("failed")), s.get("softFailed", 0))); print("```json"); print(json.dumps(d, indent=2)[:8000]); print("```")' >> "$GITHUB_STEP_SUMMARY"
+            OVERALL=$(python3 -c 'import json; print(json.load(open("live-ops-monitor-latest.json"))["summary"]["overall"])')
+            if [ "$OVERALL" != "PASS" ]; then
+              echo "::error::Live ops monitor reported FAIL"
+            fi
+          else
+            echo "No report produced" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Live ops monitor produced no report"
+          fi
