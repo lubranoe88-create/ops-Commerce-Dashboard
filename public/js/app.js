@@ -40,17 +40,17 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-38-closeout";
-import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-38-closeout";
+import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-39-safari-voice";
+import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-39-safari-voice";
 import {
   dispatchAtlasHand,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
-} from "./atlasHoloDispatch.js?v=rail-38-closeout";
-import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-38-closeout";
-import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-38-closeout";
-import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-38-closeout";
-import { VOICE_DUPLEX, reduceCall, shouldYieldToCall, wakeWordStatus } from "./atlasCall.js?v=rail-38-closeout";
+} from "./atlasHoloDispatch.js?v=rail-39-safari-voice";
+import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-39-safari-voice";
+import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-39-safari-voice";
+import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-39-safari-voice";
+import { VOICE_DUPLEX, reduceCall, shouldYieldToCall, wakeWordStatus } from "./atlasCall.js?v=rail-39-safari-voice";
 import {
   WAKE_WORD,
   canArmAlwaysOn,
@@ -58,9 +58,9 @@ import {
   matchesWakeWord,
   reduceAlwaysOn,
   wakeCommandRemainder,
-} from "./atlasWake.js?v=rail-38-closeout";
+} from "./atlasWake.js?v=rail-39-safari-voice";
 
-const BUILD_ID = "rail-38-closeout";
+const BUILD_ID = "rail-39-safari-voice";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1707,12 +1707,46 @@ function waitForPlaybackEnd(target, durationSec, token) {
   });
 }
 
-/** Play server MP3 on the MIC-primed AudioContext, then HTMLAudio if decode fails. */
+function b64ToUint8(b64) {
+  const raw = atob(b64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+
+/** Drive the plancia mic-level bars (0..1). */
+function paintMicLevel(rms) {
+  const level = Math.min(1, Math.max(0, (Number(rms) - 0.003) / 0.1));
+  document.documentElement.style.setProperty("--mic-level", level.toFixed(3));
+  document.documentElement.dataset.micFlow = level > 0.02 ? "1" : "0";
+  const meters = document.querySelectorAll(".mic-level");
+  for (const meter of meters) {
+    meter.style.setProperty("--mic-level", level.toFixed(3));
+    meter.dataset.active = level > 0.02 ? "1" : "0";
+    const bars = meter.querySelectorAll("i");
+    bars.forEach((bar, idx) => {
+      const threshold = (idx + 1) / (bars.length + 0.35);
+      bar.classList.toggle("on", level >= threshold * 0.55);
+    });
+  }
+}
+
+function clearMicLevel() {
+  paintMicLevel(0);
+  document.documentElement.dataset.micFlow = "0";
+}
+
+/** Play server MP3. Safari tablet: Blob URL HTMLAudio first (data: URLs go silent). */
 async function speakViaServerAudio(line, playback) {
   const token = playback?.token;
   const signal = playback?.signal;
   ensureAudioSessionPlayAndRecord();
   const ctx = getPrimedAudioContext();
+  try {
+    await ctx?.resume?.();
+  } catch {
+    /* ignore */
+  }
   let data;
   try {
     data = await api("/api/ai/speak", {
@@ -1733,6 +1767,7 @@ async function speakViaServerAudio(line, playback) {
   } catch {
     /* ignore */
   }
+  const bytes = b64ToUint8(b64);
 
   const playHtml = async () => {
     if (playbackStale(token)) return false;
@@ -1743,41 +1778,48 @@ async function speakViaServerAudio(line, playback) {
     } catch {
       /* ignore */
     }
+    // Safari tablet: large data: URLs often fail silently. Blob URLs are reliable.
+    const blob = new Blob([bytes], { type: mime });
+    const url = URL.createObjectURL(blob);
     audio.setAttribute("playsinline", "true");
+    audio.setAttribute("webkit-playsinline", "true");
     audio.preload = "auto";
-    audio.src = `data:${mime};base64,${b64}`;
+    audio.volume = 1;
+    audio.src = url;
     state._ttsAudio = audio;
-    await audio.play();
-    if (playbackStale(token)) {
-      try { audio.pause(); } catch { /* ignore */ }
-      return false;
+    try {
+      await audio.play();
+      if (playbackStale(token)) {
+        try { audio.pause(); } catch { /* ignore */ }
+        return false;
+      }
+      let dur = audio.duration;
+      if (!Number.isFinite(dur) || dur <= 0) {
+        await new Promise((resolve) => {
+          const done = () => resolve();
+          audio.addEventListener?.("loadedmetadata", done, { once: true });
+          setTimeout(done, 900);
+        });
+        dur = audio.duration;
+      }
+      await waitForPlaybackEnd(audio, dur, token);
+      return !playbackStale(token);
+    } finally {
+      try { URL.revokeObjectURL(url); } catch { /* ignore */ }
     }
-    let dur = audio.duration;
-    if (!Number.isFinite(dur) || dur <= 0) {
-      await new Promise((resolve) => {
-        const done = () => resolve();
-        audio.addEventListener?.("loadedmetadata", done, { once: true });
-        setTimeout(done, 800);
-      });
-      dur = audio.duration;
-    }
-    await waitForPlaybackEnd(audio, dur, token);
-    return !playbackStale(token);
   };
 
   const playCtx = async () => {
     if (playbackStale(token)) return false;
     if (!ctx) throw new Error("AudioContext assente");
     ensureAudioSessionPlayAndRecord();
+    primeAudioContextInGesture(ctx);
     await ctx.resume?.();
     if (playbackStale(token)) return false;
     if (ctx.state && ctx.state !== "running") {
       throw new Error(`AudioContext ${ctx.state}`);
     }
-    const raw = atob(b64);
-    const bytes = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
-    const copy = bytes.buffer.slice(0);
+    const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     const audioBuf = await new Promise((resolve, reject) => {
       let settled = false;
       const ok = (buf) => {
@@ -1805,33 +1847,31 @@ async function speakViaServerAudio(line, playback) {
     }
     const source = ctx.createBufferSource();
     source.buffer = audioBuf;
-    source.connect(ctx.destination);
+    const gain = ctx.createGain();
+    gain.gain.value = 1;
+    source.connect(gain);
+    gain.connect(ctx.destination);
     state._ttsSource = source;
     source.start(0);
     await waitForPlaybackEnd(source, audioBuf.duration, token);
     return !playbackStale(token);
   };
 
-  // AudioContext first (resumed inside the MIC gesture). HTMLAudio is the fallback
-  // when Safari cannot decode the MP3 or the context is left suspended.
-  let ctxErr = null;
-  try {
-    const played = await playCtx();
-    if (played === false) return false;
-    return played;
-  } catch (err) {
-    if (playbackStale(token)) return false;
-    ctxErr = err;
+  // iPad/Safari: HTMLAudio+Blob first (gesture-primed). Desktop: AudioContext first.
+  const apple = isIpadLike() || isAppleWebKit();
+  const order = apple ? [playHtml, playCtx] : [playCtx, playHtml];
+  let lastErr = null;
+  for (const play of order) {
+    try {
+      const played = await play();
+      if (played === false) return false;
+      return played;
+    } catch (err) {
+      if (playbackStale(token)) return false;
+      lastErr = err;
+    }
   }
-  try {
-    const played = await playHtml();
-    if (played === false) return false;
-    return played;
-  } catch (err) {
-    if (playbackStale(token)) return false;
-    const decodeMsg = ctxErr?.message || String(ctxErr || "decode saltato");
-    throw new Error(`decode: ${decodeMsg} · audio: ${err?.message || err}`);
-  }
+  throw new Error(lastErr?.message || String(lastErr || "TTS playback fallita"));
 }
 
 /**
@@ -3495,30 +3535,54 @@ function containerLooksDecodable(bytes, mime) {
 }
 
 /**
- * Safari getUserMedia → PCM. MediaRecorder mp4 from a real iPad is often an empty
- * or fragmented blob; the oscillator test never produces that file.
+ * Mic → PCM via AnalyserNode (ScriptProcessor is unreliable / silent on Safari).
+ * MediaRecorder mp4 on iPad is often empty; Whisper gets this WAV instead.
  */
 function startPcmTap(stream) {
   const ctx = getPrimedAudioContext();
-  if (!ctx || typeof ctx.createMediaStreamSource !== "function" || typeof ctx.createScriptProcessor !== "function") {
+  if (!ctx || typeof ctx.createMediaStreamSource !== "function" || typeof ctx.createAnalyser !== "function") {
     return null;
   }
   try {
     ctx.resume?.();
+    primeAudioContextInGesture(ctx);
     const source = ctx.createMediaStreamSource(stream);
-    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0;
     const mute = ctx.createGain();
     mute.gain.value = 0;
-    const chunks = [];
-    processor.onaudioprocess = (ev) => {
-      const ch = ev.inputBuffer?.getChannelData?.(0);
-      if (!ch || !ch.length) return;
-      chunks.push(new Float32Array(ch));
-    };
-    source.connect(processor);
-    processor.connect(mute);
+    source.connect(analyser);
+    analyser.connect(mute);
     mute.connect(ctx.destination);
     const rate = ctx.sampleRate || 48000;
+    const chunks = [];
+    const frame = new Float32Array(analyser.fftSize);
+    let timer = null;
+    const pull = () => {
+      try {
+        if (typeof analyser.getFloatTimeDomainData === "function") {
+          analyser.getFloatTimeDomainData(frame);
+        } else if (typeof analyser.getByteTimeDomainData === "function") {
+          const bytes = new Uint8Array(analyser.fftSize);
+          analyser.getByteTimeDomainData(bytes);
+          for (let i = 0; i < bytes.length; i += 1) frame[i] = (bytes[i] - 128) / 128;
+        } else {
+          return;
+        }
+        let acc = 0;
+        for (let i = 0; i < frame.length; i += 1) acc += frame[i] * frame[i];
+        const rms = Math.sqrt(acc / frame.length);
+        chunks.push(new Float32Array(frame));
+        // Cap memory: keep ~8s of audio frames at this hop.
+        const maxChunks = Math.ceil((rate * 8) / frame.length);
+        if (chunks.length > maxChunks) chunks.splice(0, chunks.length - maxChunks);
+        paintMicLevel(rms);
+      } catch {
+        /* analyser can fail if the context was closed */
+      }
+    };
+    timer = setInterval(pull, 40);
     const measure = (list) => {
       let samples = 0;
       let acc = 0;
@@ -3535,9 +3599,11 @@ function startPcmTap(stream) {
     };
     return {
       stop() {
-        try { processor.onaudioprocess = null; } catch { /* ignore */ }
-        try { processor.disconnect(); } catch { /* ignore */ }
+        if (timer) clearInterval(timer);
+        timer = null;
+        clearMicLevel();
         try { source.disconnect(); } catch { /* ignore */ }
+        try { analyser.disconnect(); } catch { /* ignore */ }
         try { mute.disconnect(); } catch { /* ignore */ }
       },
       snapshot() {
@@ -3545,6 +3611,18 @@ function startPcmTap(stream) {
       },
       consume() {
         return measure(chunks.splice(0, chunks.length));
+      },
+      level() {
+        try {
+          if (typeof analyser.getFloatTimeDomainData === "function") {
+            analyser.getFloatTimeDomainData(frame);
+          }
+          let acc = 0;
+          for (let i = 0; i < frame.length; i += 1) acc += frame[i] * frame[i];
+          return Math.sqrt(acc / frame.length);
+        } catch {
+          return 0;
+        }
       },
     };
   } catch {
@@ -3577,10 +3655,12 @@ async function chooseUploadBlob(chunks, mime, pcmTap) {
     snap = null;
   }
   const wav = snap?.blob && snap.blob.size > 16 ? snap.blob : null;
+  // Tablet Safari mics often land quieter than desktop; accept a lower RMS floor.
+  const rmsFloor = isIpadLike() || isAppleWebKit() ? 0.004 : 0.008;
   const wavSpeech = Boolean(
     wav &&
-      snap.samples > (snap.sampleRate || 16000) * 0.45 &&
-      snap.rms >= 0.008,
+      snap.samples > (snap.sampleRate || 16000) * 0.35 &&
+      snap.rms >= rmsFloor,
   );
   // Real iPad: send the PCM/WAV Whisper already accepts. The fake-mic test is a
   // valid container; a Safari timeslice mp4 often is not.
@@ -3701,6 +3781,7 @@ function setupMic(button, onText) {
   };
 
   const stopUi = () => {
+    clearMicLevel();
     starting = false;
     mode = null;
     clearStartWatch();
@@ -4080,11 +4161,12 @@ function setupMic(button, onText) {
   });
 
   const blobForSegment = async (chunks, mime, snap) => {
+    const rmsFloor = isIpadLike() || isAppleWebKit() ? 0.004 : 0.008;
     const speechy = Boolean(
       snap &&
       snap.blob &&
-      snap.rms >= 0.008 &&
-      snap.samples > (snap.sampleRate || 16000) * 0.28,
+      snap.rms >= rmsFloor &&
+      snap.samples > (snap.sampleRate || 16000) * 0.22,
     );
     // PCM/WAV is the reliable Apple capture. MediaRecorder mp4 is used when PCM
     // did not hear speech but the container itself looks real.
@@ -4093,7 +4175,8 @@ function setupMic(button, onText) {
   };
 
   const segmentIsSilent = (blob, snap) => {
-    if (snap && snap.samples > (snap.sampleRate || 16000) * 0.2) return snap.rms < 0.008;
+    const rmsFloor = isIpadLike() || isAppleWebKit() ? 0.004 : 0.008;
+    if (snap && snap.samples > (snap.sampleRate || 16000) * 0.18) return snap.rms < rmsFloor;
     if (!blob || blob.size <= 16) return true;
     const min = /wav|mp4|aac|m4a/i.test(blob.type || "") ? 700 : 64;
     return blob.size < min;
@@ -4585,9 +4668,10 @@ function setupMic(button, onText) {
           let acc = 0;
           for (let i = 0; i < data.length; i += 1) acc += data[i] * data[i];
           const rms = Math.sqrt(acc / data.length);
-          if (rms >= 0.12) {
+          const bargeFloor = isIpadLike() || isAppleWebKit() ? 0.07 : 0.12;
+          if (rms >= bargeFloor) {
             if (!hotSince) hotSince = Date.now();
-            else if (Date.now() - hotSince >= 320) bargeIn("speech");
+            else if (Date.now() - hotSince >= 280) bargeIn("speech");
           } else {
             hotSince = 0;
           }
@@ -4679,6 +4763,7 @@ function setupMic(button, onText) {
     if (!(callLive || mode === "call") && wakeActive && micStream) {
       wakeHold = false;
       setMicTracksEnabled(true);
+      if (!pcmTap) pcmTap = startPcmTap(micStream);
       document.documentElement.dataset.voicePhase = "desktop-always-on";
       document.documentElement.dataset.voiceCall = "0";
       return;
@@ -4690,6 +4775,14 @@ function setupMic(button, onText) {
     }
     setMicTracksEnabled(true);
     ensureAudioSessionPlayAndRecord();
+    try {
+      const ctx = getPrimedAudioContext();
+      primeAudioContextInGesture(ctx);
+      ctx?.resume?.();
+    } catch {
+      /* ignore */
+    }
+    if (!pcmTap) pcmTap = startPcmTap(micStream);
     document.documentElement.dataset.voicePhase = back.phase;
   };
 

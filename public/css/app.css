@@ -1362,6 +1362,40 @@ body[data-module="map"] .side--holo .side-head { display: none; }
   stroke-linecap: round;
 }
 .analizza-mic.live { color: var(--amber); }
+.mic-level {
+  --mic-level: 0;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 1.15em;
+  margin-left: 0.15em;
+  opacity: 0.35;
+  transition: opacity 120ms ease;
+}
+.analizza-mic.live .mic-level,
+.mic-level[data-active="1"] {
+  opacity: 1;
+}
+.mic-level i {
+  display: block;
+  width: 3px;
+  height: 22%;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.35;
+  transform-origin: bottom center;
+  transition: height 60ms linear, opacity 60ms linear;
+}
+.mic-level i:nth-child(1) { height: calc(22% + var(--mic-level) * 18%); }
+.mic-level i:nth-child(2) { height: calc(28% + var(--mic-level) * 28%); }
+.mic-level i:nth-child(3) { height: calc(36% + var(--mic-level) * 42%); }
+.mic-level i:nth-child(4) { height: calc(48% + var(--mic-level) * 42%); }
+.mic-level i:nth-child(5) { height: calc(58% + var(--mic-level) * 42%); }
+.mic-level i.on {
+  opacity: 1;
+  background: var(--amber, #e8b86d);
+}
+
 .analizza-send {
   position: relative;
   display: inline-flex;

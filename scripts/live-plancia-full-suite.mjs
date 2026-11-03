@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Full live plancia suite against the deployed Render instance.
- * Requires rail-38-closeout (Atlas). Exit 0 only on 100% hard pass.
+ * Requires rail-39-safari-voice (Atlas). Exit 0 only on 100% hard pass.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 const require = createRequire(import.meta.url);
 const LIVE = process.env.LIVE_BASE || "https://ops-commerce-dashboard.onrender.com";
 const PASS = process.env.LIVE_PASS || process.env.SITE_PASSWORD || "";
-const EXPECT_BUILD = process.env.EXPECT_BUILD || "rail-38-closeout";
+const EXPECT_BUILD = process.env.EXPECT_BUILD || "rail-39-safari-voice";
 
 const results = [];
 const ok = (name, detail = "") => {

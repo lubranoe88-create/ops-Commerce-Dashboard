@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=rail-38-closeout" />
+  <link rel="stylesheet" href="/css/app.css?v=rail-39-safari-voice" />
 </head>
 <body>
   <!--
@@ -171,6 +171,9 @@
             <button type="button" id="globalMic" class="analizza-mic" title="Voce">
               <svg class="mic-glyph" viewBox="0 0 16 22" aria-hidden="true"><rect x="4.5" y="1" width="7" height="12" rx="3.5"/><path d="M1.5 10.5a6.5 6.5 0 0 0 13 0M8 17v4"/></svg>
               <span>MIC</span>
+              <span class="mic-level" id="micLevelMeter" aria-hidden="true" title="Livello microfono">
+                <i></i><i></i><i></i><i></i><i></i>
+              </span>
             </button>
             <button type="button" id="sendChat" class="analizza-send" title="Invia" aria-label="Invia">
               <svg viewBox="0 0 32 32" aria-hidden="true"><circle class="sonar-outer" cx="16" cy="16" r="14.5"/><circle class="sonar-inner" cx="16" cy="16" r="8"/><circle class="sonar-core" cx="16" cy="16" r="2"/></svg>
@@ -276,6 +279,6 @@
     }
   }
   </script>
-  <script type="module" src="/js/app.js?v=rail-38-closeout"></script>
+  <script type="module" src="/js/app.js?v=rail-39-safari-voice"></script>
 </body>
 </html>

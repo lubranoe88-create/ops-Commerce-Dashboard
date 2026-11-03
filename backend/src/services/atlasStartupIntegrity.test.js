@@ -75,7 +75,7 @@ describe("M5 startup integrity", { concurrency: false }, () => {
   test("boot calls the check before listen", () => {
     const server = read("backend/src/server.js");
     assert.match(server, /runStartupIntegrity\(\{\s*reason:\s*"boot"\s*\}\)/);
-    assert.match(server, /build:\s*"rail-38-closeout"/);
+    assert.match(server, /build:\s*"rail-39-safari-voice"/);
     const bootAt = server.indexOf('runStartupIntegrity({ reason: "boot" })');
     const listenAt = server.indexOf("app.listen(");
     assert.ok(bootAt > 0 && bootAt < listenAt);
