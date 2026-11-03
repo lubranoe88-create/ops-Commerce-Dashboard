@@ -908,7 +908,7 @@ async function checkX6() {
 
 async function checkBuild() {
   const build = ATLAS_BUILD;
-  must(build === "rail-37-always-on", build);
+  must(build === "rail-37-atlas-voice", build);
   const server = read("backend/src/server.js");
   const app = read("public/js/app.js");
   const html = read("public/index.html");

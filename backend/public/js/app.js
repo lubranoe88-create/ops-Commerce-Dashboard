@@ -40,17 +40,17 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-37-always-on";
-import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-37-always-on";
+import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-37-atlas-voice";
+import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-37-atlas-voice";
 import {
   dispatchAtlasHand,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
-} from "./atlasHoloDispatch.js?v=rail-37-always-on";
-import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-37-always-on";
-import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-37-always-on";
-import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-37-always-on";
-import { VOICE_DUPLEX, reduceCall, shouldYieldToCall, wakeWordStatus } from "./atlasCall.js?v=rail-37-always-on";
+} from "./atlasHoloDispatch.js?v=rail-37-atlas-voice";
+import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-37-atlas-voice";
+import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-37-atlas-voice";
+import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-37-atlas-voice";
+import { VOICE_DUPLEX, reduceCall, shouldYieldToCall, wakeWordStatus } from "./atlasCall.js?v=rail-37-atlas-voice";
 import {
   WAKE_WORD,
   canArmAlwaysOn,
@@ -58,9 +58,9 @@ import {
   matchesWakeWord,
   reduceAlwaysOn,
   wakeCommandRemainder,
-} from "./atlasWake.js?v=rail-37-always-on";
+} from "./atlasWake.js?v=rail-37-atlas-voice";
 
-const BUILD_ID = "rail-37-always-on";
+const BUILD_ID = "rail-37-atlas-voice";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";

@@ -491,7 +491,7 @@ describe("Atlas rail-34 jarvis", { concurrency: false }, () => {
     }
   });
 
-  test("rail-37-always-on is stamped and the cockpit mirrors match", () => {
+  test("rail-37-atlas-voice is stamped and the cockpit mirrors match", () => {
     assert.equal(read("backend/src/services/atlasRoute.js"), read("public/js/atlasRoute.js"));
     assert.equal(read("public/js/atlasRoute.js"), read("backend/public/js/atlasRoute.js"));
     assert.equal(read("public/js/atlasCockpitUi.js"), read("backend/public/js/atlasCockpitUi.js"));
@@ -501,9 +501,9 @@ describe("Atlas rail-34 jarvis", { concurrency: false }, () => {
     assert.equal(read("public/index.html"), read("backend/public/index.html"));
     assert.equal(read("public/css/app.css"), read("backend/public/css/app.css"));
 
-    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-37-always-on"/);
-    assert.match(read("backend/src/server.js"), /build:\s*"rail-37-always-on"/);
-    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-37-always-on"/);
+    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-37-atlas-voice"/);
+    assert.match(read("backend/src/server.js"), /build:\s*"rail-37-atlas-voice"/);
+    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-37-atlas-voice"/);
     assert.match(read("public/index.html"), /id="cockpitPanel"/);
     assert.match(read("public/index.html"), /id="memoryGraphPanel"/);
     assert.match(read("public/index.html"), /data-holo-action="cockpit"/);

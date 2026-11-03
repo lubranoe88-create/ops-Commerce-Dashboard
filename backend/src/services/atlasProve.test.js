@@ -50,7 +50,7 @@ function assertPack(report) {
   assert.equal(report.passed, report.total);
   assert.equal(report.percent, 100);
   assert.equal(report.ok, true);
-  assert.equal(report.build, "rail-37-always-on");
+  assert.equal(report.build, "rail-37-atlas-voice");
   assert.deepEqual(report.items.map((item) => item.id), EXPECTED_IDS);
   assert.deepEqual(
     report.deferred.map((item) => item.id),

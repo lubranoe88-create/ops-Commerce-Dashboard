@@ -219,7 +219,7 @@ describe("Atlas rail-35 voice", { concurrency: false }, () => {
     assert.equal(call.VOICE_DUPLEX, "barge-cancel");
   });
 
-  test("rail-37-always-on is stamped, mirrors match, and the speak path keeps the iPad audio route", () => {
+  test("rail-37-atlas-voice is stamped, mirrors match, and the speak path keeps the iPad audio route", () => {
     for (const rel of [
       "js/app.js",
       "js/atlasSpeak.js",
@@ -232,9 +232,9 @@ describe("Atlas rail-35 voice", { concurrency: false }, () => {
     const app = read("public/js/app.js");
     const server = read("backend/src/server.js");
     const route = read("backend/src/routes/ai.js");
-    assert.match(app, /const BUILD_ID = "rail-37-always-on"/);
-    assert.match(server, /build:\s*"rail-37-always-on"/);
-    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-37-always-on"/);
+    assert.match(app, /const BUILD_ID = "rail-37-atlas-voice"/);
+    assert.match(server, /build:\s*"rail-37-atlas-voice"/);
+    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-37-atlas-voice"/);
     assert.match(app, /normalizeSpeakText/);
     assert.match(app, /speakViaServerAudio/);
     assert.match(app, /getPrimedAudioContext/);

@@ -1,6 +1,6 @@
 # Atlas prove pack
 
-Build **rail-37-always-on**. The done classifica is checked by `backend/src/services/atlasProve.test.js`.
+Build **rail-37-atlas-voice**. The done classifica is checked by `backend/src/services/atlasProve.test.js`.
 
 ```bash
 cd backend && npm run test:atlas
@@ -58,4 +58,4 @@ Phase Later and X6 are in the pack for the desktop path. iPad always-on stays de
 | call | Phase Now reducer is `barge-cancel`; a wake event opens the same call |
 | phase-later | Desktop always-on arms only with `VOICE_ALWAYS_ON` and a desktop host |
 | X6 | Wake word is Atlas; it opens Phase Now. iPad always-on stays out of scope |
-| build | Stamp `rail-37-always-on` on `/health`, `BUILD_ID`, and the public mirror |
+| build | Stamp `rail-37-atlas-voice` on `/health`, `BUILD_ID`, and the public mirror |
