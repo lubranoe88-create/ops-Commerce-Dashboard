@@ -91,11 +91,13 @@ cmake --build build --config Release -t llama-server
 
 ## G. Collegamento plancia (dopo che A–F funzionano)
 
-- [ ] Capito che **aprire Cursor non basta** a far parlare la plancia col modello locale
-- [ ] Configurato il backend plancia (env / pannello / proxy) verso  
-  `http://127.0.0.1:8080/v1` (OpenAI-compatible) **oppure** un bridge dedicato
-- [ ] Se la plancia oggi usa **OpenRouter** / chiavi remote: punto di switch = base URL + modello lato server plancia, non “magia” IDE
-- [ ] Test voce end-to-end: STT → risposta locale → TTS
+Dettaglio: **`COLLEGAMENTO_PLANCIA.md`**.
+
+- [ ] Capito che **aprire Cursor non basta**
+- [ ] Capito che il pannello modelli sceglie solo slug **OpenRouter**, non un URL locale
+- [ ] Capito che oggi `openrouter.js` punta fisso a `https://openrouter.ai/api/v1/chat/completions`
+- [ ] Pianificata patch/proxy: base URL `http://127.0.0.1:8080/v1` (opz. router `:8070`)
+- [ ] Test voce end-to-end solo **dopo** la patch: STT → LLM locale → TTS
 - [ ] Tool critici ancora dietro conferma / FSM plancia
 
 ---

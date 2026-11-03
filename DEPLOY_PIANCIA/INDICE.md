@@ -8,6 +8,7 @@ Pacchetto da copiare sul PC Windows. Nessuna esecuzione automatica.
 | `CHECKLIST.md` | Passi ordinati sul PC |
 | `CONFIG_LOCALE.md` | Flag esatti cervello 35B-A3B (`-ngl`, `-ncmoe`, ctx, thinking off) |
 | `ROUTER_PICCOLO.md` | Router Qwen3-8B + fallback 35B, VRAM, integrazione stack |
+| `COLLEGAMENTO_PLANCIA.md` | Come la plancia parla all'LLM oggi; perché Cursor non basta; come collegare llama.cpp |
 | `README.md` | Install llama.cpp, download GGUF, avvio |
 | `INDICE.md` | Questo elenco |
 | `config/llama-server.env.example` | Env cervello |
