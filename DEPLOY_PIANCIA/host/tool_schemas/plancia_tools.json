@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PlanciaToolCatalog",
+  "description": "Allowlist e JSON Schema dei tool consentiti all'agente vocale locale. Solo questi name possono essere eseguiti.",
+  "tools": [
+    {
+      "name": "get_agent_status",
+      "description": "Legge lo stato operativo della plancia (build, health, modalità).",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "side_effect": "read",
+      "requires_confirmation": false
+    },
+    {
+      "name": "search_memory",
+      "description": "Cerca ricordi o note nella memoria locale della plancia.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 5
+          }
+        },
+        "required": ["query"]
+      },
+      "side_effect": "read",
+      "requires_confirmation": false
+    },
+    {
+      "name": "set_mic_session",
+      "description": "Avvia o termina una sessione microfono sulla plancia.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["start", "hangup"]
+          }
+        },
+        "required": ["action"]
+      },
+      "side_effect": "write",
+      "requires_confirmation": true
+    },
+    {
+      "name": "send_user_message",
+      "description": "Invia un messaggio testuale all'utente sulla plancia. Richiede conferma.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": ["text"]
+      },
+      "side_effect": "write",
+      "requires_confirmation": true
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "$schema_comment": "Profilo di riferimento per Qwen3.6-35B-A3B Q4_K_M su RTX 5070 12GB + 32GB RAM. I valori reali vengono letti da llama-server.env dallo script di avvio.",
+  "model_id": "Qwen3.6-35B-A3B",
+  "quant": "Q4_K_M",
+  "architecture": {
+    "type": "MoE",
+    "total_params": "35B",
+    "active_params": "~3B",
+    "recommended_experts_cpu_layers": 40
+  },
+  "hardware_profile": {
+    "gpu": "NVIDIA RTX 5070 Blackwell",
+    "vram_gb": 12,
+    "system_ram_gb": 32,
+    "storage_note": "GGUF Q4_K_M ~20-23 GB su disco; lascia spazio per KV cache e OS"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "api": "openai-compatible"
+  },
+  "flags": {
+    "n_gpu_layers": 99,
+    "n_cpu_moe": 40,
+    "ctx_size": 4096,
+    "ctx_size_options": [2048, 4096, 8192],
+    "n_predict": 256,
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "repeat_penalty": 1.1,
+    "threads": 8,
+    "flash_attn": true,
+    "thinking": "off",
+    "mtp_speculative": false,
+    "parallel_slots": 1
+  },
+  "voice_agent_policy": {
+    "thinking_off": true,
+    "no_mtp": true,
+    "short_context": true,
+    "host_side_tool_validation": true,
+    "never_show_raw_cot_to_user": true
+  }
+}
