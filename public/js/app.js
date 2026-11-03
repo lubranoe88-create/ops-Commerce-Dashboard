@@ -2201,6 +2201,7 @@ function runHoloAction(action, opts = {}) {
     syncHoloActive,
     saveLastView,
     openBriefingModal,
+    openMemoryLive: () => openMemoryGraphPanel(),
     openDocument: (rel) => openSandboxDoc(String(rel || "").replace(/^sandbox:\/\//, ""), { postChatUpdate }),
     refreshNews: () => loadAiNewsPins(),
   }, { ...opts, fromVoice });
@@ -2274,7 +2275,7 @@ function runHoloAction(action, opts = {}) {
     case "memory-graph":
     case "grafo": {
       toggleMemoryGraphPanel();
-      showToast(`GRAFO MEMORIA · ${src}`);
+      showToast(`MEMORY · ${src}`);
       return Promise.resolve();
     }
     case "status":
@@ -2623,15 +2624,15 @@ function sideForModule(mod, snap) {
       });
     }
   } else if (mod === "memory") {
-    title.textContent = "Memory 5D · concepts";
+    title.textContent = "MEMORY · concepts + live notes";
     const hint = document.createElement("div");
     hint.className = "card muted";
-    hint.textContent = "Clicca un concetto 3D per centrarlo e pulsare i collegati.";
+    hint.textContent = "Clicca un concetto 3D per centrarlo. Apri MEMORY live per le note expandable aggiornate in tempo reale.";
     body.appendChild(hint);
     const graphBtn = document.createElement("button");
     graphBtn.type = "button";
     graphBtn.className = "pill-btn";
-    graphBtn.textContent = "Grafo note Atlas";
+    graphBtn.textContent = "Apri MEMORY live";
     graphBtn.addEventListener("click", () => openMemoryGraphPanel());
     body.appendChild(graphBtn);
     (snap.memory?.concepts || []).forEach((c) => {

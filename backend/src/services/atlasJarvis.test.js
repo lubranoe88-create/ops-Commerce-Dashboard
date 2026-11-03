@@ -509,7 +509,9 @@ describe("Atlas rail-34 jarvis", { concurrency: false }, () => {
     assert.match(read("public/index.html"), /data-holo-action="cockpit"/);
     assert.match(read("public/index.html"), /data-holo-action="memory-graph"/);
     assert.match(read("public/js/app.js"), /case "cockpit"/);
-    assert.match(read("public/js/app.js"), /Grafo note Atlas/);
+    assert.match(read("public/js/app.js"), /Apri MEMORY live/);
+    assert.match(read("public/js/atlasMemoryGraphUi.js"), /memory\/live/);
+    assert.match(read("backend/src/routes/ai.js"), /\/agentq\/memory\/live/);
     assert.match(read("public/js/agentqUi.js"), /routeAtlasTurn/);
     assert.equal(read("public/js/agentqUi.js").includes("setInterval("), false);
     assert.equal(read("backend/src/services/atlasResident.js").includes("setInterval("), false);

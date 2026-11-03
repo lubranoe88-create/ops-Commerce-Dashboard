@@ -68,7 +68,7 @@ import {
   saveJob,
 } from "../services/atlasSchedule.js";
 import { buildCockpit } from "../services/atlasCockpit.js";
-import { memoryGraph } from "../services/atlasMemoryGraph.js";
+import { memoryGraph, memoryLiveSnapshot } from "../services/atlasMemoryGraph.js";
 import { listWorkflows, resumeInterruptedWorkflows, resumeWorkflowRun, runWorkflow } from "../services/atlasWorkflows.js";
 import { listOpenRuns, listRuns } from "../services/atlasRuns.js";
 
@@ -267,6 +267,20 @@ aiRouter.get("/agentq/memory/graph", (req, res) => {
     );
   } catch (err) {
     res.status(500).json({ ok: false, name: "Atlas", error: err.message || "memory graph failed" });
+  }
+});
+
+/** Live MEMORY panel: expandable.json + SQLite concepts, revision for cheap polling. */
+aiRouter.get("/agentq/memory/live", (req, res) => {
+  try {
+    res.json(
+      memoryLiveSnapshot({
+        limit: Number(req.query?.limit) || 40,
+        query: String(req.query?.q || req.query?.query || ""),
+      }),
+    );
+  } catch (err) {
+    res.status(500).json({ ok: false, name: "Atlas", label: "MEMORY", error: err.message || "memory live failed" });
   }
 });
 

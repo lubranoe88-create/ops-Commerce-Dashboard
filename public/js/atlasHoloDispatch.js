@@ -68,6 +68,8 @@ export function dispatchAtlasHand(action, deps = {}, opts = {}) {
       deps.syncHoloActive?.(id);
       return Promise.resolve(deps.showModule?.(id)).then(() => {
         deps.saveLastView?.(id);
+        // MEMORY opens the live expandable/SQLite panel alongside the 3D module.
+        if (id === "memory") deps.openMemoryLive?.();
         deps.showToast?.(`${id.toUpperCase()} · ${src}`);
         return { ran: id };
       });

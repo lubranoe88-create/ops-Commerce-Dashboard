@@ -886,6 +886,7 @@ export async function handleAtlasCommand(raw, ctx = {}) {
         method: "POST",
         body: JSON.stringify({ title: note.slice(0, 80), text: note, tags: ["voice"] }),
       });
+      window.dispatchEvent(new CustomEvent("atlas:memory-changed", { detail: data }));
       ctx.postChatUpdate?.(
         atlasLine(`Memoria aggiornata (${data.count} note). Id: ${data.entry?.id || "—"}.`),
         "ok",
