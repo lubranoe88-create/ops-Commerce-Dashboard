@@ -35,6 +35,8 @@ const EXPECTED_IDS = [
   "tts",
   "alphabet",
   "call",
+  "phase-later",
+  "X6",
   "build",
 ];
 
@@ -48,21 +50,22 @@ function assertPack(report) {
   assert.equal(report.passed, report.total);
   assert.equal(report.percent, 100);
   assert.equal(report.ok, true);
-  assert.equal(report.build, "rail-36-prove");
+  assert.equal(report.build, "rail-37-always-on");
   assert.deepEqual(report.items.map((item) => item.id), EXPECTED_IDS);
   assert.deepEqual(
     report.deferred.map((item) => item.id),
-    ["phase-later", "X6"],
+    ["ipad-always-on"],
   );
-  assert.equal(report.items.some((item) => item.id === "X6" || item.id === "phase-later"), false);
+  assert.equal(report.items.some((item) => item.id === "X6"), true);
+  assert.equal(report.items.some((item) => item.id === "phase-later"), true);
 }
 
 describe("Atlas prove pack", { concurrency: false }, () => {
-  test("covers every done classifica id and keeps Phase Later and X6 deferred", () => {
+  test("covers every done classifica id and keeps iPad always-on deferred", () => {
     assert.deepEqual([...PROVE_ITEM_IDS], EXPECTED_IDS);
     assert.deepEqual(
       PROVE_DEFERRED.map((item) => item.id),
-      ["phase-later", "X6"],
+      ["ipad-always-on"],
     );
   });
 
@@ -75,7 +78,7 @@ describe("Atlas prove pack", { concurrency: false }, () => {
     assert.equal(summary.passed, summary.total);
     assert.equal(summary.percent, 100);
     assert.equal(summary.items.length, EXPECTED_IDS.length);
-    assert.equal(summary.deferred[1].id, "X6");
+    assert.equal(summary.deferred[0].id, "ipad-always-on");
   });
 
   test("isolated prove pack is 100% including file round-trips", async () => {
@@ -85,6 +88,8 @@ describe("Atlas prove pack", { concurrency: false }, () => {
     assert.match(report.items.find((item) => item.id === "X1").detail, /third confirm/);
     assert.match(report.items.find((item) => item.id === "C9").detail, /session file/);
     assert.match(report.items.find((item) => item.id === "J2").detail, /resumes/);
-    assert.match(report.items.find((item) => item.id === "call").detail, /X6 still deferred/);
+    assert.match(report.items.find((item) => item.id === "call").detail, /barge-cancel/);
+    assert.match(report.items.find((item) => item.id === "phase-later").detail, /iPad stays Phase Now/);
+    assert.match(report.items.find((item) => item.id === "X6").detail, /iPad always-on stays out of scope/);
   });
 });

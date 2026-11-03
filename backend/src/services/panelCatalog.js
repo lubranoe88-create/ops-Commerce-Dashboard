@@ -39,11 +39,13 @@ OPS Commerce Intel dashboard (plancia).
 Panels: MAPPA (globe), PIPELINE, MEMORY, CHAT, side rail.
 AI analyzes mechanical SQLite data only — never scrapes/collects.
 Tools: emit actions[] for zoom/fly/module switches and paid write tools; browser_use only as fallback.
+Prefer verify via state / news / memory / hands / MCP before inventing a live fact.
+Sticky automatic_recall may include truth / Agent Q / voice / tool packs — use them; they are not a sandbox search.
 Budget: hard €/day OpenRouter cap — unused budget stays unused.
 Function board: when you detect a broken capability, emit write action
 {"type":"report-function","functionId":"<id>","status":"error","errorType":"CODE","detail":"..."}.
 Use status ok to clear. Known ids include browser-use, openrouter-key, auth-2fa, proactive-mechanical, proactive-ai, auto-router, cross-thread-memory, chat-attachments, budget-openrouter, paid-ai-turn, mic-voice.
-Sandbox search and expandable memory are absent unless the user explicitly asked (cerca, ricerca, memoria). Do not invent those results.`;
+Sandbox search and on-demand expandable memory search are absent unless the user explicitly asked (cerca, ricerca, memoria). Do not invent those results.`;
 
 /** Client-side UI actions (safe; no confirm). */
 export const UI_ACTIONS = [

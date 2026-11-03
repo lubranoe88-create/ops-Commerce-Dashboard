@@ -1,6 +1,7 @@
 /**
  * Done-pack proof for Atlas.
- * Phase Later and X6 wake-word stay deferred and are not counted.
+ * Phase Later and X6 are done for the desktop always-on path.
+ * iPad always-on stays deferred: touch Safari remains Phase Now (gesture MIC).
  * isolate:true redirects stores to a temp directory. /health uses isolate:false.
  */
 import fs from "node:fs";
@@ -110,19 +111,15 @@ import { setToolLogFileForTests } from "./atlasToolLog.js";
 import { setMemoryExpandPathForTests } from "./agentqBridge.js";
 import * as speak from "../../public/js/atlasSpeak.js";
 import * as call from "../../public/js/atlasCall.js";
+import * as wake from "../../public/js/atlasWake.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 export const PROVE_DEFERRED = Object.freeze([
   {
-    id: "phase-later",
-    title: "Phase Later",
-    detail: "Left out of the done prove pack. No Phase Later listener is armed.",
-  },
-  {
-    id: "X6",
-    title: "wake-word",
-    detail: "VOICE_ALWAYS_ON is recorded and does not start a listener. wakeWord stays deferred.",
+    id: "ipad-always-on",
+    title: "iPad always-on",
+    detail: "iPad and iPhone stay Phase Now (gesture MIC). Desktop always-on does not claim the iPad audio session.",
   },
 ]);
 
@@ -831,6 +828,8 @@ async function checkAlphabet() {
 async function checkCall() {
   const opened = call.reduceCall({ open: false, phase: "idle" }, "tap");
   must(opened.action === "open" && opened.phase === "listen" && opened.duplex === "barge-cancel", "open");
+  const fromWake = call.reduceCall({ open: false, phase: "idle" }, "wake");
+  must(fromWake.action === "open" && fromWake.phase === "listen" && fromWake.open === true, "wake opens");
   const barge = call.reduceCall({ open: true, phase: "tts" }, "speech");
   const tap = call.reduceCall({ open: true, phase: "tts" }, "tap");
   must(barge.action === "barge" && barge.cancelAudio === true && barge.open === true, "speech barge");
@@ -838,20 +837,78 @@ async function checkCall() {
   must(call.VOICE_DUPLEX === "barge-cancel", call.VOICE_DUPLEX);
   const src = read("public/js/atlasCall.js");
   must(src.startsWith("/**\n * Phase Now"), "Phase Now header");
-  must(src.includes("X6 wake-word stays deferred"), "X6 comment");
   const wake = call.wakeWordStatus(true);
-  must(wake.env === true && wake.armed === false && wake.phase === "later", "wake armed");
-  must(/deferred/i.test(wake.note), wake.note);
+  must(wake.env === true && wake.armed === false && wake.phase === "later", "wake unarmed without desktop");
+  must(/not armed/i.test(wake.note), wake.note);
   const app = read("public/js/app.js");
-  must(app.includes("X6 wake-word stays deferred"), "app still arms wake-word");
   must(app.includes("reduceCall") && app.includes("bargeIn") && app.includes("cancelPlayback"), "call ui");
-  must(read("backend/src/server.js").includes('wakeWord: "deferred"'), "health wakeWord");
-  return "Phase Now barge-cancel, X6 still deferred";
+  must(app.includes("isIpadLike") && app.includes("getPrimedAudioContext"), "ipad audio unlock stays");
+  must(app.includes('reduceCall({ open: false, phase: "idle" }, "wake")'), "wake handoff");
+  return "Phase Now barge-cancel; wake reuses the same open";
+}
+
+async function checkPhaseLater() {
+  must(wake.canArmAlwaysOn({ alwaysOnEnv: true, desktop: true }) === true, "arm desktop");
+  must(wake.canArmAlwaysOn({ alwaysOnEnv: true, desktop: false }) === false, "no ipad arm");
+  must(wake.canArmAlwaysOn({ alwaysOnEnv: false, desktop: true }) === false, "env off");
+  must(wake.isDesktopVoiceHost("Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)") === false, "ipad ua");
+  must(wake.isDesktopVoiceHost("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)") === false, "iphone");
+  must(wake.isDesktopVoiceHost("Mozilla/5.0 (iPod touch; CPU iPhone OS 15_0 like Mac OS X)") === false, "ipod");
+  must(
+    wake.isDesktopVoiceHost("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", { platform: "MacIntel", maxTouchPoints: 5 }) === false,
+    "ipados desktop ua",
+  );
+  must(wake.isDesktopVoiceHost("Mozilla/5.0 (Windows NT 10.0; Win64; x64)") === true, "windows");
+  const off = call.wakeWordStatus(true, { desktop: false });
+  const on = call.wakeWordStatus(true, { desktop: true });
+  must(off.armed === false && off.phase === "later" && off.env === true, "server-shaped status");
+  must(on.armed === true && on.phase === "desktop-always-on", "desktop status");
+  must(/wake word opens Phase Now/i.test(on.note), on.note);
+  const app = read("public/js/app.js");
+  must(app.includes("canArmAlwaysOn") && app.includes("isDesktopVoiceHost"), "client gate");
+  must(app.includes("armAlwaysOnFromGesture"), "first mic tap arms");
+  must(app.includes("desktop-always-on"), "dataset phase");
+  must(!app.includes("new RTCPeerConnection"), "no webrtc");
+  return "desktop always-on armed; iPad stays Phase Now";
+}
+
+async function checkX6() {
+  must(wake.WAKE_WORD === "Atlas", wake.WAKE_WORD);
+  must(wake.WAKE_PHRASES.includes("atlas") && wake.WAKE_PHRASES.includes("ehi atlas") && wake.WAKE_PHRASES.includes("hey atlas"), "phrases");
+  must(wake.matchesWakeWord("Ehi, Atlas!") && wake.matchesWakeWord("hey atlas") && wake.matchesWakeWord("Atlas"), "match");
+  must(wake.matchesWakeWord("atlante") === false && wake.matchesWakeWord("apri la mappa") === false, "non match");
+  let state = wake.reduceAlwaysOn({ enabled: false, phase: "off" }, "enable");
+  must(state.phase === "arming" && state.enabled === true, "arming");
+  state = wake.reduceAlwaysOn(state, "mic-ready");
+  must(state.phase === "listening", "listening");
+  const miss = wake.reduceAlwaysOn(state, "transcript", { text: "apri la mappa" });
+  must(miss.phase === "listening" && miss.action === "keep", "miss");
+  const opened = wake.reduceAlwaysOn(state, "transcript", { text: "ehi atlas" });
+  must(opened.action === "open-call" && opened.phase === "waking", "open-call");
+  const callOpen = call.reduceCall({ open: false, phase: "idle" }, "wake");
+  must(callOpen.action === "open" && callOpen.phase === "listen", "same call stack");
+  const inCall = wake.reduceAlwaysOn(opened, "call-open");
+  must(inCall.phase === "in-call", "in-call");
+  const during = wake.reduceAlwaysOn(inCall, "transcript", { text: "atlas" });
+  must(during.phase === "in-call" && during.action !== "open-call", "paused");
+  const back = wake.reduceAlwaysOn(inCall, "call-end");
+  must(back.phase === "listening" && back.enabled === true && back.action === "resume-listen", "resume");
+  const app = read("public/js/app.js");
+  must(app.includes("matchesWakeWord") && app.includes("wakeOnly"), "wake spotter");
+  must(app.includes("openCallFromWake"), "handoff");
+  const server = read("backend/src/server.js");
+  must(server.includes("wakeWordStatus(config.voiceAlwaysOn, { desktop: false })"), "health desktop false");
+  must(server.includes('wakePhrase: "Atlas"'), "wake phrase");
+  must(server.includes("armed: false"), "server stays unarmed");
+  must(app.includes("In ascolto — di' Atlas per parlare."), "listen cue");
+  must(read("backend/src/services/agentqBridge.js").includes("wakeWordStatus(config.voiceAlwaysOn, { desktop: false })"), "bridge");
+  must(read("backend/src/services/agentqBridge.js").includes('wakePhrase: "Atlas"'), "bridge phrase");
+  return "desktop wake word opens Phase Now; iPad always-on stays out of scope";
 }
 
 async function checkBuild() {
   const build = ATLAS_BUILD;
-  must(build === "rail-36-prove", build);
+  must(build === "rail-37-always-on", build);
   const server = read("backend/src/server.js");
   const app = read("public/js/app.js");
   const html = read("public/index.html");
@@ -859,7 +916,7 @@ async function checkBuild() {
   must(server.includes("runtimeProve") && server.includes("summarizeProve"), "health prove");
   must(app.includes(`const BUILD_ID = "${build}"`), "BUILD_ID");
   must(html.includes(`src="/js/app.js?v=${build}"`) && html.includes(`href="/css/app.css?v=${build}"`), "html stamp");
-  for (const rel of ["js/app.js", "js/atlasCall.js", "js/atlasSpeak.js", "index.html"]) {
+  for (const rel of ["js/app.js", "js/atlasCall.js", "js/atlasSpeak.js", "js/atlasWake.js", "index.html"]) {
     must(read(`public/${rel}`) === read(`backend/public/${rel}`), `mirror ${rel}`);
   }
   const init = await handleMcpMessage({ jsonrpc: "2.0", id: 7, method: "initialize" });
@@ -900,6 +957,8 @@ const CHECKS = [
   { id: "tts", title: "TTS eleven-flash primary", run: checkTts },
   { id: "alphabet", title: "Alphabet normalize pack", run: checkAlphabet },
   { id: "call", title: "Call reducer Phase Now barge-cancel", run: checkCall },
+  { id: "phase-later", title: "Phase Later desktop always-on", run: checkPhaseLater },
+  { id: "X6", title: "X6 wake word opens Phase Now", run: checkX6 },
   { id: "build", title: "Build stamp", run: checkBuild },
 ];
 

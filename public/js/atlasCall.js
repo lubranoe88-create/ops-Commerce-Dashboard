@@ -13,14 +13,21 @@ export const VOICE_DUPLEX_NOTE =
 export const WAKE_WORD_PHASE = "later";
 
 /**
- * X6 wake-word stays deferred. VOICE_ALWAYS_ON is recorded and does not arm a listener.
+ * Desktop always-on is armed only when VOICE_ALWAYS_ON is on and the caller
+ * passes desktop:true. The server passes desktop:false (it cannot see the UA).
+ * iPad always-on stays out of scope. Wake phrases live in atlasWake.js.
  */
-export function wakeWordStatus(alwaysOn) {
+export function wakeWordStatus(alwaysOn, { desktop = false } = {}) {
+  const env = Boolean(alwaysOn);
+  const armed = env && Boolean(desktop);
   return {
-    env: Boolean(alwaysOn),
-    armed: false,
-    phase: WAKE_WORD_PHASE,
-    note: "X6 wake-word is deferred. VOICE_ALWAYS_ON does not start a listener.",
+    env,
+    armed,
+    phase: armed ? "desktop-always-on" : WAKE_WORD_PHASE,
+    wakeWord: "Atlas",
+    note: armed
+      ? "Desktop always-on armed: mic stays open; wake word opens Phase Now call."
+      : "Always-on/wake-word not armed (needs VOICE_ALWAYS_ON + desktop host).",
   };
 }
 
@@ -30,7 +37,7 @@ export function shouldYieldToCall({ yieldToCall = false, callOpen = false } = {}
 
 /**
  * @param {{ open?: boolean, phase?: string }} state
- * @param {"tap"|"speech"|"segment-silence"|"segment-heard"|"tts-start"|"tts-end"|"hangup"|"mic-dead"} event
+ * @param {"tap"|"wake"|"speech"|"segment-silence"|"segment-heard"|"tts-start"|"tts-end"|"hangup"|"mic-dead"} event
  */
 export function reduceCall(state, event) {
   const open = Boolean(state?.open);
@@ -54,7 +61,8 @@ export function reduceCall(state, event) {
     };
   }
   if (!open) {
-    if (event === "tap") {
+    // "wake" is the always-on handoff: same open as a MIC tap, no second stack.
+    if (event === "tap" || event === "wake") {
       return {
         action: "open",
         open: true,
@@ -86,6 +94,7 @@ export function reduceCall(state, event) {
       duplex: VOICE_DUPLEX,
     };
   }
+  if (event === "wake") return { ...listening, action: "keep", phase };
   if (event === "speech") {
     if (phase === "tts") return { ...listening, action: "barge", cancelAudio: true };
     return { ...listening, action: "keep", phase };

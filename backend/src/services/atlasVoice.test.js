@@ -200,17 +200,31 @@ describe("Atlas rail-35 voice", { concurrency: false }, () => {
     assert.equal(wake.env, true);
     assert.equal(wake.armed, false);
     assert.equal(wake.phase, "later");
-    assert.match(wake.note, /deferred/);
+    assert.match(wake.note, /not armed/);
+    const armedWake = call.wakeWordStatus(true, { desktop: true });
+    assert.equal(armedWake.env, true);
+    assert.equal(armedWake.armed, true);
+    assert.equal(armedWake.phase, "desktop-always-on");
+    assert.equal(armedWake.wakeWord, "Atlas");
+    assert.equal(wake.wakeWord, "Atlas");
+    assert.match(armedWake.note, /wake word opens Phase Now/);
+    assert.equal(call.wakeWordStatus(false, { desktop: true }).armed, false);
+    const fromWake = call.reduceCall({ open: false, phase: "idle" }, "wake");
+    assert.equal(fromWake.action, "open");
+    assert.equal(fromWake.open, true);
+    assert.equal(fromWake.phase, "listen");
+    assert.equal(call.reduceCall({ open: true, phase: "listen" }, "wake").action, "keep");
     assert.match(call.VOICE_DUPLEX_NOTE, /WebRTC/);
     assert.match(call.VOICE_DUPLEX_NOTE, /AudioContext/);
     assert.equal(call.VOICE_DUPLEX, "barge-cancel");
   });
 
-  test("rail-36-prove is stamped, mirrors match, and the speak path keeps the iPad audio route", () => {
+  test("rail-37-always-on is stamped, mirrors match, and the speak path keeps the iPad audio route", () => {
     for (const rel of [
       "js/app.js",
       "js/atlasSpeak.js",
       "js/atlasCall.js",
+      "js/atlasWake.js",
       "index.html",
     ]) {
       assert.equal(read(`public/${rel}`), read(`backend/public/${rel}`), rel);
@@ -218,9 +232,9 @@ describe("Atlas rail-35 voice", { concurrency: false }, () => {
     const app = read("public/js/app.js");
     const server = read("backend/src/server.js");
     const route = read("backend/src/routes/ai.js");
-    assert.match(app, /const BUILD_ID = "rail-36-prove"/);
-    assert.match(server, /build:\s*"rail-36-prove"/);
-    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-36-prove"/);
+    assert.match(app, /const BUILD_ID = "rail-37-always-on"/);
+    assert.match(server, /build:\s*"rail-37-always-on"/);
+    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-37-always-on"/);
     assert.match(app, /normalizeSpeakText/);
     assert.match(app, /speakViaServerAudio/);
     assert.match(app, /getPrimedAudioContext/);
@@ -232,7 +246,10 @@ describe("Atlas rail-35 voice", { concurrency: false }, () => {
     assert.match(app, /open \? "END" : "MIC"/);
     assert.match(app, /shouldYieldToCall/);
     assert.match(app, /yieldToCall: opts\.yieldToCall/);
-    assert.match(app, /X6 wake-word stays deferred/);
+    assert.match(app, /armAlwaysOnFromGesture/);
+    assert.match(app, /matchesWakeWord/);
+    assert.match(app, /desktop-always-on/);
+    assert.match(app, /reduceCall\(\{ open: false, phase: "idle" \}, "wake"\)/);
     assert.equal(app.includes("new RTCPeerConnection"), false);
     assert.match(app, /dataset\.voiceDuplex = VOICE_DUPLEX/);
     assert.match(read("public/js/agentqUi.js"), /yieldToCall: true/);
@@ -242,7 +259,15 @@ describe("Atlas rail-35 voice", { concurrency: false }, () => {
     assert.match(read("backend/src/services/openrouter.js"), /deepgram\/aura-2/);
     assert.match(read("backend/src/services/openrouter.js"), /microsoft\/mai-voice-2\.1-flash/);
     assert.match(route, /spokenText/);
-    assert.match(server, /wakeWord: "deferred"/);
+    assert.match(server, /wakeWordStatus\(config\.voiceAlwaysOn, \{ desktop: false \}\)/);
+    assert.match(server, /wakePhrase:\s*"Atlas"/);
+    assert.match(server, /armed:\s*false/);
+    assert.match(app, /In ascolto — di' Atlas per parlare\./);
+    assert.match(app, /speech_input: Boolean\(voice\)/);
+    assert.match(app, /fromVoice: true/);
+    assert.match(app, /voice: Boolean\(voice\)/);
+    assert.match(app, /conversation: recentConversation\(\)/);
+    assert.match(read("backend/src/services/aiAgent.js"), /injectAutomaticRecall\(prompt, recallQuery/);
     assert.match(read("backend/src/services/agentqBridge.js"), /wakeWordStatus/);
     assert.match(read("public/index.html"), /<span>MIC<\/span>/);
   });

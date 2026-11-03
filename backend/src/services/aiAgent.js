@@ -6,11 +6,17 @@ import { config } from "../config.js";
 import { completeChat } from "./openrouter.js";
 import { assertCanCall, recordCompletion, getBudgetStatus } from "./aiBudget.js";
 import { PANEL_CATALOG, SYSTEM_CARD, sanitizeActions } from "./panelCatalog.js";
-import { asAtlasLine } from "./atlasPersonality.js";
+import { asAtlasLine, sanitizeAtlasUserReply } from "./atlasPersonality.js";
 import { getDashboardSnapshot, searchCrossThreadMemory } from "../memory/store.js";
 import { isPlanciaStateQuestion, answerPlanciaStateLive } from "./atlasStateAnswer.js";
 import { userAskedForMemory } from "./atlasSearchGate.js";
-import { RECALL_MARKER, injectAutomaticRecall, recallForContext } from "./atlasRecall.js";
+import {
+  RECALL_MARKER,
+  injectAutomaticRecall,
+  recallForContext,
+  recallQueryFromTurn,
+} from "./atlasRecall.js";
+import { ATLAS_ESCALATE_REMINDERS } from "./atlasPromptCanon.js";
 import { assessLiveSpend, spendAskId, withBudgetLine } from "./atlasSpend.js";
 import { trustLineForResult } from "./atlasTrust.js";
 import {
@@ -39,7 +45,7 @@ function extractJsonObject(text) {
   }
 }
 
-async function callTier(tier, { system, prompt, maxTokens, temperature }) {
+async function callTier(tier, { system, prompt, maxTokens, temperature, recallQuery }) {
   assertCanCall(tier);
   const model =
     tier === "router"
@@ -47,7 +53,9 @@ async function callTier(tier, { system, prompt, maxTokens, temperature }) {
       : tier === "grok"
         ? config.aiGrokModel
         : config.aiMainModel;
-  const attached = injectAutomaticRecall(prompt, prompt);
+  // Prefer an explicit turn query (message + dialogue) over the raw prompt —
+  // escalate prompts are huge JSON contexts that pollute token overlap.
+  const attached = injectAutomaticRecall(prompt, recallQuery != null ? recallQuery : prompt);
   const result = await completeChat({
     system,
     prompt: attached.prompt,
@@ -56,7 +64,7 @@ async function callTier(tier, { system, prompt, maxTokens, temperature }) {
     temperature,
   });
   recordCompletion({ tier, model: result.model, usage: result.usage });
-  return { ...result, tier };
+  return { ...result, tier, recall: attached.recall, recallInjected: attached.injected };
 }
 
 /**
@@ -156,6 +164,17 @@ export async function runAiTurn({
   }
 
   const catalogBrief = PANEL_CATALOG.map((p) => `${p.id}:${p.label}`).join(", ");
+  const conversation = Array.isArray(uiState?.conversation) ? uiState.conversation.slice(-12) : [];
+  const conversationBlock = conversation.length
+    ? `Recent conversation (use for continuity; do not pretend amnesia):\n${conversation
+        .map((row) => `${row.role === "assistant" ? "Atlas" : "User"}: ${String(row.content || "").slice(0, 400)}`)
+        .join("\n")}`
+    : "Recent conversation: (none yet — open warmly and ask what the caller needs.)";
+  const turnRecallQuery = recallQueryFromTurn({
+    message,
+    conversation,
+    module: uiState?.module || "",
+  });
 
   if (forceTier === "grok" || forceTier === "main" || forceTier === "router") {
     const tier = forceTier;
@@ -165,13 +184,14 @@ export async function runAiTurn({
     }
     const spend = assessLiveSpend({ tier, confirm: confirmSpend === true });
     const out = await callTier(tier, {
-      system: `${SYSTEM_CARD}\nPanels: ${catalogBrief}`,
+      system: `${SYSTEM_CARD}\nPanels: ${catalogBrief}\n${conversationBlock}`,
       prompt: message || "Status",
       maxTokens: tier === "router" ? 400 : 900,
+      recallQuery: turnRecallQuery,
     });
     return {
       route: `force_${tier}`,
-      reply: withBudgetLine(out.content, spend, { force: tier !== "router" }),
+      reply: withBudgetLine(sanitizeAtlasUserReply(out.content), spend, { force: tier !== "router" }),
       actions: [],
       tier: out.tier,
       model: out.model,
@@ -186,17 +206,19 @@ export async function runAiTurn({
   const routerSystem = [
     SYSTEM_CARD,
     "You are Atlas on the OPS dashboard front route (identity: Atlas only).",
-    "Reply ONLY with compact JSON:",
+    "Reply ONLY with compact JSON (never put JSON in the spoken reply field):",
     '{"route":"answer_local"|"escalate_main"|"escalate_grok"|"need_questions",',
-    '"reply":"italian short text if answer_local",',
+    '"reply":"italian short Atlas speech if answer_local — must start as Atlas, end with one follow-up question",',
     '"actions":["map"|"zoom-in"|...],',
     '"escalate_reason":"why main/grok if escalating",',
     '"questions":{"ask":true|false}}',
     "Use escalate_grok only for hard multi-step analysis / deep advice / complex briefing.",
-    "Use escalate_main for normal analysis. Prefer answer_local for greetings and simple nav.",
+    "Use escalate_main for normal analysis. Prefer answer_local for greetings, identity, and simple nav.",
+    "The reply field is voice-safe: plain Italian, no braces, no route keys.",
     `Panels: ${catalogBrief}`,
     `Goals so far: q1=${q1 || "—"} q2=${q2 || "—"} q3=${q3 || "—"}`,
-    `UI module=${uiState.module || "map"}`,
+    `UI module=${uiState.module || "map"} voice=${uiState.voice ? "yes" : "no"}`,
+    conversationBlock,
   ].join("\n");
 
   let routerRaw;
@@ -204,8 +226,9 @@ export async function runAiTurn({
     routerRaw = await callTier("router", {
       system: routerSystem,
       prompt: message || "(empty)",
-      maxTokens: 350,
-      temperature: 0.1,
+      maxTokens: 400,
+      temperature: 0.2,
+      recallQuery: turnRecallQuery,
     });
   } catch (err) {
     if (err.code === "AI_BUDGET_HARD" || err.code === "NO_OPENROUTER") {
@@ -260,7 +283,10 @@ export async function runAiTurn({
     const localSpend = assessLiveSpend({ tier: "router" });
     return {
       route: "answer_local",
-      reply: withBudgetLine(parsed.reply || routerRaw.content, localSpend),
+      reply: withBudgetLine(
+        sanitizeAtlasUserReply(parsed.reply || routerRaw.content),
+        localSpend,
+      ),
       actions,
       tier: "router",
       model: routerRaw.model,
@@ -344,12 +370,15 @@ export async function runAiTurn({
   const news = getCachedNews(8);
   const memoryRequested = userAskedForMemory(message);
   const crossMem = memoryRequested ? searchCrossThreadMemory(message, { limit: 8 }) : [];
-  const recall = recallForContext(`${message || ""} ${uiState?.module || ""}`.trim(), { limit: 4 });
+  const recall = recallForContext(turnRecallQuery, { limit: 5 });
   const mainSystem = [
     SYSTEM_CARD,
-    "Rispondi in italiano, conciso. Analizza solo il contesto fornito.",
+    "Rispondi in italiano, conciso, come Atlas in chiamata vocale.",
+    "Dopo la risposta poni UNA domanda utile al chiamante.",
+    "Usa la recent conversation e automatic_recall per continuità.",
     "Non citare risultati di sandbox o memoria espandibile se memory_requested è false.",
-    "automatic_recall sono note durevoli richiamate da sole, senza una ricerca. Usale se pertinenti anche quando memory_requested è false.",
+    "automatic_recall sono note durevoli (incluse sticky truth/Agent Q/voice/tool) richiamate da sole. Usale se pertinenti anche quando memory_requested è false.",
+    ATLAS_ESCALATE_REMINDERS,
     "Puoi proporre improvements come JSON opzionale in coda:",
     '<!--SUGGESTIONS:[{"area":"...","issue":"...","evidence":"...","effort":"l|m|h","action":"refresh"|{}}]-->',
     `Escalate path: ${tier} reason: ${escalateReason}`,
@@ -357,7 +386,10 @@ export async function runAiTurn({
 
   const context = {
     goals: { q1, q2, q3 },
-    ui: uiState,
+    ui: {
+      module: uiState?.module || "map",
+      voice: Boolean(uiState?.voice),
+    },
     day: snap.day_key,
     health: snap.health,
     tops: (snap.tops || []).slice(0, 8),
@@ -381,21 +413,22 @@ export async function runAiTurn({
       lon: n.lon,
       source: n.source,
     })),
-    panels: PANEL_CATALOG,
+    panels: PANEL_CATALOG.map((p) => `${p.id}:${p.label}`),
   };
 
   const powered = await callTier(tier, {
     system: mainSystem,
-    prompt: `Contesto:\n${JSON.stringify(context)}\n\nMessaggio utente:\n${message}`,
+    prompt: `${conversationBlock}\n\nContesto:\n${JSON.stringify(context)}\n\nMessaggio utente:\n${message}`,
     maxTokens: tier === "grok" ? 1200 : 900,
-    temperature: 0.25,
+    temperature: 0.3,
+    recallQuery: turnRecallQuery,
   });
 
   console.info(`[ai] escalate ${routerRaw.model} → ${powered.model} (${tier}): ${escalateReason}`);
 
   return {
     route: wantGrok ? "escalate_grok" : "escalate_main",
-    reply: withBudgetLine(powered.content, spend, { force: true }),
+    reply: withBudgetLine(sanitizeAtlasUserReply(powered.content), spend, { force: true }),
     actions,
     tier: powered.tier,
     model: powered.model,

@@ -3,7 +3,9 @@
  *
  * Durable notes live in expandable memory. On wake and chat Atlas ranks
  * them by keyword overlap and recency and injects the top facts into the
- * model context. The operator does not have to ask.
+ * model context. Sticky-tagged packs (truth, Agent Q, voice, tools) always
+ * compete for a slot even without keyword overlap — faster retrieval of the
+ * brain packs without pasting them into every system card.
  *
  * This is not C3. C3 is an on-request sandbox / memory search. Recall never
  * searches the sandbox and never sets searched/onDemand.
@@ -13,6 +15,15 @@ import { appendExpandableMemory, listExpandableMemory } from "./agentqBridge.js"
 
 export const RECALL_MARKER = "FATTI RICHIAMATI AUTOMATICAMENTE";
 export const DURABLE_TAG = "durable";
+export const STICKY_TAG = "sticky";
+/** Pack tags that always surface in automatic recall (even with weak keyword overlap). */
+export const STICKY_TAGS = new Set([
+  STICKY_TAG,
+  "atlas-truth-pack",
+  "atlas-agentq-heritage",
+  "atlas-voice-ops",
+  "atlas-tool-config",
+]);
 const SESSION_TAG = "atlas-session";
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -37,6 +48,11 @@ export function recallTokens(text) {
     .filter((word) => word.length > 2 && !STOP.has(word));
 }
 
+export function isStickyEntry(entry) {
+  const tags = Array.isArray(entry?.tags) ? entry.tags : [];
+  return tags.some((tag) => STICKY_TAGS.has(tag));
+}
+
 function isRecallCandidate(entry) {
   const tags = Array.isArray(entry?.tags) ? entry.tags : [];
   if (tags.includes(SESSION_TAG)) return false;
@@ -45,7 +61,7 @@ function isRecallCandidate(entry) {
 
 /**
  * keyword is the share of query tokens found (title hits count full, body hits 0.6).
- * recency decays on a 7-day time constant. A durable tag adds a small tie-break.
+ * recency decays on a 7-day time constant. Durable + sticky tags boost ranking.
  */
 export function scoreRecallEntry(entry, queryTokens, nowMs = Date.now()) {
   const tokens = Array.isArray(queryTokens) ? queryTokens : [];
@@ -63,18 +79,20 @@ export function scoreRecallEntry(entry, queryTokens, nowMs = Date.now()) {
   const ageMs = Math.max(0, nowMs - at);
   const recency = Math.exp(-ageMs / WEEK_MS);
   const durable = (entry?.tags || []).includes(DURABLE_TAG);
-  const score = keyword * 0.7 + recency * 0.3 + (durable ? 0.05 : 0);
-  return { score, keyword, recency, durable };
+  const sticky = isStickyEntry(entry);
+  // Sticky packs stay in the top band without drowning strong keyword hits.
+  const score = keyword * 0.7 + recency * 0.3 + (durable ? 0.05 : 0) + (sticky ? 0.28 : 0);
+  return { score, keyword, recency, durable, sticky };
 }
 
-export function rankRecall(entries, query, { now = Date.now(), limit = 4 } = {}) {
+export function rankRecall(entries, query, { now = Date.now(), limit = 5 } = {}) {
   const queryTokens = recallTokens(query);
   const ranked = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
     if (!isRecallCandidate(entry)) continue;
     const scored = scoreRecallEntry(entry, queryTokens, now);
-    if (queryTokens.length && scored.keyword <= 0) continue;
-    if (!queryTokens.length && !scored.durable) continue;
+    if (queryTokens.length && scored.keyword <= 0 && !scored.sticky) continue;
+    if (!queryTokens.length && !scored.durable && !scored.sticky) continue;
     ranked.push({ entry, ...scored });
   }
   ranked.sort((a, b) => b.score - a.score || String(b.entry?.at || "").localeCompare(String(a.entry?.at || "")));
@@ -113,7 +131,10 @@ export function formatRecallLine(facts) {
 export function formatRecallBlock(recallOrFacts) {
   const facts = Array.isArray(recallOrFacts) ? recallOrFacts : recallOrFacts?.facts || [];
   if (!facts.length) return "";
-  const lines = facts.map((fact) => `- ${clip(fact?.title, 120) || "Nota"}: ${clip(fact?.text, 240)}`);
+  const lines = facts.map((fact) => {
+    const max = fact?.sticky ? 160 : 240;
+    return `- ${clip(fact?.title, 120) || "Nota"}: ${clip(fact?.text, max)}`;
+  });
   return `${RECALL_MARKER} (non è una ricerca; l'operatore non l'ha chiesta):\n${lines.join("\n")}`;
 }
 
@@ -129,7 +150,16 @@ export function recallQueryFromBundle(bundle) {
   return parts.filter(Boolean).join(" ");
 }
 
-export function recallForContext(query, { limit = 4, now = Date.now(), entries } = {}) {
+/** Build a tight recall query from the live turn (message + recent dialogue). */
+export function recallQueryFromTurn({ message = "", conversation = [], module = "" } = {}) {
+  const recent = (Array.isArray(conversation) ? conversation : [])
+    .slice(-6)
+    .map((row) => String(row?.content || "").slice(0, 220))
+    .filter(Boolean);
+  return clip([message, module, ...recent].filter(Boolean).join(" "), 900);
+}
+
+export function recallForContext(query, { limit = 5, now = Date.now(), entries } = {}) {
   let list = entries;
   if (!list) {
     try {
@@ -142,9 +172,10 @@ export function recallForContext(query, { limit = 4, now = Date.now(), entries }
   const facts = ranked.map((row) => ({
     id: row.entry.id,
     title: clip(row.entry.title, 120) || "Nota",
-    text: clip(row.entry.text, 240),
+    text: clip(row.entry.text, row.sticky ? 160 : 240),
     at: row.entry.at || null,
     tags: Array.isArray(row.entry.tags) ? row.entry.tags.slice(0, 8) : [],
+    sticky: Boolean(row.sticky),
     score: Number(row.score.toFixed(4)),
     keyword: Number(row.keyword.toFixed(4)),
     recency: Number(row.recency.toFixed(4)),
@@ -166,9 +197,9 @@ export function injectAutomaticRecall(prompt, query) {
   if (text.includes(RECALL_MARKER)) {
     return { prompt: text, recall: null, injected: false };
   }
-  const recall = recallForContext(query || text, { limit: 4 });
+  const recall = recallForContext(query || text, { limit: 5 });
   if (!recall.block) return { prompt: text, recall, injected: false };
-  const room = Math.max(0, (config.maxPromptChars || 8000) - text.length - 2);
+  const room = Math.max(0, (config.maxPromptChars || 10000) - text.length - 2);
   if (room < 80) return { prompt: text, recall, injected: false };
   const block = recall.block.slice(0, room);
   return { prompt: `${text}\n\n${block}`, recall, injected: true };

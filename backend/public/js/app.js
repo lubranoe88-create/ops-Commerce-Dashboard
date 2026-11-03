@@ -40,19 +40,27 @@ import {
   toggleFunctionBoardPanel,
   wireFunctionBoardUi,
 } from "./functionBoardUi.js?v=rail-25-atlas";
-import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-36-prove";
-import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-36-prove";
+import { openSandboxDoc, rememberOpenModule, showProblems, wireAgentqUi } from "./agentqUi.js?v=rail-37-always-on";
+import { voiceDefersToAtlasHands } from "./atlasHandsPlan.js?v=rail-37-always-on";
 import {
   dispatchAtlasHand,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
-} from "./atlasHoloDispatch.js?v=rail-36-prove";
-import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-36-prove";
-import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-36-prove";
-import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-36-prove";
-import { VOICE_DUPLEX, reduceCall, shouldYieldToCall } from "./atlasCall.js?v=rail-36-prove";
+} from "./atlasHoloDispatch.js?v=rail-37-always-on";
+import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-37-always-on";
+import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-37-always-on";
+import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-37-always-on";
+import { VOICE_DUPLEX, reduceCall, shouldYieldToCall, wakeWordStatus } from "./atlasCall.js?v=rail-37-always-on";
+import {
+  WAKE_WORD,
+  canArmAlwaysOn,
+  isDesktopVoiceHost,
+  matchesWakeWord,
+  reduceAlwaysOn,
+  wakeCommandRemainder,
+} from "./atlasWake.js?v=rail-37-always-on";
 
-const BUILD_ID = "rail-36-prove";
+const BUILD_ID = "rail-37-always-on";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -1086,10 +1094,29 @@ async function refreshSecretsStatus() {
   try {
     const h = await fetch("/health", { credentials: "same-origin" }).then((r) => r.json());
     state.secrets = h.secrets_configured || null;
-    // X6 wake-word stays deferred. The env stub is recorded and does not start listening.
-    document.documentElement.dataset.voiceAlwaysOn = h.voice?.alwaysOn ? "1" : "0";
-    document.documentElement.dataset.wakeWord = h.voice?.wakeWord || "deferred";
+    // Server health cannot see the UA. Desktop always-on is armed here only.
+    // iPad/iPhone/iPod stay Phase Now. wakeWord is "later" until a desktop host is armed.
+    const desktop = isDesktopVoiceHost(navigator.userAgent);
+    const envOn = Boolean(h.voice?.alwaysOn);
+    const armed = canArmAlwaysOn({ alwaysOnEnv: envOn, desktop });
     document.documentElement.dataset.voiceDuplex = h.voice?.duplex || VOICE_DUPLEX;
+    if (armed) {
+      document.documentElement.dataset.wakeWordArmed = "1";
+      document.documentElement.dataset.wakeWord = "desktop-always-on";
+      document.documentElement.dataset.voiceAlwaysOn = "1";
+      if (document.documentElement.dataset.voiceCall !== "1") {
+        document.documentElement.dataset.voicePhase = "desktop-always-on";
+      }
+      // Marks the controller only. The first MIC tap is what calls getUserMedia.
+      globalMicControl?.armAlwaysOn?.();
+    } else {
+      document.documentElement.dataset.wakeWordArmed = "0";
+      document.documentElement.dataset.wakeWord = "later";
+      document.documentElement.dataset.voiceAlwaysOn = envOn ? "1" : "0";
+      if (document.documentElement.dataset.voiceCall !== "1" && document.documentElement.dataset.voicePhase === "desktop-always-on") {
+        document.documentElement.dataset.voicePhase = "idle";
+      }
+    }
   } catch {
     state.secrets = null;
   }
@@ -2136,6 +2163,8 @@ window.__opsDiag = () => ({
   voiceOnboard: document.body.dataset.voiceOnboard || null,
   voiceCall: document.documentElement.dataset.voiceCall || "0",
   voicePhase: document.documentElement.dataset.voicePhase || "idle",
+  wakeWord: document.documentElement.dataset.wakeWord || "later",
+  wakePhase: document.documentElement.dataset.wakePhase || "off",
   micEngine: document.documentElement.dataset.micEngine || "",
   lastView: readLastView(),
   globe: getGlobeState(),
@@ -3126,6 +3155,18 @@ async function loadChat({ introduce = false } = {}) {
   });
 }
 
+function recentConversation(limit = 8) {
+  const nodes = [...($("messageList")?.querySelectorAll(".bubble") || [])];
+  return nodes
+    .filter((node) => !node.classList.contains("system"))
+    .slice(-limit)
+    .map((node) => ({
+      role: node.dataset?.role === "assistant" || node.classList.contains("assistant") ? "assistant" : "user",
+      content: String(node.textContent || "").trim().slice(0, 400),
+    }))
+    .filter((row) => row.content);
+}
+
 async function sendChat(text, { voice = false } = {}) {
   if (!text.trim()) return;
   if (!state.threadId) {
@@ -3135,7 +3176,8 @@ async function sendChat(text, { voice = false } = {}) {
   await ensureChatModelSelect();
   const model = getSelectedChatModel();
   try {
-    // Always persist user utterance (incl. MIC) so speech_input + history survive paid path
+    // Voice and typed turns share this path: the thread is persisted (speech_input
+    // on MIC) and the paid /api/ai/turn injects atlasRecall before the model call.
     const attach = state.pendingAttachment;
     try {
       await api(`/api/chat/threads/${state.threadId}/messages`, {
@@ -3159,9 +3201,15 @@ async function sendChat(text, { voice = false } = {}) {
 
     // Paid AI agent path: busy ✓ while working, actions[] applied, reply in chat
     if (state.aiPaid) {
+      const uiState = {
+        module: state.module,
+        focusedTopId: state.focusedTopId,
+        voice: Boolean(voice),
+        conversation: recentConversation(),
+      };
       let result = await runPaidAiTurn({
         message: text,
-        uiState: { module: state.module, focusedTopId: state.focusedTopId },
+        uiState,
       });
       if (result?.needSpendConfirm) {
         let ok = false;
@@ -3173,7 +3221,7 @@ async function sendChat(text, { voice = false } = {}) {
         if (ok) {
           result = await runPaidAiTurn({
             message: text,
-            uiState: { module: state.module, focusedTopId: state.focusedTopId },
+            uiState,
             confirmSpend: true,
           });
         }
@@ -3599,8 +3647,14 @@ function setupMic(button, onText) {
   let wakeSegment = null;
   let finishCollect = null;
   let bargeWatch = null;
+  let alwaysOnState = { phase: "off", enabled: false, action: "keep", wakeWord: "Atlas" };
+  let wakeActive = false;
+  let wakeGen = 0;
+  let wakeHold = false;
   const uiButtons = new Set([button]);
   const CALL_SEGMENT_MS = 3200;
+  const WAKE_SEGMENT_MS = 1800;
+  const LISTEN_CUE = "In ascolto — di' Atlas per parlare.";
 
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -3682,6 +3736,9 @@ function setupMic(button, onText) {
     stopBargeWatch();
     callLive = false;
     callGen += 1;
+    wakeActive = false;
+    wakeGen += 1;
+    wakeHold = false;
     ttsEpoch += 1;
     ttsHolding = false;
     segmentDiscard = true;
@@ -3714,12 +3771,269 @@ function setupMic(button, onText) {
     stopUi();
     document.documentElement.dataset.voicePhase = "idle";
     document.documentElement.dataset.micEngine = "";
+    if (alwaysOnState?.enabled) applyAlwaysOn("disable");
+    else document.documentElement.dataset.wakePhase = "off";
+  };
+
+  const streamAlive = (stream) => {
+    const tracks = stream?.getAudioTracks?.() || [];
+    return tracks.length > 0 && tracks.some((track) => track.readyState === "live");
+  };
+
+  // First MIC tap on a desktop host with VOICE_ALWAYS_ON grants the mic and arms
+  // wake listening. It does not open the Phase Now call. iPad never enters here.
+  const desktopAlwaysOn = () => canArmAlwaysOn({
+    alwaysOnEnv: document.documentElement.dataset.voiceAlwaysOn === "1",
+    desktop: isDesktopVoiceHost(),
+  });
+
+  const applyAlwaysOn = (event, payload) => {
+    alwaysOnState = reduceAlwaysOn(alwaysOnState, event, payload);
+    document.documentElement.dataset.wakePhase = alwaysOnState.phase || "off";
+    return alwaysOnState;
+  };
+
+  const paintWakeUi = () => {
+    state.micLive = true;
+    document.body.classList.toggle("mic-live", true);
+    document.body.classList.toggle("voice-call", false);
+    document.documentElement.dataset.voiceCall = "0";
+    document.documentElement.dataset.voicePhase = "desktop-always-on";
+    document.documentElement.dataset.wakeWord = "desktop-always-on";
+    document.documentElement.dataset.wakeWordArmed = "1";
+    document.documentElement.dataset.micEngine = "wake-spot";
+    document.documentElement.dataset.wakePhase = alwaysOnState.phase || "listening";
+    for (const btn of uiButtons) {
+      btn.classList.toggle("live", true);
+      btn.setAttribute("aria-pressed", "true");
+      paintMicLabel(btn, false);
+      btn.title = LISTEN_CUE;
+      btn.setAttribute("aria-label", "Ascolto Atlas attivo");
+    }
+  };
+
+  const stopActiveRecorder = () => {
+    const recNow = mediaRecorder;
+    mediaRecorder = null;
+    if (recNow && recNow.state !== "inactive") {
+      try { recNow.onstop = null; recNow.stop(); } catch { /* ignore */ }
+    }
+    recordChunks = [];
+  };
+
+  const stopWakeLoop = () => {
+    wakeActive = false;
+    wakeGen += 1;
+    wakeHold = false;
+    try { wakeSegment?.(); } catch { /* ignore */ }
+    wakeSegment = null;
+    stopActiveRecorder();
+    stopPcmTap();
+  };
+
+  const pauseCallKeepMic = () => {
+    stopBargeWatch();
+    callLive = false;
+    callGen += 1;
+    ttsEpoch += 1;
+    ttsHolding = false;
+    segmentDiscard = true;
+    wakeHold = false;
+    try { wakeSegment?.(); } catch { /* ignore */ }
+    wakeSegment = null;
+    try { finishCollect?.(); } catch { /* ignore */ }
+    finishCollect = null;
+    stopActiveRecorder();
+    stopPcmTap();
+    if (rec) {
+      try {
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        rec.onstart = null;
+        rec.abort?.();
+      } catch {
+        try { rec.stop(); } catch { /* ignore */ }
+      }
+      rec = null;
+    }
+    dropGestureCapture();
+    starting = false;
+    mode = null;
+    clearStartWatch();
+    if (recordTimer) {
+      clearTimeout(recordTimer);
+      recordTimer = null;
+    }
+  };
+
+  const startWakeLoop = () => {
+    if (!desktopAlwaysOn() || callLive || !streamAlive(micStream)) return;
+    if (alwaysOnState.phase === "arming" && alwaysOnState.enabled) applyAlwaysOn("mic-ready");
+    wakeHold = false;
+    wakeActive = true;
+    const gen = ++wakeGen;
+    paintWakeUi();
+    runWakeLoop(gen).catch((err) => {
+      if (!wakeActive || gen !== wakeGen) return;
+      postChatUpdate(err?.message || "Ascolto interrotto", "warn");
+      applyAlwaysOn("mic-dead");
+      hardStop();
+    });
+  };
+
+  const openCallFromWake = async (heard) => {
+    const opened = reduceCall({ open: false, phase: "idle" }, "wake");
+    if (opened.action !== "open" || opened.open !== true) {
+      applyAlwaysOn("call-end");
+      return;
+    }
+    stopWakeLoop();
+    applyAlwaysOn("call-open");
+    const rest = wakeCommandRemainder(heard);
+    await delay(160);
+    if (callLive || !desktopAlwaysOn()) return;
+    if (!streamAlive(micStream)) {
+      applyAlwaysOn("mic-dead");
+      hardStop();
+      postChatUpdate("Microfono interrotto. Ritocca MIC per riarmare l'ascolto.", "warn");
+      return;
+    }
+    await startVoiceCall({ reuseStream: true, seedText: rest });
+  };
+
+  const runWakeLoop = async (gen) => {
+    let lastWarnAt = 0;
+    while (wakeActive && gen === wakeGen && !callLive) {
+      while (wakeActive && gen === wakeGen && wakeHold && !callLive) await delay(120);
+      if (!wakeActive || gen !== wakeGen || callLive) return;
+      if (!streamAlive(micStream)) {
+        applyAlwaysOn("mic-dead");
+        hardStop();
+        postChatUpdate("Microfono interrotto. Ritocca MIC per riarmare l'ascolto.", "warn");
+        return;
+      }
+      const captured = await recordSegment(gen, {
+        ms: WAKE_SEGMENT_MS,
+        wake: true,
+        alive: () => wakeActive && gen === wakeGen && !callLive && !wakeHold,
+      });
+      if (!wakeActive || gen !== wakeGen || callLive || wakeHold) continue;
+      if (!captured) continue;
+      const { blob, snap } = captured;
+      if (segmentIsSilent(blob, snap)) continue;
+      let heard = "";
+      try {
+        heard = await transcribeSegment(blob, { wakeOnly: true });
+      } catch (err) {
+        if (!wakeActive || gen !== wakeGen || callLive) return;
+        if (isSilenceTranscriptError(err)) continue;
+        const now = Date.now();
+        if (now - lastWarnAt > 8000) {
+          lastWarnAt = now;
+          postChatUpdate(err?.message || "Trascrizione wake fallita", "warn");
+        }
+        await delay(600);
+        continue;
+      }
+      if (!wakeActive || gen !== wakeGen || callLive || wakeHold) continue;
+      if (!heard || isIgnorableTranscript(heard) || !matchesWakeWord(heard)) {
+        if (heard) applyAlwaysOn("transcript", { text: heard });
+        continue;
+      }
+      const decision = applyAlwaysOn("transcript", { text: heard });
+      if (decision.action !== "open-call") continue;
+      await openCallFromWake(heard);
+      return;
+    }
+  };
+
+  const armAlwaysOnFromGesture = async () => {
+    if (!desktopAlwaysOn() || callOpen() || starting) return;
+    if (wakeActive && streamAlive(micStream)) {
+      paintWakeUi();
+      postChatUpdate(LISTEN_CUE);
+      showToast(LISTEN_CUE, "ok");
+      return;
+    }
+    applyAlwaysOn("enable");
+    markUserInput?.();
+    const capture = gestureMicPromise;
+    gestureMicPromise = null;
+    if (!capture && streamAlive(micStream)) {
+      applyAlwaysOn("mic-ready");
+      postChatUpdate(LISTEN_CUE);
+      showToast(LISTEN_CUE, "ok");
+      startWakeLoop();
+      return;
+    }
+    if (!capture) {
+      applyAlwaysOn("mic-dead");
+      postChatUpdate(micErrorMessage("gesture"), "warn");
+      return;
+    }
+    let perm;
+    try {
+      perm = await capture;
+    } catch (err) {
+      applyAlwaysOn("mic-dead");
+      postChatUpdate(micErrorMessage(err?.name || "not-allowed"), "warn");
+      return;
+    }
+    if (callOpen() || starting) {
+      if (perm?.stream && perm.stream !== micStream) releaseMicStream(perm.stream);
+      return;
+    }
+    if (!perm?.ok || !perm.stream) {
+      if (perm?.stream) releaseMicStream(perm.stream);
+      applyAlwaysOn("mic-dead");
+      postChatUpdate(micErrorMessage(perm?.code), "warn");
+      return;
+    }
+    if (micStream && micStream !== perm.stream) releaseMicStream(micStream);
+    micStream = perm.stream;
+    const canCapture = typeof MediaRecorder !== "undefined"
+      || Boolean(getPrimedAudioContext()?.createScriptProcessor);
+    if (!canCapture) {
+      releaseMicStream(micStream);
+      micStream = null;
+      applyAlwaysOn("mic-dead");
+      postChatUpdate(`Microfono non disponibile su questo browser (${micDiagHint()}).`, "warn");
+      return;
+    }
+    applyAlwaysOn("mic-ready");
+    postChatUpdate(LISTEN_CUE);
+    showToast(LISTEN_CUE, "ok");
+    startWakeLoop();
   };
 
   const endVoiceCall = (msg = "Chiamata chiusa") => {
-    const decision = reduceCall({ open: true, phase: "listen" }, "hangup");
-    const was = callOpen() || starting || state.micLive;
+    const wasCall = callOpen() || starting;
+    const wasWake = wakeActive && !wasCall;
+    const decision = reduceCall({ open: wasCall, phase: "listen" }, "hangup");
+    const was = wasCall || state.micLive;
     cancelPlayback();
+    if (wasWake) {
+      hardStop();
+      document.documentElement.dataset.voicePhase = "idle";
+      postChatUpdate("Ascolto disattivato");
+      showToast("Ascolto disattivato", "ok");
+      return;
+    }
+    const keepForWake = wasCall && desktopAlwaysOn() && streamAlive(micStream);
+    if (keepForWake) {
+      pauseCallKeepMic();
+      applyAlwaysOn("call-end");
+      paintWakeUi();
+      if (was && msg) {
+        postChatUpdate(`Chiamata chiusa. ${LISTEN_CUE}`);
+        showToast(LISTEN_CUE, "ok");
+      }
+      delay(180).then(() => {
+        if (!callLive && desktopAlwaysOn() && streamAlive(micStream)) startWakeLoop();
+      });
+      return;
+    }
     hardStop();
     document.documentElement.dataset.voicePhase = decision.phase;
     if (was && msg) {
@@ -3784,7 +4098,7 @@ function setupMic(button, onText) {
     return blob.size < min;
   };
 
-  const transcribeSegment = async (blob) => {
+  const transcribeSegment = async (blob, opts = {}) => {
     const meta = describeAudioBlob(blob);
     const audioBase64 = await blobToBase64(blob);
     const data = await api("/api/ai/transcribe", {
@@ -3794,6 +4108,7 @@ function setupMic(button, onText) {
         mimeType: meta.mimeType,
         filename: meta.filename,
         language: "it",
+        ...(opts.wakeOnly ? { wakeOnly: true } : {}),
       }),
     });
     const heard = String(data?.text || "").trim();
@@ -3805,8 +4120,12 @@ function setupMic(button, onText) {
     return heard;
   };
 
-  const recordSegment = async (gen) => {
-    if (!callLive || gen !== callGen || !micStream || ttsHolding) return null;
+  const recordSegment = async (gen, opts = {}) => {
+    const ms = Number(opts.ms) > 0 ? Number(opts.ms) : CALL_SEGMENT_MS;
+    const alive = typeof opts.alive === "function"
+      ? opts.alive
+      : () => Boolean(callLive && gen === callGen);
+    if (!alive() || !micStream || ttsHolding || (opts.wake && wakeHold)) return null;
     ensureAudioSessionPlayAndRecord();
     setMicTracksEnabled(true);
     if (!pcmTap) pcmTap = startPcmTap(micStream);
@@ -3831,20 +4150,25 @@ function setupMic(button, onText) {
         }
       }
     }
-    document.documentElement.dataset.voicePhase = "listen";
-    setLiveUi(true);
+    if (opts.wake) {
+      document.documentElement.dataset.voicePhase = "desktop-always-on";
+      document.documentElement.dataset.wakeWord = "desktop-always-on";
+    } else {
+      document.documentElement.dataset.voicePhase = "listen";
+      setLiveUi(true);
+    }
     await new Promise((resolve) => {
       const timer = setTimeout(() => {
         wakeSegment = null;
         resolve();
-      }, CALL_SEGMENT_MS);
+      }, ms);
       wakeSegment = () => {
         clearTimeout(timer);
         wakeSegment = null;
         resolve();
       };
     });
-    const discard = segmentDiscard || ttsHolding || !callLive || gen !== callGen;
+    const discard = segmentDiscard || ttsHolding || (opts.wake && wakeHold) || !alive();
     const chunks = await collectRecorder();
     let snap = null;
     try { snap = pcmTap?.consume?.() || null; } catch { snap = null; }
@@ -3856,7 +4180,7 @@ function setupMic(button, onText) {
     return { blob, snap };
   };
 
-  const runCallLoop = async (gen) => {
+  const runCallLoop = async (gen, seedText = "") => {
     let lastWarnAt = 0;
     const warn = (msg) => {
       const now = Date.now();
@@ -3864,6 +4188,38 @@ function setupMic(button, onText) {
       lastWarnAt = now;
       postChatUpdate(msg, "warn");
     };
+    const seed = String(seedText || "").trim();
+    if (seed && callLive && gen === callGen && !isIgnorableTranscript(seed)) {
+      const reply = reduceCall({ open: true, phase: "listen" }, "segment-heard");
+      if (reply.action === "reply") {
+        postChatUpdate(`Voce rilevata: ${seed}`);
+        showToast("Voce rilevata", "ok");
+        ttsHolding = true;
+        segmentDiscard = true;
+        setMicTracksEnabled(false);
+        stopPcmTap();
+        document.documentElement.dataset.voicePhase = reply.phase;
+        const epoch = ttsEpoch;
+        try {
+          await Promise.resolve(onText(seed));
+        } catch (err) {
+          warn(err?.message || "Risposta vocale fallita");
+        }
+        if (!callLive || gen !== callGen) return;
+        if (ttsEpoch !== epoch) {
+          while (callLive && gen === callGen && ttsHolding) await delay(120);
+          if (!callLive || gen !== callGen) return;
+          await delay(420);
+        } else {
+          ttsHolding = false;
+          segmentDiscard = false;
+          setMicTracksEnabled(true);
+        }
+        const back = reduceCall({ open: true, phase: "tts" }, "tts-end");
+        if (!back.open) return;
+        document.documentElement.dataset.voicePhase = back.phase;
+      }
+    }
     while (callLive && gen === callGen) {
       while (callLive && gen === callGen && ttsHolding) await delay(120);
       if (!callLive || gen !== callGen || !micStream) return;
@@ -3924,7 +4280,7 @@ function setupMic(button, onText) {
     }
   };
 
-  const startVoiceCall = async () => {
+  const startVoiceCall = async ({ reuseStream = false, seedText = "" } = {}) => {
     markUserInput?.();
     ensureAudioSessionPlayAndRecord();
     const myGen = ++callGen;
@@ -3933,6 +4289,36 @@ function setupMic(button, onText) {
     document.documentElement.dataset.micEngine = "media-recorder-call";
     document.documentElement.dataset.voicePhase = "listen";
     setLiveUi(true);
+
+    if (reuseStream) {
+      if (myGen !== callGen || !streamAlive(micStream)) {
+        if (myGen === callGen) hardStop();
+        postChatUpdate("Microfono non disponibile. Ritocca MIC per riarmare l'ascolto.", "warn");
+        return;
+      }
+      if (!pcmTap) pcmTap = startPcmTap(micStream);
+      if (!pcmTap && typeof MediaRecorder === "undefined") {
+        if (myGen === callGen) hardStop();
+        postChatUpdate(
+          `Microfono non disponibile su questo browser (${micDiagHint()}). Su iPad serve Safari aggiornato.`,
+          "warn",
+        );
+        return;
+      }
+      callLive = true;
+      ttsHolding = false;
+      segmentDiscard = false;
+      starting = false;
+      setLiveUi(true);
+      postChatUpdate("Chiamata aperta — resto in ascolto. Rispondo a voce. Ritocca END per chiudere.");
+      showToast("Chiamata attiva", "ok");
+      try {
+        await runCallLoop(myGen, seedText);
+      } catch (err) {
+        if (callLive && myGen === callGen) endVoiceCall(err?.message || "Chiamata interrotta");
+      }
+      return;
+    }
 
     const failStart = async (message, capture) => {
       if (capture) {
@@ -4070,6 +4456,11 @@ function setupMic(button, onText) {
     if (callOpen() || starting) {
       dropGestureCapture();
       endVoiceCall("Chiamata chiusa");
+      return;
+    }
+    // Desktop always-on listens for Atlas. iPad / non-desktop falls through to Phase Now.
+    if (desktopAlwaysOn()) {
+      armAlwaysOnFromGesture();
       return;
     }
     if (mode === "sr" || rec) {
@@ -4242,6 +4633,11 @@ function setupMic(button, onText) {
     beginGestureMicCapture();
     e.preventDefault();
     e.stopPropagation();
+    // Desktop always-on: the first MIC tap arms wake listening and does not open the call.
+    if (!callOpen() && !starting && decision.action === "open" && desktopAlwaysOn()) {
+      armAlwaysOnFromGesture();
+      return;
+    }
     toggle();
   };
 
@@ -4251,6 +4647,14 @@ function setupMic(button, onText) {
   const releaseForTts = () => {
     ensureAudioSessionPlayAndRecord();
     if (!(callLive || mode === "call")) {
+      if (wakeActive && micStream) {
+        const epoch = ++ttsEpoch;
+        wakeHold = true;
+        segmentDiscard = true;
+        try { wakeSegment?.(); } catch { /* ignore */ }
+        setMicTracksEnabled(false);
+        return epoch;
+      }
       hardStop();
       return 0;
     }
@@ -4271,6 +4675,13 @@ function setupMic(button, onText) {
     stopBargeWatch();
     ttsHolding = false;
     segmentDiscard = false;
+    if (!(callLive || mode === "call") && wakeActive && micStream) {
+      wakeHold = false;
+      setMicTracksEnabled(true);
+      document.documentElement.dataset.voicePhase = "desktop-always-on";
+      document.documentElement.dataset.voiceCall = "0";
+      return;
+    }
     const back = reduceCall({ open: Boolean(callLive), phase: "tts" }, "tts-end");
     if (!callLive || !micStream) {
       document.documentElement.dataset.voicePhase = callLive ? back.phase : "idle";
@@ -4281,10 +4692,39 @@ function setupMic(button, onText) {
     document.documentElement.dataset.voicePhase = back.phase;
   };
 
+  const status = () => {
+    const desk = isDesktopVoiceHost(navigator.userAgent);
+    const envOn = document.documentElement.dataset.voiceAlwaysOn === "1";
+    const wake = wakeWordStatus(envOn, { desktop: desk });
+    return {
+      armed: Boolean(wake.armed),
+      wakeWord: WAKE_WORD,
+      listening: Boolean(wakeActive),
+      callOpen: callOpen(),
+      phase: callLive ? "in-call" : wakeActive ? "listening" : wake.phase,
+    };
+  };
+
+  // Boot calls this after /health. It must not call getUserMedia — browsers
+  // require a gesture, and the first MIC tap runs armAlwaysOnFromGesture.
+  const armAlwaysOn = () => {
+    if (!desktopAlwaysOn()) return status();
+    if (!alwaysOnState.enabled) applyAlwaysOn("enable");
+    document.documentElement.dataset.wakeWordArmed = "1";
+    document.documentElement.dataset.wakeWord = "desktop-always-on";
+    document.documentElement.dataset.voiceAlwaysOn = "1";
+    if (!callLive && document.documentElement.dataset.voiceCall !== "1") {
+      document.documentElement.dataset.voicePhase = "desktop-always-on";
+    }
+    return status();
+  };
+
   const control = {
     toggle,
     stop: () => endVoiceCall("Chiamata chiusa"),
     endCall: () => endVoiceCall("Chiamata chiusa"),
+    armAlwaysOn,
+    status,
     releaseForTts,
     resumeAfterTts,
     attachButton(btn) {
@@ -4762,6 +5202,8 @@ async function boot() {
   }
 
   wireUi();
+  // setupMic is inside wireUi. If /health arms desktop always-on, refreshSecretsStatus
+  // calls armAlwaysOn() and does not open the mic until the first MIC tap.
   // Quadro 2D: wire panel controls only — opens from «Funzionamento plancia», not on home.
   wireFunctionBoardUi();
   window.__opsAtlasDigest = (line) => {

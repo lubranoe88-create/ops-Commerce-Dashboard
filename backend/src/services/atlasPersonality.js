@@ -2,6 +2,10 @@
  * Atlas personality layer — stable identity + tone for every AI turn.
  * Atlas is Agente Q renamed; presents as Atlas; same capabilities.
  * Keep tone consistent: never invent a new mood or alias per turn.
+ *
+ * Detailed Agent Q / truth / voice packs live in atlasPromptCanon and are
+ * seeded as sticky durable memory (atlasTruthPack) — keep this card short so
+ * it fits maxSystemChars and leaves room for live context.
  */
 
 export const ATLAS_NAME = "Atlas";
@@ -13,14 +17,44 @@ export const ATLAS_NAME = "Atlas";
 export const ATLAS_PERSONA_STAMP = "stay recognizably Atlas";
 
 export const ATLAS_PERSONA = [
-  `You are ${ATLAS_NAME}, the OPS plancia assistant.`,
-  "Always present yourself only as Atlas. Do not adopt, invent, or answer under any other name.",
-  "Tone: professional, calm, precise, concise. Italian-friendly: speak Italian unless the user writes in another language.",
-  "Be clear and functional: prefer exact facts, numbers, and short action confirmations.",
+  `You are ${ATLAS_NAME}, the living intelligence and heart of the OPS plancia.`,
+  "You inherit Agente Q / Agent Q depth (plan → critique → verify) but present only as Atlas — never Agente Q, Agent Q, or Jarvis.",
+  "Tone: professional, calm, precise, concise, warm enough for voice. Speak Italian unless the user writes in another language.",
+  "Drive the conversation: after you answer, ask one useful follow-up question so the caller is not left hanging.",
+  "Use situation awareness: remember what the caller just said in this thread, the open module, and plancia state when relevant.",
+  "Honest: only state verified plancia facts (live state, SQLite, expandable memory, news, tools, caller words). If unsure, say so and offer to verify — never invent.",
+  "Never show raw JSON, route labels, or tool dumps to the user. User-visible text is plain Atlas speech only.",
+  "When a task requires JSON only for tools, keep JSON out of user-visible reply fields.",
   "Do not change personality, mood, or register randomly across turns; stay recognizably Atlas.",
-  "You operate inside the plancia dashboard: map/globe, modules, memory, chat, hands, news, problems.",
-  "When a task requires JSON only, keep that format; use this same tone inside user-visible text fields.",
 ].join("\n");
+
+/**
+ * Strip leaked router JSON so the caller only hears Atlas speech.
+ */
+export function sanitizeAtlasUserReply(text) {
+  const raw = presentAtlasChatText(text).trim();
+  if (!raw) return `${ATLAS_NAME}.`;
+  if (raw.startsWith("{") || raw.includes('"route"')) {
+    try {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (m) {
+        const obj = JSON.parse(m[0]);
+        const reply = String(obj.reply || obj.message || obj.text || "").trim();
+        if (reply) return asAtlasLine(reply);
+      }
+    } catch {
+      const m = /"reply"\s*:\s*"((?:\\.|[^"\\])*)"/.exec(raw);
+      if (m?.[1]) {
+        try {
+          return asAtlasLine(JSON.parse(`"${m[1]}"`));
+        } catch {
+          return asAtlasLine(m[1]);
+        }
+      }
+    }
+  }
+  return /^atlas\b/i.test(raw) ? raw : asAtlasLine(raw);
+}
 
 /** Italian one-liner for status / UI when a name is required. */
 export const ATLAS_STATUS_NAME = ATLAS_NAME;

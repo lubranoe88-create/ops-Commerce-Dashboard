@@ -23,6 +23,7 @@ import { runStartupIntegrity } from "./services/atlasStartupIntegrity.js";
 import { attemptSelfHeal } from "./services/atlasSelfHeal.js";
 import { applyBrowserUseRuntimeEnv } from "./services/browserUseRuntime.js";
 import { runtimeProve, summarizeProve } from "./services/atlasProve.js";
+import { wakeWordStatus } from "../public/js/atlasCall.js";
 
 applyBrowserUseRuntimeEnv();
 
@@ -98,7 +99,7 @@ app.get("/health", async (_req, res) => {
   } catch (err) {
     prove = {
       ok: false,
-      build: "rail-36-prove",
+      build: "rail-37-always-on",
       depth: "runtime",
       passed: 0,
       total: 0,
@@ -108,14 +109,18 @@ app.get("/health", async (_req, res) => {
       error: String(err?.message || "prove failed").slice(0, 200),
     };
   }
+  const wake = wakeWordStatus(config.voiceAlwaysOn, { desktop: false });
   res.json({
     ok: true,
-    build: "rail-36-prove",
+    build: "rail-37-always-on",
     prove,
     voice: {
       duplex: "barge-cancel",
       alwaysOn: config.voiceAlwaysOn,
-      wakeWord: "deferred",
+      armed: false,
+      wakeWord: wake.wakeWord,
+      wakePhrase: "Atlas",
+      wakePhase: wake.phase,
       primaryTts: config.openRouterTtsModel,
     },
     integrity: (() => {
@@ -198,6 +203,17 @@ app.use((err, _req, res, _next) => {
 // M5: integrity finishes before the port opens. A hard failure is persisted
 // and surfaced; it does not stop the process. The resident wake reads the
 // same report and withholds hand actions while it is red.
+import { ensureAtlasTruthMemory } from "./services/atlasTruthPack.js";
+
+try {
+  const seeded = ensureAtlasTruthMemory();
+  console.log(
+    `[atlas] truth/agentq memory seeded tags=${(seeded.tags || []).join(",")}`,
+  );
+} catch (err) {
+  console.warn("[atlas] truth memory seed", err?.message || err);
+}
+
 runStartupIntegrity({ reason: "boot" })
   .then((report) =>
     attemptSelfHeal({ integrity: report }).catch((err) => {

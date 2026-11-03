@@ -1,6 +1,6 @@
 # Atlas prove pack
 
-Build **rail-36-prove**. The done classifica is checked by `backend/src/services/atlasProve.test.js`.
+Build **rail-37-always-on**. The done classifica is checked by `backend/src/services/atlasProve.test.js`.
 
 ```bash
 cd backend && npm run test:atlas
@@ -10,18 +10,17 @@ That script is `node --test src/services/atlas*.test.js`.
 
 ## Result
 
-- Atlas suite: **74 tests, 74 passed, 0 failed** (12 files).
-- Prove items: **33/33 (100%)** on the runtime pack and again on the isolated pack (temp trust, session, runs, schedule, decisions).
+- Atlas suite: **86 tests, 86 passed, 0 failed** (14 files).
+- Prove items: **35/35 (100%)** on the runtime pack and again on the isolated pack (temp trust, session, runs, schedule, decisions).
 - `GET /health` includes `prove` (`ok`, `passed`, `total`, `percent`, `deferred`, `items`). The process `ok` flag stays the liveness flag. `prove.ok` is the pack.
 
-Phase Later and X6 are not part of the 33.
+Phase Later and X6 are in the pack for the desktop path. iPad always-on stays deferred.
 
 ## Deferred
 
-- **Phase Later** — not in this pack. No Phase Later listener is armed.
-- **X6 wake-word** — `VOICE_ALWAYS_ON` is recorded and does not start a listener. `wakeWord` stays `"deferred"` (`phase: "later"`).
+- **iPad always-on** — out of scope. Desktop listens for Atlas after the first MIC gesture. iPad stays Phase Now (MIC opens the call). The server has no user-agent, so `/health` stays unarmed and reports `wakePhrase: "Atlas"`.
 
-## What the 33 items check
+## What the 35 items check
 
 | Id | Check |
 | --- | --- |
@@ -56,5 +55,7 @@ Phase Later and X6 are not part of the 33.
 | X4 | Memory graph links a shared tag |
 | tts | ElevenLabs Flash is first, then Deepgram Aura, then MAI voice |
 | alphabet | A–Z, digits, and symbol pack normalizes before a code is spoken |
-| call | Phase Now reducer is `barge-cancel`; X6 stays unarmed |
-| build | Stamp `rail-36-prove` on `/health`, `BUILD_ID`, and the public mirror |
+| call | Phase Now reducer is `barge-cancel`; a wake event opens the same call |
+| phase-later | Desktop always-on arms only with `VOICE_ALWAYS_ON` and a desktop host |
+| X6 | Wake word is Atlas; it opens Phase Now. iPad always-on stays out of scope |
+| build | Stamp `rail-37-always-on` on `/health`, `BUILD_ID`, and the public mirror |

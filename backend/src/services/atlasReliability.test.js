@@ -165,7 +165,8 @@ describe("Atlas rail-32 reliability", { concurrency: false }, () => {
 
     const agent = read("backend/src/services/aiAgent.js");
     assert.match(agent, /automatic_recall/);
-    assert.match(agent, /injectAutomaticRecall\(prompt, prompt\)/);
+    assert.match(agent, /injectAutomaticRecall\(prompt, recallQuery/);
+    assert.match(agent, /recallQueryFromTurn/);
     assert.match(agent, /userAskedForMemory\(message\)/);
     assert.equal(agent.includes("const crossMem = searchCrossThreadMemory(message"), false);
     assert.match(read("backend/src/routes/chat.js"), /injectAutomaticRecall/);
@@ -410,8 +411,8 @@ describe("Atlas rail-32 reliability", { concurrency: false }, () => {
     assert.match(ui, /recallLine/);
     assert.match(ui, /decisionLine/);
     assert.match(ui, /decisionSnippet/);
-    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-36-prove"/);
-    assert.match(read("backend/src/server.js"), /build:\s*"rail-36-prove"/);
+    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-37-always-on"/);
+    assert.match(read("backend/src/server.js"), /build:\s*"rail-37-always-on"/);
     assert.equal(read("public/js/app.js"), read("backend/public/js/app.js"));
     assert.equal(read("public/index.html"), read("backend/public/index.html"));
   });

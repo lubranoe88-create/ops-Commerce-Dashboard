@@ -42,7 +42,15 @@ export function setUpdatesPathForTests(filePath) {
 function updatesFile() {
   return updatesPathOverride || UPDATES_PATH;
 }
-const MEMORY_EXPAND_PATH = path.resolve(DATA_ROOT, "agentq-memory/expandable.json");
+/**
+ * Durable expandable memory. Default stays under data/agentq-memory for live
+ * compatibility. Prefer ATLAS_MEMORY_DIR when you want a cleaner atlas-named
+ * folder (e.g. backend/data/atlas-memory) — expandable.json is written there.
+ */
+const MEMORY_DIR = process.env.ATLAS_MEMORY_DIR?.trim()
+  ? path.resolve(process.env.ATLAS_MEMORY_DIR.trim())
+  : path.resolve(DATA_ROOT, "agentq-memory");
+const MEMORY_EXPAND_PATH = path.resolve(MEMORY_DIR, "expandable.json");
 let memoryPathOverride = "";
 
 /** Tests point expandable memory at a temp file. */
@@ -52,6 +60,16 @@ export function setMemoryExpandPathForTests(filePath) {
 
 function memoryFile() {
   return memoryPathOverride || MEMORY_EXPAND_PATH;
+}
+
+export function atlasMemoryPaths() {
+  return {
+    dir: MEMORY_DIR,
+    expandable: MEMORY_EXPAND_PATH,
+    relative: path.relative(path.resolve(__dirname, "../../.."), MEMORY_EXPAND_PATH) ||
+      "backend/data/agentq-memory/expandable.json",
+    envOverride: Boolean(process.env.ATLAS_MEMORY_DIR?.trim()),
+  };
 }
 
 /** Solo SELECT su queste tabelle — nessuna scrittura via ricerca. */
@@ -503,6 +521,11 @@ export function listExpandableMemory({ limit = 40, query = "" } = {}) {
 }
 
 function presentMemoryEntry(entry) {
+  const tags = Array.isArray(entry?.tags) ? entry.tags : [];
+  // Sticky / prompt packs are model-facing: keep "Agent Q" heritage wording intact.
+  if (tags.includes("sticky") || tags.includes("prompt")) {
+    return { ...entry, tags };
+  }
   return {
     ...entry,
     title: presentAtlasChatText(entry?.title),
@@ -552,8 +575,8 @@ function normalizeTags(tags) {
   return list;
 }
 
-/** Replace the single note with this tag. Used by the Atlas session mirror. */
-export function upsertTaggedMemory({ tag, title, text } = {}) {
+/** Replace the single note with this tag. Used by the Atlas session mirror + sticky packs. */
+export function upsertTaggedMemory({ tag, title, text, tags } = {}) {
   const key = String(tag || "").trim().slice(0, 40);
   if (!key) {
     const err = new Error("tag richiesto");
@@ -562,12 +585,14 @@ export function upsertTaggedMemory({ tag, title, text } = {}) {
   }
   const data = readMemoryFile();
   const idx = data.entries.findIndex((entry) => (entry?.tags || []).includes(key));
+  const merged = Array.isArray(tags) && tags.length ? [...tags] : [key, "atlas"];
+  if (!merged.includes(key)) merged.unshift(key);
   const entry = {
     id: idx >= 0 ? data.entries[idx].id : `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     at: new Date().toISOString(),
     title: String(title || "Nota Atlas").slice(0, 160),
     text: String(text || "").slice(0, 4000),
-    tags: normalizeTags([key, "atlas"]),
+    tags: normalizeTags(merged),
   };
   if (idx >= 0) data.entries[idx] = entry;
   else data.entries.unshift(entry);
@@ -898,9 +923,10 @@ export async function agentqStatus() {
       duplexNote: VOICE_DUPLEX_NOTE,
       primaryTts: config.openRouterTtsModel,
       fallbackTts: ["cartesia", "deepgram/aura-2", "microsoft/mai-voice-2.1-flash"],
-      wakeWord: wakeWordStatus(config.voiceAlwaysOn),
+      wakeWord: wakeWordStatus(config.voiceAlwaysOn, { desktop: false }),
+      wakePhrase: "Atlas",
       note:
-        "iPad: unlock TTS su pointerdown MIC; server TTS→AudioContext; MediaRecorder+Whisper; no SpeechRecognition. Barge-in cancella HTMLAudio/AudioContext; WebRTC duplex non è usato.",
+        "iPad: unlock TTS su pointerdown MIC; server TTS→AudioContext; MediaRecorder+Whisper; no SpeechRecognition. Barge-in cancella HTMLAudio/AudioContext; WebRTC duplex non è usato. Desktop always-on is armed on the client when VOICE_ALWAYS_ON is set and the host is not iPad.",
     },
   };
 }

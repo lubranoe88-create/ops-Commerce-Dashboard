@@ -78,10 +78,20 @@ export const config = {
   cartesiaVoiceId:
     process.env.CARTESIA_VOICE_ID?.trim() || "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
   cartesiaVersion: process.env.CARTESIA_VERSION?.trim() || "2026-08-14",
-  /** Stub only. X6 wake-word stays off even when this is true. */
+  /**
+   * VOICE_ALWAYS_ON arms the desktop client path (wake word Atlas: mic stays
+   * open, "Atlas" opens the Phase Now call). The server cannot see the UA, so
+   * /health stays unarmed. The browser starts listening after the first MIC
+   * gesture. iPad/iPhone/iPod stay Phase Now.
+   */
   voiceAlwaysOn: /^(1|true|on|yes)$/i.test(String(process.env.VOICE_ALWAYS_ON || "").trim()),
-  maxPromptChars: intEnv("MAX_PROMPT_CHARS", 8000),
-  maxSystemChars: intEnv("MAX_SYSTEM_CHARS", 2000),
+  /**
+   * Prompt budgets. Defaults raised so the lean Atlas persona + conversation
+   * history + sticky recall fit without truncating honesty packs out of mind.
+   * Override with MAX_PROMPT_CHARS / MAX_SYSTEM_CHARS when needed.
+   */
+  maxPromptChars: intEnv("MAX_PROMPT_CHARS", 10000),
+  maxSystemChars: intEnv("MAX_SYSTEM_CHARS", 4000),
   maxTokens: intEnv("MAX_TOKENS", 1024),
   /** Cheap front-agent model (same OpenRouter key). Always used first on paid. */
   aiRouterModel:

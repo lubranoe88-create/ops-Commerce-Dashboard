@@ -33,3 +33,6 @@ services:
         value: https://ops-commerce-dashboard.onrender.com
       - key: AI_ENTITLEMENT
         value: paid
+      # Desktop clients arm Atlas wake listening after the first MIC gesture.
+      - key: VOICE_ALWAYS_ON
+        value: "true"
