@@ -472,7 +472,22 @@ export async function runAgentqSearch(
   };
 }
 
+function migrateExpandableFromLegacy() {
+  if (memoryPathOverride || !process.env.ATLAS_MEMORY_DIR?.trim()) return;
+  const neu = MEMORY_EXPAND_PATH;
+  const legacy = path.resolve(DATA_ROOT, "agentq-memory/expandable.json");
+  if (!fs.existsSync(legacy) || fs.existsSync(neu)) return;
+  try {
+    fs.mkdirSync(path.dirname(neu), { recursive: true });
+    fs.copyFileSync(legacy, neu);
+    console.log(`[atlas] migrated expandable memory → ${neu}`);
+  } catch (err) {
+    console.warn("[atlas] memory migrate", err?.message || err);
+  }
+}
+
 function ensureMemoryExpand() {
+  migrateExpandableFromLegacy();
   const file = memoryFile();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (!fs.existsSync(file)) {

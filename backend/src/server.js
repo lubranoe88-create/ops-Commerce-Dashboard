@@ -99,7 +99,7 @@ app.get("/health", async (_req, res) => {
   } catch (err) {
     prove = {
       ok: false,
-      build: "rail-37-atlas-voice",
+      build: "rail-38-closeout",
       depth: "runtime",
       passed: 0,
       total: 0,
@@ -112,7 +112,7 @@ app.get("/health", async (_req, res) => {
   const wake = wakeWordStatus(config.voiceAlwaysOn, { desktop: false });
   res.json({
     ok: true,
-    build: "rail-37-atlas-voice",
+    build: "rail-38-closeout",
     prove,
     voice: {
       duplex: "barge-cancel",
@@ -204,6 +204,7 @@ app.use((err, _req, res, _next) => {
 // and surfaced; it does not stop the process. The resident wake reads the
 // same report and withholds hand actions while it is red.
 import { ensureAtlasTruthMemory } from "./services/atlasTruthPack.js";
+import { ensureAtlasCatalogMemory } from "./services/atlasCatalogPack.js";
 
 try {
   const seeded = ensureAtlasTruthMemory();
@@ -212,6 +213,15 @@ try {
   );
 } catch (err) {
   console.warn("[atlas] truth memory seed", err?.message || err);
+}
+
+try {
+  const catalog = ensureAtlasCatalogMemory();
+  console.log(
+    `[atlas] plancia/geo memory seeded tags=${(catalog.tags || []).join(",")}`,
+  );
+} catch (err) {
+  console.warn("[atlas] catalog memory seed", err?.message || err);
 }
 
 runStartupIntegrity({ reason: "boot" })

@@ -23,6 +23,8 @@ export const STICKY_TAGS = new Set([
   "atlas-agentq-heritage",
   "atlas-voice-ops",
   "atlas-tool-config",
+  "atlas-plancia-control",
+  "atlas-world-geo",
 ]);
 const SESSION_TAG = "atlas-session";
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;

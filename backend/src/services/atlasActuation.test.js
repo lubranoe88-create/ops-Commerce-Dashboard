@@ -45,7 +45,7 @@ describe("actuation pack", () => {
     assert.match(app, /fromVoice: true/);
     assert.match(app, /openBriefingModal/);
     assert.match(app, /openSandboxDoc/);
-    assert.equal(app.includes('const BUILD_ID = "rail-37-atlas-voice"'), true);
+    assert.equal(app.includes('const BUILD_ID = "rail-38-closeout"'), true);
   });
 
   test("zoom utterances become globe hands and call the camera", async () => {

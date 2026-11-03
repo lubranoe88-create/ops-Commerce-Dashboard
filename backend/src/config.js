@@ -80,11 +80,15 @@ export const config = {
   cartesiaVersion: process.env.CARTESIA_VERSION?.trim() || "2026-08-14",
   /**
    * VOICE_ALWAYS_ON arms the desktop client path (wake word Atlas: mic stays
-   * open, "Atlas" opens the Phase Now call). The server cannot see the UA, so
-   * /health stays unarmed. The browser starts listening after the first MIC
-   * gesture. iPad/iPhone/iPod stay Phase Now.
+   * open, "Atlas" opens the Phase Now call). Defaults to true so live Render
+   * arms even when the blueprint env var was not applied; set
+   * VOICE_ALWAYS_ON=false to disable. The server cannot see the UA, so /health
+   * stays unarmed. The browser starts listening after the first MIC gesture.
+   * iPad/iPhone/iPod stay Phase Now.
    */
-  voiceAlwaysOn: /^(1|true|on|yes)$/i.test(String(process.env.VOICE_ALWAYS_ON || "").trim()),
+  voiceAlwaysOn: /^(1|true|on|yes)$/i.test(
+    String(process.env.VOICE_ALWAYS_ON ?? "true").trim() || "true",
+  ),
   /**
    * Prompt budgets. Defaults raised so the lean Atlas persona + conversation
    * history + sticky recall fit without truncating honesty packs out of mind.

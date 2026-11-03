@@ -36,3 +36,7 @@ services:
       # Desktop clients arm Atlas wake listening after the first MIC gesture.
       - key: VOICE_ALWAYS_ON
         value: "true"
+      # Durable expandable memory (repo path backend/data/atlas-memory).
+      # Service rootDir is backend, so the runtime path is data/atlas-memory.
+      - key: ATLAS_MEMORY_DIR
+        value: data/atlas-memory
