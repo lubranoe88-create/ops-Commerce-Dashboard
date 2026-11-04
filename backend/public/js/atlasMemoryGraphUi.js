@@ -9,6 +9,22 @@ let pollTimer = null;
 let lastRevision = "";
 let panelOpen = false;
 
+/** Pallini per tipo neurone (lista + anello SVG). */
+const NEURON_DOT = Object.freeze({
+  heritage: { fill: "#e8c56a", stroke: "#f0d090", label: "heritage" }, // oro
+  skill: { fill: "#5dcf8a", stroke: "#8ae4ad", label: "skill" }, // verde
+  prompt: { fill: "#4ec8e0", stroke: "#7addef", label: "prompt" }, // cyan
+  function: { fill: "#a78bfa", stroke: "#c4b5fd", label: "function" }, // viola
+  concept: { fill: "#9aa3ad", stroke: "#c5ccd4", label: "concept" }, // grigio
+  tool: { fill: "#f0a06a", stroke: "#f6c49a", label: "tool" },
+  session: { fill: "#6ab0f0", stroke: "#9accf6", label: "session" },
+  fact: { fill: "#7a9aa8", stroke: "#a8c0ca", label: "fact" },
+});
+
+function neuronStyle(kind) {
+  return NEURON_DOT[String(kind || "fact").toLowerCase()] || NEURON_DOT.fact;
+}
+
 async function api(path) {
   const res = await fetch(path, {
     credentials: "same-origin",
@@ -57,47 +73,38 @@ function renderLive(live) {
   const summary = document.getElementById("memoryGraphSummary");
   if (!list || !svg) return;
 
-  const entries = live?.expandable?.entries || [];
-  const concepts = live?.sqlite?.concepts || [];
+  const neurons = live?.neurons || live?.expandable?.entries || [];
   const graph = live?.graph || { nodes: [], edges: [] };
   const nodes = graph.nodes || [];
   const edges = graph.edges || [];
+  const heritageCount = neurons.filter((n) => n.kind === "heritage").length;
 
   if (summary) {
     summary.textContent = [
-      `${live?.expandable?.count ?? entries.length} note`,
-      `${live?.sqlite?.conceptCount ?? concepts.length} concetti`,
-      "live",
+      `${live?.count ?? neurons.length} neuroni`,
+      `${heritageCount} Agent Q`,
+      live?.unified ? "cervello unico" : "live",
     ].join(" · ");
   }
 
-  const noteItems = entries.length
-    ? `<h3>MEMORY · expandable</h3><ul>${entries
+  const noteItems = neurons.length
+    ? `<h3>CERVELLO · neuroni</h3><ul>${neurons
         .map((entry) => {
           const on = entry.id === selectedId ? " is-selected" : "";
+          const kind = escapeHtml(entry.kind || "fact");
+          const body = String(entry.body || entry.text || "");
           return `<li class="memory-graph-item${on}" data-memory-id="${escapeHtml(entry.id)}">
-            <strong>${escapeHtml(entry.title)}</strong>
-            <div class="muted">${escapeHtml((entry.tags || []).join(" · ") || "senza tag")}${
-              entry.at ? ` · ${escapeHtml(String(entry.at).replace("T", " ").slice(0, 19))}` : ""
+            <strong>[${kind}] ${escapeHtml(entry.title)}</strong>
+            <div class="muted">${escapeHtml((entry.tags || []).slice(0, 6).join(", ") || "senza tag")}${
+              entry.at ? ` — ${escapeHtml(String(entry.at).replace("T", " ").slice(0, 19))}` : ""
             }</div>
-            <div>${escapeHtml(String(entry.text || "").slice(0, 160))}</div>
+            <div>${escapeHtml(body.slice(0, 220))}</div>
           </li>`;
         })
         .join("")}</ul>`
-    : `<h3>MEMORY · expandable</h3><p class="muted">Nessuna nota in expandable.json.</p>`;
+    : `<h3>CERVELLO · neuroni</h3><p class="muted">Nessun neurone nel cervello Atlas.</p>`;
 
-  const conceptItems = concepts.length
-    ? `<h3>MEMORY · sqlite</h3><ul>${concepts
-        .map(
-          (c) => `<li class="memory-graph-item">
-            <strong>${escapeHtml(c.label || c.id)}</strong>
-            <div class="muted">dim ${escapeHtml(c.dimension ?? "—")} · i${Number(c.importance || 0).toFixed(2)}</div>
-          </li>`,
-        )
-        .join("")}</ul>`
-    : `<h3>MEMORY · sqlite</h3><p class="muted">Nessun concetto in memory.sqlite.</p>`;
-
-  list.innerHTML = `${noteItems}${conceptItems}`;
+  list.innerHTML = noteItems;
   list.querySelectorAll("[data-memory-id]").forEach((item) => {
     item.addEventListener("click", () => {
       const id = item.getAttribute("data-memory-id");

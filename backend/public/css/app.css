@@ -2100,6 +2100,18 @@ body[data-module="map"] #app.clear-globe-layout #glCanvas {
 .memory-graph-item { cursor: pointer; }
 .memory-graph-item.is-selected { color: #e8fbff; }
 .memory-graph-item.is-dim { opacity: 0.38; }
+.memory-graph-item strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.neuron-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
 .memory-graph-body {
   display: grid;
   grid-template-columns: minmax(220px, 340px) 1fr;
