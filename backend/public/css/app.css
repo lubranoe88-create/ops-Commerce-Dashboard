@@ -2097,119 +2097,87 @@ body[data-module="map"] #app.clear-globe-layout #glCanvas {
   font-size: 13px;
 }
 
-/* MEMORY bottom: holographic neural brain (unica sezione in basso) */
-.memory-bottom {
+/* MEMORY page: fixed full-viewport 3D neural brain (not a popup) */
+.memory-page {
   display: none;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 10px;
+  z-index: 6;
+  pointer-events: none;
   flex-direction: column;
   gap: 6px;
-  width: 100%;
-  min-height: clamp(280px, 42vh, 560px);
-  padding: 8px 10px 10px;
-  border-radius: 8px;
-  background:
-    radial-gradient(ellipse 70% 60% at 50% 45%, rgba(30, 90, 120, 0.28), transparent 70%),
-    linear-gradient(180deg, rgba(2, 12, 20, 0.92), rgba(0, 6, 12, 0.96));
-  border: 1px solid rgba(90, 200, 230, 0.22);
-  box-shadow: inset 0 0 40px rgba(40, 160, 200, 0.08);
 }
-.memory-bottom.is-open,
-.memory-bottom:not([hidden]) {
+.memory-page.is-open,
+.memory-page:not([hidden]) {
   display: flex;
 }
-body.memory-holo-open .bottom-tools { display: none !important; }
-.memory-bottom-head {
+.memory-page-head {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  pointer-events: auto;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(4, 14, 24, 0.82), rgba(2, 8, 14, 0.62));
+  border: 1px solid rgba(90, 200, 230, 0.22);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35), inset 0 0 24px rgba(40, 160, 200, 0.08);
+  backdrop-filter: blur(8px);
 }
-.memory-bottom-title {
+.memory-page-title {
   margin: 0;
   font-family: "Sora", system-ui, sans-serif;
   font-size: 13px;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: rgba(190, 240, 255, 0.95);
+  color: rgba(190, 240, 255, 0.98);
+  text-shadow: 0 0 18px rgba(80, 200, 255, 0.35);
 }
-.memory-bottom-summary {
+.memory-page-summary {
   flex: 1 1 auto;
   font-size: 11px;
-  opacity: 0.75;
+  opacity: 0.8;
 }
-.memory-graph-svg,
-.memory-graph-svg--holo {
-  width: 100%;
-  height: clamp(240px, 36vh, 500px);
-  background: transparent;
-  border-radius: 4px;
+.memory-page-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
-.holo-lobe {
-  fill: none;
-  stroke: rgba(100, 210, 235, 0.14);
-  stroke-width: 1.2;
+.mem-kind {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(230, 240, 250, 0.9);
 }
-.memory-edge {
-  fill: none;
-  stroke: rgba(110, 210, 235, 0.42);
-  stroke-width: 1.15;
-  stroke-linecap: round;
-}
-.memory-edge--recall {
-  stroke: rgba(160, 220, 245, 0.55);
-  stroke-dasharray: 5 4;
-}
-.memory-edge.is-flowing {
-  stroke: rgba(140, 235, 255, 0.75);
-  stroke-width: 1.45;
-  animation: holo-edge-flow 1.4s linear infinite;
-}
-.memory-edge--dead {
-  stroke: rgba(90, 100, 110, 0.28) !important;
-  stroke-width: 1 !important;
-  stroke-dasharray: 2 6;
-  animation: none !important;
-  opacity: 0.45;
-}
-@keyframes holo-edge-flow {
-  to { stroke-dashoffset: -36; }
-}
-.memory-node { cursor: pointer; }
-.memory-node .neuron-halo {
-  fill: rgba(60, 180, 220, 0.1);
-  stroke: rgba(120, 220, 245, 0.35);
-  stroke-width: 1;
-}
-.memory-node .neuron-core {
-  fill: rgba(12, 48, 62, 0.95);
-  stroke: rgba(150, 230, 250, 0.95);
-  stroke-width: 1.6;
-}
-.memory-node.is-selected .neuron-core {
-  stroke-width: 2.4;
-  stroke: rgba(210, 245, 255, 1);
-}
-.memory-node.is-error .neuron-halo {
-  fill: rgba(180, 30, 40, 0.18);
-  stroke: rgba(255, 90, 90, 0.55);
-}
-.memory-node.is-error .neuron-core {
-  fill: rgba(90, 12, 18, 0.95);
-  stroke: rgba(255, 80, 80, 0.95);
-}
-.holo-packet {
-  fill: rgba(180, 245, 255, 0.95);
-  stroke: rgba(220, 255, 255, 0.7);
-  stroke-width: 0.6;
+.mem-kind--heritage { background: rgba(212, 168, 75, 0.18); border-color: rgba(212, 168, 75, 0.45); color: #f0d594; }
+.mem-kind--skill { background: rgba(61, 255, 154, 0.14); border-color: rgba(61, 255, 154, 0.4); color: #9dffc8; }
+.mem-kind--prompt { background: rgba(61, 214, 255, 0.14); border-color: rgba(61, 214, 255, 0.4); color: #9fe8ff; }
+.mem-kind--function { background: rgba(183, 148, 246, 0.16); border-color: rgba(183, 148, 246, 0.45); color: #d4c0ff; }
+.mem-kind--concept { background: rgba(154, 163, 173, 0.14); border-color: rgba(154, 163, 173, 0.4); color: #c5ccd3; }
+.memory-page-hint {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 11px;
+  opacity: 0.7;
   pointer-events: none;
 }
-.holo-packet--trail {
-  fill: rgba(120, 210, 240, 0.35);
-  stroke: none;
+body.memory-page-active .gl-host {
+  background:
+    radial-gradient(ellipse 55% 45% at 50% 48%, rgba(30, 90, 130, 0.22), transparent 70%),
+    #03060c;
 }
-.holo-packet--fail {
-  fill: rgba(255, 70, 70, 0.95);
-  stroke: rgba(255, 160, 160, 0.8);
+body.memory-page-active .overlay-hud--minimal {
+  opacity: 0.55;
 }
+body.memory-page-active .bottom-tools { display: none !important; }
+body.memory-page-active .imagery-credit { display: none !important; }
+/* Legacy SVG classes kept harmless if any residual markup appears */
+.memory-bottom { display: none !important; }
 .holo-signal-lost {
   fill: rgba(255, 110, 110, 0.95);
   font-size: 13px;

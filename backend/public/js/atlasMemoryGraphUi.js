@@ -1,30 +1,57 @@
 /**
- * Holographic neural CERVELLO — unica sezione MEMORY in basso sulla plancia.
- * Full-bleed SVG: neuroni collegati da archi, pacchetti dati live sulle sinapsi.
- * Hop falliti → arco spento / nodo rosso. Niente lista, niente colori per tipo, niente filtri.
+ * MEMORY page — permanent full-viewport 3D neural brain (not a popup).
+ * Three.js: labeled neurons, kind colors, orbit/zoom, idle auto-rotate,
+ * live synapse packets, glow. Replaces the old 5D concept hologram.
  */
-const POLL_MS = 1800;
-const NS = "http://www.w3.org/2000/svg";
-const VIEW_W = 960;
-const VIEW_H = 560;
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const POLL_MS = 2000;
+const FETCH_LIMIT = 200;
+
+const KIND_COLOR = {
+  heritage: 0xd4a84b,
+  skill: 0x3dff9a,
+  prompt: 0x3dd6ff,
+  function: 0xb794f6,
+  concept: 0x9aa3ad,
+  fact: 0x7eb6ff,
+  tool: 0xff9f43,
+  session: 0xff7ab8,
+  note: 0xaeb4bf,
+};
 
 let selectedId = "";
 let pollTimer = null;
-let rafId = 0;
+let animId = 0;
 let lastRevision = "";
-let panelOpen = false;
+let pageOpen = false;
 let lastFetchOk = true;
-let lastFetchAt = 0;
+let idleResumeTimer = null;
 
-/** @type {{ nodes: object[], edges: object[], points: Map<string,{x:number,y:number}>, at: number }} */
-let scene = { nodes: [], edges: [], points: new Map(), at: 0 };
+/** @type {null | {
+ *  scene: THREE.Scene,
+ *  camera: THREE.PerspectiveCamera,
+ *  renderer: THREE.WebGLRenderer,
+ *  controls: OrbitControls,
+ *  root: THREE.Group,
+ *  packetGroup: THREE.Group,
+ *  nodeById: Map<string, THREE.Object3D>,
+ *  labelById: Map<string, THREE.Sprite>,
+ *  edgeCurves: Array<{curve: THREE.QuadraticBezierCurve3, key: string, line: THREE.Line}>,
+ *  nodes: object[],
+ *  edges: object[],
+ *  container: HTMLElement,
+ *  onResize: () => void,
+ *  onPointer: (ev: PointerEvent) => void,
+ * }} */
+let runtime = null;
 
-/** @type {Map<string, { lastPulse: number, fails: number, alive: boolean }>} */
-const edgeHealth = new Map();
-/** @type {Map<string, { lastSeen: number, errorUntil: number }>} */
-const nodeHealth = new Map();
-/** @type {Array<{ id: string, from: string, to: string, t: number, speed: number, failed: boolean, reason: string }>} */
+/** @type {Array<{ mesh: THREE.Mesh, curve: THREE.QuadraticBezierCurve3, t: number, speed: number, failed: boolean, key: string }>} */
 let packets = [];
+
+/** @type {Map<string, { lastPulse: number, alive: boolean }>} */
+const edgeHealth = new Map();
 
 function api(path) {
   return fetch(path, {
@@ -50,12 +77,6 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function hideOthers() {
-  for (const id of ["functionBoardClose", "cockpitClose"]) {
-    document.getElementById(id)?.click();
-  }
-}
-
 function hash01(str) {
   let h = 2166136261;
   const s = String(str || "");
@@ -74,48 +95,60 @@ function edgeKey(from, to, reason = "") {
   return `${lo}|${hi}|${reason || ""}`;
 }
 
-/** Organic two-lobe brain layout (stable per node id). */
-function layoutBrain(nodes) {
+function kindOf(node) {
+  const k = String(node?.kind || "concept").toLowerCase();
+  return KIND_COLOR[k] != null ? k : "concept";
+}
+
+function colorForKind(kind) {
+  return new THREE.Color(KIND_COLOR[kind] ?? KIND_COLOR.concept);
+}
+
+function neuronTitle(node) {
+  const raw = String(node?.title || node?.label || node?.id || "neurone").trim();
+  return raw.length > 42 ? `${raw.slice(0, 40)}…` : raw;
+}
+
+/** Organic two-lobe 3D brain layout (stable per id). */
+function layoutBrain3d(nodes) {
   const points = new Map();
   const n = Math.max(nodes.length, 1);
   nodes.forEach((node, index) => {
     const id = String(node.id);
     const h = hash01(id);
     const lobe = h < 0.5 ? -1 : 1;
-    const ring = 0.32 + hash01(`${id}:r`) * 0.58;
+    const ring = 0.35 + hash01(`${id}:r`) * 0.65;
     const a0 = lobe < 0 ? Math.PI * 0.55 : -Math.PI * 0.55;
     const sweep = Math.PI * 0.95;
     const t = (index / n + h * 0.17) % 1;
     const angle = a0 + t * sweep * lobe;
-    const cx = VIEW_W * 0.5 + lobe * 78;
-    const cy = VIEW_H * 0.5 + 6;
-    const rx = 200 * ring;
-    const ry = 155 * ring;
-    const jitterX = (hash01(`${id}:x`) - 0.5) * 26;
-    const jitterY = (hash01(`${id}:y`) - 0.5) * 22;
-    points.set(id, {
-      x: cx + Math.cos(angle) * rx + jitterX,
-      y: cy + Math.sin(angle) * ry + jitterY,
-    });
+    const cx = lobe * 1.15;
+    const cy = (hash01(`${id}:y`) - 0.5) * 0.9;
+    const rx = 2.35 * ring;
+    const ry = 1.85 * ring;
+    const jz = (hash01(`${id}:z`) - 0.5) * 1.4;
+    points.set(
+      id,
+      new THREE.Vector3(
+        cx + Math.cos(angle) * rx + (hash01(`${id}:jx`) - 0.5) * 0.35,
+        cy + Math.sin(angle) * ry * 0.85,
+        Math.sin(angle * 0.7) * 1.1 + jz,
+      ),
+    );
   });
   const ids = [...points.keys()];
-  for (let pass = 0; pass < 3; pass += 1) {
+  for (let pass = 0; pass < 4; pass += 1) {
     for (let i = 0; i < ids.length; i += 1) {
       for (let j = i + 1; j < ids.length; j += 1) {
         const a = points.get(ids[i]);
         const b = points.get(ids[j]);
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const d = Math.hypot(dx, dy) || 0.01;
-        const min = 26;
+        const d = a.distanceTo(b) || 0.01;
+        const min = 0.42;
         if (d < min) {
-          const push = ((min - d) / 2) * 0.65;
-          const ux = dx / d;
-          const uy = dy / d;
-          a.x -= ux * push;
-          a.y -= uy * push;
-          b.x += ux * push;
-          b.y += uy * push;
+          const push = ((min - d) / 2) * 0.7;
+          const dir = b.clone().sub(a).normalize();
+          a.addScaledVector(dir, -push);
+          b.addScaledVector(dir, push);
         }
       }
     }
@@ -123,397 +156,383 @@ function layoutBrain(nodes) {
   return points;
 }
 
-function curvePath(a, b, bend = 0.22) {
-  const mx = (a.x + b.x) / 2;
-  const my = (a.y + b.y) / 2;
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const cx = mx - dy * bend;
-  const cy = my + dx * bend;
-  return { d: `M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`, cx, cy };
-}
-
-function ensureDefs(svg) {
-  let defs = svg.querySelector("defs");
-  if (defs) return defs;
-  defs = document.createElementNS(NS, "defs");
-  defs.innerHTML = `
-    <radialGradient id="holoCore" cx="50%" cy="45%" r="55%">
-      <stop offset="0%" stop-color="rgba(140,230,255,0.45)"/>
-      <stop offset="55%" stop-color="rgba(20,70,95,0.22)"/>
-      <stop offset="100%" stop-color="rgba(0,10,18,0)"/>
-    </radialGradient>
-    <filter id="holoGlow" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="2.2" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-    <filter id="errGlow" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="2.8" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  `;
-  svg.appendChild(defs);
-  return defs;
-}
-
-function markFlowPulse(edges, now = Date.now()) {
-  for (const edge of edges) {
-    const key = edgeKey(edge.from, edge.to, edge.reason);
-    edgeHealth.set(key, { lastPulse: now, fails: 0, alive: true });
-  }
-}
-
-function spawnPackets(edges, points, burst = 6) {
-  if (!edges.length) return;
-  const now = Date.now();
-  const pick = [...edges].sort(() => hash01(String(now + Math.random())) - 0.5).slice(0, burst);
-  for (const edge of pick) {
-    if (!points.has(String(edge.from)) || !points.has(String(edge.to))) continue;
-    const key = edgeKey(edge.from, edge.to, edge.reason);
-    const health = edgeHealth.get(key);
-    const failed = health ? !health.alive : false;
-    packets.push({
-      id: `pkt-${now}-${Math.random().toString(36).slice(2, 8)}`,
-      from: String(edge.from),
-      to: String(edge.to),
-      t: 0,
-      speed: 0.35 + hash01(key) * 0.55,
-      failed,
-      reason: edge.reason || "",
-    });
-  }
-  if (packets.length > 48) packets = packets.slice(-48);
-}
-
-function evaluateHealth(nodes, edges, now = Date.now()) {
-  const liveIds = new Set(nodes.map((n) => String(n.id)));
-  for (const id of liveIds) {
-    const prev = nodeHealth.get(id) || { lastSeen: 0, errorUntil: 0 };
-    nodeHealth.set(id, { lastSeen: now, errorUntil: prev.errorUntil });
-  }
-  for (const [id, state] of [...nodeHealth.entries()]) {
-    if (!liveIds.has(id) && now - state.lastSeen > 4000) nodeHealth.delete(id);
-  }
-  for (const edge of edges) {
-    const key = edgeKey(edge.from, edge.to, edge.reason);
-    const h = edgeHealth.get(key) || { lastPulse: now, fails: 0, alive: true };
-    if (now - h.lastPulse > 9000) {
-      h.fails += 1;
-      h.alive = false;
-      for (const nid of [String(edge.from), String(edge.to)]) {
-        const st = nodeHealth.get(nid) || { lastSeen: now, errorUntil: 0 };
-        st.errorUntil = Math.max(st.errorUntil, now + 5000);
-        nodeHealth.set(nid, st);
-      }
-    }
-    edgeHealth.set(key, h);
-  }
-  if (!lastFetchOk) {
-    for (const id of liveIds) {
-      const st = nodeHealth.get(id) || { lastSeen: now, errorUntil: 0 };
-      st.errorUntil = Math.max(st.errorUntil, now + 4000);
-      nodeHealth.set(id, st);
-    }
-  }
-}
-
-function pointAlongQuad(a, b, cx, cy, t) {
-  const u = 1 - t;
-  return {
-    x: u * u * a.x + 2 * u * t * cx + t * t * b.x,
-    y: u * u * a.y + 2 * u * t * cy + t * t * b.y,
-  };
-}
-
-function paintFrame(ts) {
-  const svg = document.getElementById("memoryGraphSvg");
-  if (!svg || !panelOpen) {
-    rafId = 0;
-    return;
-  }
-  const layer = svg.querySelector("#holoPackets");
-  const now = Date.now();
-  const dt = Math.min(0.05, paintFrame._last ? (ts - paintFrame._last) / 1000 : 0.016);
-  paintFrame._last = ts;
-
-  const next = [];
-  for (const pkt of packets) {
-    pkt.t += pkt.speed * dt * (pkt.failed ? 0.55 : 1);
-    if (pkt.t >= 1) {
-      const key = edgeKey(pkt.from, pkt.to, pkt.reason);
-      if (pkt.failed) {
-        const h = edgeHealth.get(key) || { lastPulse: 0, fails: 0, alive: false };
-        h.fails += 1;
-        h.alive = false;
-        edgeHealth.set(key, h);
-        const st = nodeHealth.get(pkt.to) || { lastSeen: now, errorUntil: 0 };
-        st.errorUntil = Math.max(st.errorUntil, now + 3500);
-        nodeHealth.set(pkt.to, st);
-      } else {
-        const h = edgeHealth.get(key) || { lastPulse: now, fails: 0, alive: true };
-        h.lastPulse = now;
-        h.fails = 0;
-        h.alive = true;
-        edgeHealth.set(key, h);
-      }
-      continue;
-    }
-    next.push(pkt);
-  }
-  packets = next;
-
-  if (layer) {
-    layer.replaceChildren();
-    for (const pkt of packets) {
-      const a = scene.points.get(pkt.from);
-      const b = scene.points.get(pkt.to);
-      if (!a || !b) continue;
-      const bend = 0.18 + hash01(edgeKey(pkt.from, pkt.to)) * 0.12;
-      const { cx, cy } = curvePath(a, b, bend);
-      const p = pointAlongQuad(a, b, cx, cy, pkt.t);
-      const dot = document.createElementNS(NS, "circle");
-      dot.setAttribute("cx", String(p.x));
-      dot.setAttribute("cy", String(p.y));
-      dot.setAttribute("r", pkt.failed ? "3.2" : "3.8");
-      dot.setAttribute("class", pkt.failed ? "holo-packet holo-packet--fail" : "holo-packet");
-      layer.appendChild(dot);
-      if (!pkt.failed && pkt.t > 0.15 && pkt.t < 0.85) {
-        const trail = document.createElementNS(NS, "circle");
-        const tp = pointAlongQuad(a, b, cx, cy, Math.max(0, pkt.t - 0.08));
-        trail.setAttribute("cx", String(tp.x));
-        trail.setAttribute("cy", String(tp.y));
-        trail.setAttribute("r", "2");
-        trail.setAttribute("class", "holo-packet holo-packet--trail");
-        layer.appendChild(trail);
-      }
-    }
-  }
-
-  svg.querySelectorAll(".memory-node").forEach((g) => {
-    const id = g.getAttribute("data-id");
-    const st = nodeHealth.get(id);
-    const err = !lastFetchOk || (st && st.errorUntil > now);
-    g.classList.toggle("is-error", Boolean(err));
-    const core = g.querySelector(".neuron-core");
-    if (core) {
-      const pulse = 1 + Math.sin(now / 320 + hash01(id) * 6) * 0.06;
-      core.setAttribute("r", String((err ? 9 : 8) * pulse));
-    }
+function makeLabelSprite(text, kindColor) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 96;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const grad = ctx.createLinearGradient(0, 0, 0, 96);
+  grad.addColorStop(0, "rgba(4,14,22,0.92)");
+  grad.addColorStop(1, "rgba(2,8,14,0.55)");
+  ctx.fillStyle = grad;
+  roundRect(ctx, 8, 18, 496, 60, 12);
+  ctx.fill();
+  ctx.strokeStyle = `rgba(${Math.round(kindColor.r * 255)},${Math.round(kindColor.g * 255)},${Math.round(kindColor.b * 255)},0.75)`;
+  ctx.lineWidth = 2;
+  roundRect(ctx, 8, 18, 496, 60, 12);
+  ctx.stroke();
+  ctx.fillStyle = "#eaf6ff";
+  ctx.font = "600 28px Sora, IBM Plex Sans, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 256, 50);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
   });
-
-  svg.querySelectorAll(".memory-edge").forEach((path) => {
-    const key = path.getAttribute("data-key");
-    const h = edgeHealth.get(key);
-    const dead = !lastFetchOk || (h && !h.alive);
-    path.classList.toggle("memory-edge--dead", Boolean(dead));
-    path.classList.toggle("is-flowing", Boolean(h && h.alive && now - h.lastPulse < 4000));
-  });
-
-  rafId = requestAnimationFrame(paintFrame);
-}
-paintFrame._last = 0;
-
-function startRaf() {
-  if (rafId) return;
-  paintFrame._last = 0;
-  rafId = requestAnimationFrame(paintFrame);
+  const spr = new THREE.Sprite(mat);
+  spr.scale.set(1.55, 0.29, 1);
+  spr.center.set(0.5, 0);
+  return spr;
 }
 
-function stopRaf() {
-  if (rafId) cancelAnimationFrame(rafId);
-  rafId = 0;
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
-function setBottomToolsHidden(hidden) {
-  const tools = document.getElementById("bottomTools");
-  if (tools) tools.hidden = Boolean(hidden);
+function addStarfield(scene) {
+  const count = 2200;
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i += 1) {
+    const r = 28 + Math.random() * 70;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+    positions[i * 3 + 2] = r * Math.cos(phi);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  scene.add(
+    new THREE.Points(
+      geo,
+      new THREE.PointsMaterial({
+        color: 0xb8d4e8,
+        size: 0.045,
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0.85,
+      }),
+    ),
+  );
 }
 
-function renderHolo(live) {
-  const svg = document.getElementById("memoryGraphSvg");
+function setHud(summaryText) {
   const summary = document.getElementById("memoryGraphSummary");
-  if (!svg) return;
+  if (summary) summary.textContent = summaryText;
+  const legend = document.getElementById("moduleLegend");
+  if (legend && pageOpen) legend.textContent = "MEMORY · cervello neurale 3D · drag ruota · scroll zoom";
+}
+
+function disposeRuntime() {
+  stopAnim();
+  if (!runtime) return;
+  const { renderer, container, onResize, onPointer, scene } = runtime;
+  window.removeEventListener("resize", onResize);
+  renderer.domElement.removeEventListener("pointerdown", onPointer);
+  clearTimeout(idleResumeTimer);
+  scene.traverse((obj) => {
+    if (obj.geometry) obj.geometry.dispose?.();
+    if (obj.material) {
+      if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose?.());
+      else {
+        obj.material.map?.dispose?.();
+        obj.material.dispose?.();
+      }
+    }
+  });
+  renderer.dispose();
+  if (renderer.domElement.parentNode === container) container.removeChild(renderer.domElement);
+  runtime = null;
+  packets = [];
+}
+
+function buildSceneGraph(live) {
+  if (!runtime) return;
+  const { root, packetGroup, nodeById, labelById } = runtime;
+  while (root.children.length) root.remove(root.children[0]);
+  packetGroup.clear();
+  root.add(packetGroup);
+  nodeById.clear();
+  labelById.clear();
+  runtime.edgeCurves = [];
 
   const graph = live?.graph || { nodes: [], edges: [] };
   const nodes = graph.nodes || [];
   const edges = graph.edges || [];
-  const now = Date.now();
-  const points = layoutBrain(nodes);
-  scene = { nodes, edges, points, at: now };
+  runtime.nodes = nodes;
+  runtime.edges = edges;
+  const points = layoutBrain3d(nodes);
 
-  evaluateHealth(nodes, edges, now);
-
-  if (summary) {
-    const dead = [...edgeHealth.values()].filter((h) => !h.alive).length;
-    const errs = [...nodeHealth.values()].filter((s) => s.errorUntil > now).length;
-    const parts = [
-      `${live?.count ?? nodes.length} neuroni`,
-      `${edges.length} sinapsi`,
-      lastFetchOk ? "flusso live" : "segnale assente",
-    ];
-    if (dead) parts.push(`${dead} archi spenti`);
-    if (errs) parts.push(`${errs} nodi in errore`);
-    summary.textContent = parts.join(" · ");
-  }
-
-  svg.setAttribute("viewBox", `0 0 ${VIEW_W} ${VIEW_H}`);
-  svg.setAttribute("aria-label", "Cervello olografico — flusso neurale live");
-  svg.replaceChildren();
-  ensureDefs(svg);
-
-  const bg = document.createElementNS(NS, "g");
-  bg.setAttribute("class", "holo-bg");
-  const veil = document.createElementNS(NS, "ellipse");
-  veil.setAttribute("cx", String(VIEW_W / 2));
-  veil.setAttribute("cy", String(VIEW_H / 2));
-  veil.setAttribute("rx", "320");
-  veil.setAttribute("ry", "230");
-  veil.setAttribute("fill", "url(#holoCore)");
-  bg.appendChild(veil);
+  // Soft lobe volumes
   for (const side of [-1, 1]) {
-    const lobe = document.createElementNS(NS, "ellipse");
-    lobe.setAttribute("cx", String(VIEW_W / 2 + side * 110));
-    lobe.setAttribute("cy", String(VIEW_H / 2));
-    lobe.setAttribute("rx", "190");
-    lobe.setAttribute("ry", "185");
-    lobe.setAttribute("class", "holo-lobe");
-    bg.appendChild(lobe);
+    const lobe = new THREE.Mesh(
+      new THREE.SphereGeometry(2.05, 48, 48),
+      new THREE.MeshStandardMaterial({
+        color: 0x0a2a38,
+        emissive: 0x123848,
+        emissiveIntensity: 0.35,
+        transparent: true,
+        opacity: 0.14,
+        roughness: 0.85,
+        metalness: 0.05,
+        depthWrite: false,
+      }),
+    );
+    lobe.position.set(side * 1.05, 0.05, 0);
+    lobe.scale.set(1.05, 0.92, 0.88);
+    root.add(lobe);
   }
-  svg.appendChild(bg);
 
-  const edgeLayer = document.createElementNS(NS, "g");
-  edgeLayer.setAttribute("class", "holo-edges");
+  // Core glow
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(0.55, 32, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0x3dd6ff,
+      transparent: true,
+      opacity: 0.12,
+    }),
+  );
+  root.add(core);
+
   for (const edge of edges) {
     const a = points.get(String(edge.from));
     const b = points.get(String(edge.to));
     if (!a || !b) continue;
     const key = edgeKey(edge.from, edge.to, edge.reason);
-    const health = edgeHealth.get(key);
-    const bend = 0.18 + hash01(key) * 0.12;
-    const { d } = curvePath(a, b, bend);
-    const path = document.createElementNS(NS, "path");
-    path.setAttribute("d", d);
-    path.setAttribute("data-key", key);
-    const classes = ["memory-edge"];
-    if (String(edge.reason || "").startsWith("recall:")) classes.push("memory-edge--recall");
-    if ((health && !health.alive) || !lastFetchOk) classes.push("memory-edge--dead");
-    path.setAttribute("class", classes.join(" "));
-    edgeLayer.appendChild(path);
+    const mid = a.clone().lerp(b, 0.5);
+    mid.y += 0.25 + hash01(key) * 0.45;
+    mid.x += (hash01(`${key}:mx`) - 0.5) * 0.35;
+    const curve = new THREE.QuadraticBezierCurve3(a, mid, b);
+    const pts = curve.getPoints(28);
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const recall = String(edge.reason || "").startsWith("recall:");
+    const line = new THREE.Line(
+      geo,
+      new THREE.LineBasicMaterial({
+        color: recall ? 0x9ad8ff : 0x4a90a8,
+        transparent: true,
+        opacity: recall ? 0.42 : 0.28,
+      }),
+    );
+    line.userData = { key, kind: "edge" };
+    root.add(line);
+    runtime.edgeCurves.push({ curve, key, line });
+    if (!edgeHealth.has(key)) edgeHealth.set(key, { lastPulse: Date.now(), alive: true });
   }
-  svg.appendChild(edgeLayer);
 
-  const packetLayer = document.createElementNS(NS, "g");
-  packetLayer.setAttribute("id", "holoPackets");
-  packetLayer.setAttribute("class", "holo-packets");
-  svg.appendChild(packetLayer);
-
-  const nodeLayer = document.createElementNS(NS, "g");
-  nodeLayer.setAttribute("class", "holo-nodes");
   for (const node of nodes) {
     const id = String(node.id);
-    const point = points.get(id);
-    if (!point) continue;
-    const st = nodeHealth.get(id);
-    const err = !lastFetchOk || (st && st.errorUntil > now);
-    const group = document.createElementNS(NS, "g");
-    group.setAttribute(
-      "class",
-      ["memory-node", selectedId === id ? "is-selected" : "", err ? "is-error" : ""]
-        .filter(Boolean)
-        .join(" "),
+    const pos = points.get(id);
+    if (!pos) continue;
+    const kind = kindOf(node);
+    const color = colorForKind(kind);
+    const group = new THREE.Group();
+    group.position.copy(pos);
+
+    const halo = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22, 24, 24),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.18,
+        depthWrite: false,
+      }),
     );
-    group.setAttribute("data-id", id);
-    group.setAttribute("filter", err ? "url(#errGlow)" : "url(#holoGlow)");
+    group.add(halo);
 
-    const halo = document.createElementNS(NS, "circle");
-    halo.setAttribute("cx", String(point.x));
-    halo.setAttribute("cy", String(point.y));
-    halo.setAttribute("r", "15");
-    halo.setAttribute("class", "neuron-halo");
-    group.appendChild(halo);
+    const mesh = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.11, 1),
+      new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.55,
+        metalness: 0.35,
+        roughness: 0.28,
+      }),
+    );
+    mesh.userData = { pickable: true, neuronId: id, node, kind };
+    group.add(mesh);
 
-    const core = document.createElementNS(NS, "circle");
-    core.setAttribute("cx", String(point.x));
-    core.setAttribute("cy", String(point.y));
-    core.setAttribute("r", selectedId === id ? "10" : "8");
-    core.setAttribute("class", "neuron-core");
-    group.appendChild(core);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.16, 0.008, 8, 40),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55 }),
+    );
+    ring.rotation.x = Math.PI / 2;
+    group.add(ring);
 
-    group.addEventListener("click", () => {
-      selectedId = selectedId === id ? "" : id;
-      const out = edges.filter((e) => String(e.from) === id || String(e.to) === id);
-      spawnPackets(out.length ? out : edges, points, 8);
-      renderHolo(live);
+    const label = makeLabelSprite(neuronTitle(node), color);
+    label.position.set(0, 0.28, 0);
+    group.add(label);
+
+    root.add(group);
+    nodeById.set(id, group);
+    labelById.set(id, label);
+  }
+
+  const dead = [...edgeHealth.values()].filter((h) => !h.alive).length;
+  setHud(
+    [
+      `${live?.count ?? nodes.length} neuroni`,
+      `${edges.length} sinapsi`,
+      lastFetchOk ? "flusso live" : "segnale assente",
+      dead ? `${dead} archi spenti` : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  );
+
+  spawnPackets(8);
+  if (selectedId && nodeById.has(selectedId)) focusNeuron(selectedId, { toast: false });
+}
+
+function spawnPackets(burst = 6) {
+  if (!runtime?.edgeCurves?.length) return;
+  const pick = [...runtime.edgeCurves]
+    .sort(() => hash01(String(Date.now() + Math.random())) - 0.5)
+    .slice(0, burst);
+  for (const edge of pick) {
+    const health = edgeHealth.get(edge.key);
+    const failed = health ? !health.alive : false;
+    const color = failed ? 0xff5555 : 0xd8f7ff;
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.035, 10, 10),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }),
+    );
+    runtime.packetGroup.add(mesh);
+    packets.push({
+      mesh,
+      curve: edge.curve,
+      t: 0,
+      speed: 0.28 + hash01(edge.key) * 0.45,
+      failed,
+      key: edge.key,
     });
-    nodeLayer.appendChild(group);
   }
-  svg.appendChild(nodeLayer);
+  if (packets.length > 56) {
+    const drop = packets.splice(0, packets.length - 56);
+    for (const p of drop) {
+      runtime.packetGroup.remove(p.mesh);
+      p.mesh.geometry.dispose();
+      p.mesh.material.dispose();
+    }
+  }
+}
 
-  if (!lastFetchOk) {
-    const banner = document.createElementNS(NS, "text");
-    banner.setAttribute("x", String(VIEW_W / 2));
-    banner.setAttribute("y", "28");
-    banner.setAttribute("text-anchor", "middle");
-    banner.setAttribute("class", "holo-signal-lost");
-    banner.textContent = "SEGNALE ASSENTE — hop falliti";
-    svg.appendChild(banner);
+function tick(ts) {
+  if (!runtime || !pageOpen) {
+    animId = 0;
+    return;
+  }
+  const dt = Math.min(0.05, tick._last ? (ts - tick._last) / 1000 : 0.016);
+  tick._last = ts;
+  const { controls, renderer, scene, camera, root, nodeById } = runtime;
+  controls.update();
+
+  const next = [];
+  for (const pkt of packets) {
+    pkt.t += pkt.speed * dt * (pkt.failed ? 0.55 : 1);
+    if (pkt.t >= 1) {
+      const h = edgeHealth.get(pkt.key) || { lastPulse: 0, alive: true };
+      if (pkt.failed) h.alive = false;
+      else {
+        h.alive = true;
+        h.lastPulse = Date.now();
+      }
+      edgeHealth.set(pkt.key, h);
+      runtime.packetGroup.remove(pkt.mesh);
+      pkt.mesh.geometry.dispose();
+      pkt.mesh.material.dispose();
+      continue;
+    }
+    pkt.mesh.position.copy(pkt.curve.getPoint(pkt.t));
+    next.push(pkt);
+  }
+  packets = next;
+
+  const now = Date.now();
+  for (const [id, group] of nodeById) {
+    const mesh = group.children.find((c) => c.userData?.pickable);
+    if (!mesh) continue;
+    const pulse = 1 + Math.sin(now / 380 + hash01(id) * 6) * 0.07;
+    mesh.scale.setScalar((selectedId === id ? 1.35 : 1) * pulse);
+  }
+  root.rotation.y += dt * 0.02;
+
+  for (const { key, line } of runtime.edgeCurves) {
+    const h = edgeHealth.get(key);
+    const dead = !lastFetchOk || (h && !h.alive);
+    line.material.opacity = dead ? 0.12 : 0.32;
+    line.material.color.set(dead ? 0x556066 : 0x5eb0c8);
   }
 
-  startRaf();
+  renderer.render(scene, camera);
+  animId = requestAnimationFrame(tick);
+}
+tick._last = 0;
+
+function startAnim() {
+  if (animId) return;
+  tick._last = 0;
+  animId = requestAnimationFrame(tick);
+}
+
+function stopAnim() {
+  if (animId) cancelAnimationFrame(animId);
+  animId = 0;
+}
+
+export function focusNeuron(id, { toast = true } = {}) {
+  if (!runtime) return;
+  const group = runtime.nodeById.get(String(id));
+  if (!group) return;
+  selectedId = String(id);
+  runtime.controls.target.copy(group.position);
+  const offset = new THREE.Vector3(2.2, 1.4, 2.6);
+  runtime.camera.position.copy(group.position.clone().add(offset));
+  runtime.controls.autoRotate = false;
+  clearTimeout(idleResumeTimer);
+  idleResumeTimer = setTimeout(() => {
+    if (runtime) runtime.controls.autoRotate = true;
+  }, 5000);
+  const node = runtime.nodes.find((n) => String(n.id) === selectedId);
+  if (toast && node) {
+    window.dispatchEvent(
+      new CustomEvent("atlas:memory-focus", { detail: { id: selectedId, title: neuronTitle(node), kind: kindOf(node) } }),
+    );
+  }
 }
 
 export async function refreshMemoryGraph({ force = false } = {}) {
   try {
-    const live = await api("/api/ai/agentq/memory/live?limit=48");
+    const live = await api(`/api/ai/agentq/memory/live?limit=${FETCH_LIMIT}`);
     lastFetchOk = true;
-    lastFetchAt = Date.now();
     const changed = force || !live.revision || live.revision !== lastRevision;
     if (!changed) {
-      spawnPackets(scene.edges, scene.points, 3);
-      markFlowPulse(scene.edges, lastFetchAt);
+      spawnPackets(4);
       return live;
     }
     lastRevision = live.revision || "";
-    renderHolo(live);
-    markFlowPulse(live?.graph?.edges || [], lastFetchAt);
-    spawnPackets(live?.graph?.edges || [], scene.points, 10);
-    for (const edge of (live?.graph?.edges || []).slice(0, 2)) {
-      const key = edgeKey(edge.from, edge.to, edge.reason);
-      const h = edgeHealth.get(key);
-      if (h && !h.alive) {
-        packets.push({
-          id: `miss-${Date.now()}`,
-          from: String(edge.from),
-          to: String(edge.to),
-          t: 0,
-          speed: 0.4,
-          failed: true,
-          reason: edge.reason || "",
-        });
-      }
-    }
+    buildSceneGraph(live);
     return live;
   } catch (err) {
     lastFetchOk = false;
-    lastFetchAt = Date.now();
     for (const [key, h] of edgeHealth) {
       h.alive = false;
-      h.fails += 1;
       edgeHealth.set(key, h);
     }
-    for (const [id, st] of nodeHealth) {
-      st.errorUntil = Date.now() + 8000;
-      nodeHealth.set(id, st);
-    }
-    packets = packets.map((p) => ({ ...p, failed: true }));
-    const summary = document.getElementById("memoryGraphSummary");
-    if (summary) summary.textContent = `segnale assente · ${escapeHtml(err.message || "errore")}`;
-    if (scene.nodes.length) {
-      renderHolo({
-        count: scene.nodes.length,
-        graph: { nodes: scene.nodes, edges: scene.edges },
-      });
-    }
+    setHud(`segnale assente · ${escapeHtml(err.message || "errore")}`);
     throw err;
   }
 }
@@ -521,10 +540,8 @@ export async function refreshMemoryGraph({ force = false } = {}) {
 export function startMemoryLivePolling(intervalMs = POLL_MS) {
   stopMemoryLivePolling();
   pollTimer = setInterval(() => {
-    if (!panelOpen) return;
-    refreshMemoryGraph().catch((err) => {
-      console.warn("[memory-live]", err?.message || err);
-    });
+    if (!pageOpen) return;
+    refreshMemoryGraph().catch((err) => console.warn("[memory-live]", err?.message || err));
   }, intervalMs);
 }
 
@@ -533,66 +550,189 @@ export function stopMemoryLivePolling() {
   pollTimer = null;
 }
 
-export function openMemoryGraphPanel() {
-  const panel = document.getElementById("memoryBottom");
-  if (!panel) return;
-  hideOthers();
-  panel.hidden = false;
-  panel.setAttribute("aria-hidden", "false");
-  panel.classList.add("is-open");
+/**
+ * Mount the permanent MEMORY page into the main viewport host (glCanvas).
+ * Caller must clear other engines (Cesium/Three) first.
+ */
+export async function mountMemoryBrainPage(container) {
+  if (!container) return;
+  pageOpen = true;
   document.body.dataset.atlasMemoryGraph = "1";
-  document.body.classList.add("memory-holo-open");
-  setBottomToolsHidden(true);
-  panelOpen = true;
+  document.body.classList.add("memory-page-active");
+  document.body.classList.remove("memory-holo-open");
+
+  const hud = document.getElementById("memoryPage");
+  if (hud) {
+    hud.hidden = false;
+    hud.setAttribute("aria-hidden", "false");
+    hud.classList.add("is-open");
+  }
+  // Legacy bottom dock panel — keep hidden forever (no popup).
+  const bottom = document.getElementById("memoryBottom");
+  if (bottom) {
+    bottom.hidden = true;
+    bottom.setAttribute("aria-hidden", "true");
+    bottom.classList.remove("is-open");
+  }
+
+  disposeRuntime();
+  container.innerHTML = "";
+  container.style.pointerEvents = "auto";
+
+  let w = container.clientWidth || 960;
+  let h = container.clientHeight || 640;
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x03060c, 0.022);
+  scene.background = new THREE.Color(0x03060c);
+  const camera = new THREE.PerspectiveCamera(42, w / Math.max(h, 1), 0.1, 200);
+  camera.position.set(0, 1.6, 7.2);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+  renderer.setSize(w, h, false);
+  renderer.setClearColor(0x03060c, 1);
+  container.appendChild(renderer.domElement);
+  Object.assign(renderer.domElement.style, { width: "100%", height: "100%", display: "block" });
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.07;
+  controls.minDistance = 2.8;
+  controls.maxDistance = 18;
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 0.55;
+  controls.rotateSpeed = 0.8;
+  controls.zoomSpeed = 1.1;
+  controls.addEventListener("start", () => {
+    controls.autoRotate = false;
+    clearTimeout(idleResumeTimer);
+  });
+  controls.addEventListener("end", () => {
+    clearTimeout(idleResumeTimer);
+    idleResumeTimer = setTimeout(() => {
+      controls.autoRotate = true;
+    }, 4500);
+  });
+
+  scene.add(new THREE.AmbientLight(0x7a93a8, 0.55));
+  const key = new THREE.DirectionalLight(0xe8f6ff, 1.2);
+  key.position.set(5, 4, 3);
+  const fill = new THREE.DirectionalLight(0x3dd6ff, 0.4);
+  fill.position.set(-4, -1, -2);
+  const rim = new THREE.PointLight(0xb794f6, 0.65, 24);
+  rim.position.set(-2.5, 2.2, 3);
+  scene.add(key, fill, rim);
+  addStarfield(scene);
+
+  const root = new THREE.Group();
+  const packetGroup = new THREE.Group();
+  root.add(packetGroup);
+  scene.add(root);
+
+  const onResize = () => {
+    if (!runtime) return;
+    const nw = container.clientWidth || 960;
+    const nh = container.clientHeight || 640;
+    camera.aspect = nw / Math.max(nh, 1);
+    camera.updateProjectionMatrix();
+    renderer.setSize(nw, nh, false);
+  };
+
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const onPointer = (ev) => {
+    if (ev.button !== 0 || !runtime) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(root.children, true);
+    const hit = hits.find((h) => h.object?.userData?.pickable);
+    if (hit) focusNeuron(hit.object.userData.neuronId);
+  };
+  renderer.domElement.addEventListener("pointerdown", onPointer);
+  window.addEventListener("resize", onResize);
+
+  runtime = {
+    scene,
+    camera,
+    renderer,
+    controls,
+    root,
+    packetGroup,
+    nodeById: new Map(),
+    labelById: new Map(),
+    edgeCurves: [],
+    nodes: [],
+    edges: [],
+    container,
+    onResize,
+    onPointer,
+  };
+
   lastRevision = "";
   packets = [];
-  refreshMemoryGraph({ force: true }).catch(() => {});
+  await refreshMemoryGraph({ force: true }).catch(() => {});
   startMemoryLivePolling();
-  startRaf();
+  startAnim();
+}
+
+export function unmountMemoryBrainPage() {
+  pageOpen = false;
+  document.body.dataset.atlasMemoryGraph = "0";
+  document.body.classList.remove("memory-page-active", "memory-holo-open");
+  const hud = document.getElementById("memoryPage");
+  if (hud) {
+    hud.hidden = true;
+    hud.setAttribute("aria-hidden", "true");
+    hud.classList.remove("is-open");
+  }
+  stopMemoryLivePolling();
+  disposeRuntime();
+}
+
+/** @deprecated popup API — maps to permanent page helpers for old callers */
+export function openMemoryGraphPanel() {
+  const gl = document.getElementById("glCanvas");
+  if (gl && document.body.dataset.module === "memory") {
+    return mountMemoryBrainPage(gl);
+  }
+  /* module switch owns mounting */
 }
 
 export function closeMemoryGraphPanel() {
-  const panel = document.getElementById("memoryBottom");
-  if (!panel) return;
-  panel.hidden = true;
-  panel.setAttribute("aria-hidden", "true");
-  panel.classList.remove("is-open");
-  document.body.dataset.atlasMemoryGraph = "0";
-  document.body.classList.remove("memory-holo-open");
-  setBottomToolsHidden(false);
-  panelOpen = false;
-  stopMemoryLivePolling();
-  stopRaf();
+  unmountMemoryBrainPage();
 }
 
 export function toggleMemoryGraphPanel() {
-  const panel = document.getElementById("memoryBottom");
-  if (!panel || panel.hidden) openMemoryGraphPanel();
-  else closeMemoryGraphPanel();
+  if (pageOpen) unmountMemoryBrainPage();
+  else openMemoryGraphPanel();
 }
 
-/** Other UI (voice memorizza, chat write) bumps the live panel immediately. */
 export function notifyMemoryChanged() {
   window.dispatchEvent(new CustomEvent("atlas:memory-changed"));
-  if (panelOpen) {
+  if (pageOpen) {
     lastRevision = "";
     refreshMemoryGraph({ force: true }).catch(() => {});
   }
 }
 
 export function wireMemoryGraphUi() {
-  const panel = document.getElementById("memoryBottom");
-  if (!panel || panel.dataset.wired === "1") return;
-  panel.dataset.wired = "1";
-  panel.hidden = true;
-  document.getElementById("memoryGraphClose")?.addEventListener("click", () => closeMemoryGraphPanel());
+  const hud = document.getElementById("memoryPage");
+  if (hud?.dataset.wired === "1") return;
+  if (hud) hud.dataset.wired = "1";
   document.getElementById("memoryGraphRefresh")?.addEventListener("click", () => {
     lastRevision = "";
     refreshMemoryGraph({ force: true }).catch(() => {});
   });
   window.addEventListener("atlas:memory-changed", () => {
-    if (!panelOpen) return;
+    if (!pageOpen) return;
     lastRevision = "";
     refreshMemoryGraph({ force: true }).catch(() => {});
   });
+  // Ensure legacy bottom panel never shows as a modal.
+  const bottom = document.getElementById("memoryBottom");
+  if (bottom) {
+    bottom.hidden = true;
+    bottom.setAttribute("aria-hidden", "true");
+  }
 }

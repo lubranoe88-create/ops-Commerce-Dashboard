@@ -138,7 +138,6 @@ export function openCockpitPanel() {
   const panel = document.getElementById("cockpitPanel");
   if (!panel) return;
   hidePanel("functionBoardPanel");
-  hidePanel("memoryGraphPanel");
   panel.hidden = false;
   panel.setAttribute("aria-hidden", "false");
   panel.classList.add("is-open");

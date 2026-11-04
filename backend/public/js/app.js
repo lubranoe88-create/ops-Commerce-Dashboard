@@ -48,7 +48,11 @@ import {
   ZOOM_OUT_FACTOR,
 } from "./atlasHoloDispatch.js?v=rail-40-mic-clone";
 import { toggleCockpitPanel, wireCockpitUi } from "./atlasCockpitUi.js?v=rail-40-mic-clone";
-import { openMemoryGraphPanel, toggleMemoryGraphPanel, wireMemoryGraphUi } from "./atlasMemoryGraphUi.js?v=rail-40-mic-clone";
+import {
+  mountMemoryBrainPage,
+  unmountMemoryBrainPage,
+  wireMemoryGraphUi,
+} from "./atlasMemoryGraphUi.js?v=rail-41-memory-3d";
 import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-40-mic-clone";
 import { VOICE_DUPLEX, reduceCall, shouldYieldToCall, wakeWordStatus } from "./atlasCall.js?v=rail-40-mic-clone";
 import {
@@ -60,7 +64,7 @@ import {
   wakeCommandRemainder,
 } from "./atlasWake.js?v=rail-40-mic-clone";
 
-const BUILD_ID = "rail-40-mic-clone";
+const BUILD_ID = "rail-41-memory-3d";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";
@@ -876,125 +880,6 @@ function makeSprite(text, compact = false) {
   return spr;
 }
 
-function axisLine(from, to, color, opacity = 0.55) {
-  const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
-  return new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
-}
-
-function buildMemory(root, concepts, links) {
-  // 5D encoding:
-  // x = topic axis, y = reliability/importance, z = evidence cluster,
-  // color hue = semantic dimension (0..4), size = importance, orbit ring = recency
-  state.memoryMeshes = new Map();
-  state.memoryLinks = links || [];
-  const frame = new THREE.Group();
-  root.add(frame);
-
-  const L = 3.2;
-  frame.add(axisLine(new THREE.Vector3(-L, 0, 0), new THREE.Vector3(L, 0, 0), 0x3dd6ff, 0.45));
-  frame.add(axisLine(new THREE.Vector3(0, -L, 0), new THREE.Vector3(0, L, 0), 0x3dff9a, 0.45));
-  frame.add(axisLine(new THREE.Vector3(0, 0, -L), new THREE.Vector3(0, 0, L), 0xffc14a, 0.4));
-  // 4th/5th suggested as tilted rings (not a lone flat circle)
-  const ringA = new THREE.Mesh(
-    new THREE.TorusGeometry(2.6, 0.015, 10, 96),
-    new THREE.MeshBasicMaterial({ color: 0x7aa7ff, transparent: true, opacity: 0.28 }),
-  );
-  ringA.rotation.set(Math.PI / 2.7, 0.35, 0.2);
-  frame.add(ringA);
-  const ringB = new THREE.Mesh(
-    new THREE.TorusGeometry(2.1, 0.012, 10, 96),
-    new THREE.MeshBasicMaterial({ color: 0xff7ab8, transparent: true, opacity: 0.22 }),
-  );
-  ringB.rotation.set(0.4, Math.PI / 3, 0.8);
-  frame.add(ringB);
-
-  ["topic", "reliability", "cluster", "dimension", "recency"].forEach((name, i) => {
-    const spr = makeSprite(`D${i + 1}:${name}`, true);
-    const a = (i / 5) * Math.PI * 2;
-    spr.position.set(Math.cos(a) * 3.1, Math.sin(a * 0.7) * 1.4, Math.sin(a) * 3.1);
-    frame.add(spr);
-  });
-
-  const list = concepts?.length
-    ? concepts
-    : [
-        { id: "1", label: "revenue", importance: 0.8, recency: 0.7, dimension: 0 },
-        { id: "2", label: "supply", importance: 0.6, recency: 0.4, dimension: 1 },
-        { id: "3", label: "filing", importance: 0.9, recency: 0.85, dimension: 2 },
-      ];
-
-  const pos = {};
-  list.forEach((c, i) => {
-    const dim = Number(c.dimension ?? i % 5);
-    const imp = Number(c.importance ?? 0.5);
-    const rec = Number(c.recency ?? 0.5);
-    // Spread in volume (avoid planar ring)
-    const x = ((i % 3) - 1) * 1.5 + (dim - 2) * 0.35 + (Math.sin(i * 2.1) * 0.55);
-    const y = (imp - 0.5) * 4.2 + Math.cos(i * 1.7) * 0.35;
-    const z = (rec - 0.5) * 4.0 + ((i % 2) * 0.8 - 0.4) + Math.sin(dim + i) * 0.5;
-    pos[c.id] = new THREE.Vector3(x, y, z);
-
-    const hue = 0.08 + dim * 0.14;
-    const color = new THREE.Color().setHSL(hue, 0.7, 0.55);
-    const radius = 0.14 + imp * 0.22;
-    const mesh = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(radius, 1),
-      new THREE.MeshStandardMaterial({
-        color,
-        emissive: color,
-        emissiveIntensity: 0.45,
-        metalness: 0.25,
-        roughness: 0.35,
-      }),
-    );
-    mesh.position.copy(pos[c.id]);
-    mesh.userData = {
-      pickable: true,
-      kind: "memory-concept",
-      concept: c,
-      linked: (links || []).filter((l) => l.from === c.id || l.to === c.id),
-    };
-    frame.add(mesh);
-    state.memoryMeshes.set(c.id, mesh);
-    state.pulse.push({ mesh, phase: i * 0.7, baseX: 1, baseY: 1 });
-
-    // Recency halo (5th dim)
-    const halo = new THREE.Mesh(
-      new THREE.TorusGeometry(radius * 1.55, 0.012, 8, 32),
-      new THREE.MeshBasicMaterial({ color: 0x3dd6ff, transparent: true, opacity: 0.25 + rec * 0.45 }),
-    );
-    halo.position.copy(pos[c.id]);
-    halo.lookAt(0, 0, 0);
-    frame.add(halo);
-
-    const label = makeSprite(c.label || c.id, true);
-    label.position.copy(pos[c.id].clone().add(new THREE.Vector3(0, radius + 0.22, 0)));
-    frame.add(label);
-  });
-
-  state.memoryLinks = links || [];
-  (links || []).forEach((l) => {
-    const a = pos[l.from];
-    const b = pos[l.to];
-    if (!a || !b) return;
-    const mid = a.clone().lerp(b, 0.5).add(new THREE.Vector3(0, 0.35, 0));
-    const curve = new THREE.QuadraticBezierCurve3(a, mid, b);
-    const geo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(24));
-    frame.add(
-      new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x8fa0b3, transparent: true, opacity: 0.55 })),
-    );
-  });
-
-  state.camera.position.set(4.8, 3.2, 6.4);
-  state.controls.target.set(0, 0, 0);
-  state.controls.minDistance = 3;
-  state.controls.maxDistance = 16;
-  state.autoRotate = true;
-  state.pickHandler = (data) => {
-    if (data?.kind === "memory-concept") orbitMemoryConcept(data.concept, data.linked);
-  };
-}
-
 function showToast(message, kind = "ok") {
   const host = $("toastHost");
   if (!host) return;
@@ -1367,50 +1252,6 @@ function inspectPipelineNode(node) {
         : `<div class="muted">Nessun errore collegato</div>`
     }`;
   showToast(`Nodo · ${node.label || node.id}`);
-}
-
-function orbitMemoryConcept(concept, linked) {
-  if (!concept || !state.controls) return;
-  const mesh = state.memoryMeshes.get(concept.id);
-  if (mesh) {
-    // Pull selected concept toward origin (orbit center)
-    mesh.position.lerp(new THREE.Vector3(0, 0.4, 0), 0.85);
-    state.controls.target.copy(mesh.position);
-    state.camera.position.set(mesh.position.x + 2.8, mesh.position.y + 1.6, mesh.position.z + 3.2);
-  }
-  const linkIds = new Set();
-  (linked || []).forEach((l) => {
-    if (l.from !== concept.id) linkIds.add(l.from);
-    if (l.to !== concept.id) linkIds.add(l.to);
-  });
-  state.pulse.forEach((p) => {
-    const id = p.mesh?.userData?.concept?.id;
-    if (id === concept.id || linkIds.has(id)) {
-      p.baseX = 1.55;
-      p.baseY = 1.55;
-    } else {
-      p.baseX = 0.85;
-      p.baseY = 0.85;
-    }
-  });
-  const body = $("sideBody");
-  if (body) {
-    let panel = body.querySelector(".inspect-panel");
-    if (!panel) {
-      panel = document.createElement("div");
-      panel.className = "card inspect-panel";
-      body.prepend(panel);
-    }
-    const defs = [...linkIds]
-      .map((id) => state.snapshot?.memory?.concepts?.find((c) => c.id === id))
-      .filter(Boolean)
-      .map((c) => `· ${c.label || c.id} (dim ${c.dimension ?? "—"})`)
-      .join("<br/>");
-    panel.innerHTML = `<strong>Memory · ${escapeHtml(concept.label || concept.id)}</strong>
-      <div class="muted">importanza ${(concept.importance || 0).toFixed(2)} · recency ${(concept.recency || 0).toFixed(2)}</div>
-      <div class="muted">${defs || "Nessun link diretto"}</div>`;
-  }
-  showToast(`Orbita · ${concept.label || concept.id}`);
 }
 
 async function submitCorrection(id, verdict) {
@@ -2241,7 +2082,7 @@ function runHoloAction(action, opts = {}) {
     syncHoloActive,
     saveLastView,
     openBriefingModal,
-    openMemoryLive: () => openMemoryGraphPanel(),
+    openMemoryLive: () => showModule("memory"),
     openDocument: (rel) => openSandboxDoc(String(rel || "").replace(/^sandbox:\/\//, ""), { postChatUpdate }),
     refreshNews: () => loadAiNewsPins(),
   }, { ...opts, fromVoice });
@@ -2314,10 +2155,8 @@ function runHoloAction(action, opts = {}) {
     }
     case "memory-graph":
     case "grafo": {
-      // LIVE unito in MEMORY (terza funzione / sezione in basso)
       return showModule("memory").then(() => {
         syncHoloActive("memory");
-        openMemoryGraphPanel();
         showToast(`MEMORY · ${src}`);
       });
     }
@@ -2667,21 +2506,22 @@ function sideForModule(mod, snap) {
       });
     }
   } else if (mod === "memory") {
-    title.textContent = "MEMORY · cervello olografico";
+    title.textContent = "MEMORY · neuroni";
     const hint = document.createElement("div");
     hint.className = "card muted";
-    hint.textContent = "Il flusso neurale live è nella sezione MEMORY in basso. Clicca un concetto 3D per centrarlo sul globo.";
+    hint.textContent = "Pagina fissa 3D: drag ruota, scroll zoom, impulsi live sulle sinapsi. Click su un neurone qui o nello spazio.";
     body.appendChild(hint);
-    openMemoryGraphPanel();
-    (snap.memory?.concepts || []).forEach((c) => {
+    const kinds = [
+      ["heritage", "Heritage / Agent Q"],
+      ["skill", "Skill"],
+      ["prompt", "Prompt"],
+      ["function", "Function"],
+      ["concept", "Concept / altro"],
+    ];
+    kinds.forEach(([k, label]) => {
       const el = document.createElement("div");
       el.className = "card";
-      el.innerHTML = `<div class="row"><strong>${escapeHtml(c.label || c.id)}</strong><span class="mono">i${(c.importance || 0).toFixed(2)}</span></div>
-        <div class="muted">dim ${c.dimension ?? "—"} · recency ${(c.recency || 0).toFixed(2)}</div>`;
-      el.addEventListener("click", () => {
-        const linked = (snap.memory?.links || []).filter((l) => l.from === c.id || l.to === c.id);
-        orbitMemoryConcept(c, linked);
-      });
+      el.innerHTML = `<div class="row"><strong>${escapeHtml(label)}</strong><span class="mono mem-kind mem-kind--${escapeHtml(k)}">${escapeHtml(k)}</span></div>`;
       body.appendChild(el);
     });
   } else if (mod === "chat") {
@@ -2716,6 +2556,7 @@ let moduleSwitchLocked = false;
 let moduleSwitchPromise = null;
 
 function clearViewportHost() {
+  unmountMemoryBrainPage();
   disposeScene();
   const gl = $("glCanvas");
   // Lose Cesium GL before wiping DOM so the next Three.js renderer can allocate cleanly.
@@ -2756,13 +2597,16 @@ function setExclusivePanels(mod) {
 
   document.body.dataset.module = mod;
   if (mapChrome) mapChrome.hidden = !isMap;
-  if (hud) hud.hidden = isChat;
+  if (hud) hud.hidden = isChat || mod === "memory";
   if (pickCard && !isMap) pickCard.hidden = true;
   const compare = $("compareStrip");
   if (compare && !isMap) compare.hidden = true;
   else if (isMap) updateCompareStrip();
   const credit = $("imageryCredit");
-  if (credit) credit.hidden = !isMap;
+  if (credit) credit.hidden = !isMap || mod === "memory";
+  if (mod !== "memory") {
+    unmountMemoryBrainPage();
+  }
   if (!isMap) {
     state.pickHandler = null;
     state.memoryMeshes = new Map();
@@ -2934,11 +2778,11 @@ async function showModule(mod, opts = {}) {
           }
         }
       } else if (mod === "memory") {
-        $("moduleLegend").textContent = "Memory · 5D rotatable graph · drag / scroll";
-        const root = initThree(gl, { autoRotate: true, minDistance: 3, maxDistance: 18 });
-        buildMemory(root, snap.memory?.concepts, snap.memory?.links);
+        $("moduleLegend").textContent = "MEMORY · cervello neurale 3D · drag / scroll";
+        // Permanent Memory page: own Three.js brain (replaces old 5D concept hologram).
+        await mountMemoryBrainPage(gl);
         if (!stillCurrent(epoch, mod)) {
-          disposeScene();
+          unmountMemoryBrainPage();
           return;
         }
       }

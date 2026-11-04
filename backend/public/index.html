@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=rail-40-mic-clone" />
+  <link rel="stylesheet" href="/css/app.css?v=rail-41-memory-3d" />
 </head>
 <body>
   <!--
@@ -92,6 +92,22 @@
         <!-- MAIN VISUAL: globe / module host (right of the rail) -->
         <section class="viewport globe-pane" id="viewport">
           <div id="glCanvas" class="gl-host"></div>
+          <!-- MEMORY: fixed full-page neural brain HUD (not a popup) -->
+          <section id="memoryPage" class="memory-page" hidden aria-hidden="true" aria-label="MEMORY cervello neurale 3D">
+            <header class="memory-page-head">
+              <h2 class="memory-page-title">MEMORY</h2>
+              <span id="memoryGraphSummary" class="memory-page-summary mono muted">—</span>
+              <div class="memory-page-legend" aria-hidden="true">
+                <span class="mem-kind mem-kind--heritage">heritage</span>
+                <span class="mem-kind mem-kind--skill">skill</span>
+                <span class="mem-kind mem-kind--prompt">prompt</span>
+                <span class="mem-kind mem-kind--function">function</span>
+                <span class="mem-kind mem-kind--concept">concept</span>
+              </div>
+              <button type="button" id="memoryGraphRefresh" class="pill-btn">Aggiorna</button>
+            </header>
+            <p class="memory-page-hint muted">Trascina per ruotare · scroll per zoom · click su un neurone per centrarlo · impulsi live sulle sinapsi</p>
+          </section>
           <div class="overlay-hud overlay-hud--minimal">
             <div class="legend" id="moduleLegend"></div>
             <div class="legend mono" id="coverageMini"></div>
@@ -160,17 +176,6 @@
             <button type="button" id="compareClear" class="pill-btn">Clear</button>
           </div>
         </div>
-
-        <!-- MEMORY = unica sezione in basso (ex LIVE unito qui): solo cervello olografico -->
-        <section id="memoryBottom" class="memory-bottom" hidden aria-hidden="true" aria-label="MEMORY cervello olografico">
-          <header class="memory-bottom-head">
-            <h2 class="memory-bottom-title">MEMORY</h2>
-            <span id="memoryGraphSummary" class="memory-bottom-summary mono muted">—</span>
-            <button type="button" id="memoryGraphRefresh" class="pill-btn">Aggiorna</button>
-            <button type="button" id="memoryGraphClose" class="pill-btn">Chiudi</button>
-          </header>
-          <svg id="memoryGraphSvg" class="memory-graph-svg memory-graph-svg--holo" role="img" aria-label="Cervello olografico — flusso neurale live"></svg>
-        </section>
 
         <div class="analizza-bar" id="analizzaBar">
           <input id="chatInput" type="text" placeholder="Chiedi ad Atlas…" autocomplete="off" aria-label="Messaggio per Atlas" title="Messaggio per Atlas" />
@@ -267,6 +272,6 @@
     }
   }
   </script>
-  <script type="module" src="/js/app.js?v=rail-40-mic-clone"></script>
+  <script type="module" src="/js/app.js?v=rail-41-memory-3d"></script>
 </body>
 </html>
