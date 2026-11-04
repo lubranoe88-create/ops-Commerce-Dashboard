@@ -1,5 +1,5 @@
-# Start full Atlas stack on this PC (UI + API + local brain).
-# Render site stays online separately — this is the local source of truth for memory.
+# Start full Atlas stack on this PC only (UI + API + local brain).
+# Completely separate from Render — no proxy, no shared data, no API link.
 $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $Backend = Join-Path $Root "backend"
@@ -16,5 +16,5 @@ if (-not $env:ATLAS_MEMORY_DIR) {
 New-Item -ItemType Directory -Force -Path $env:ATLAS_MEMORY_DIR | Out-Null
 
 Write-Host "ATLAS_MEMORY_DIR=$($env:ATLAS_MEMORY_DIR)"
-Write-Host "Open http://127.0.0.1:$($env:PORT) after listen (local brain, not Render)."
+Write-Host "Local-only stack. Open http://127.0.0.1:$($env:PORT) — do not use the Render URL for this brain."
 npm start
