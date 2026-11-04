@@ -1,7 +1,7 @@
 /**
- * Live MEMORY panel on the plancia.
- * Shows expandable.json notes (+ SQLite concepts) and polls while open so new
- * writes appear without a manual refresh. X4 graph rendering stays available.
+ * Live CERVELLO panel on the plancia — unified Atlas neurons
+ * (skill / prompt / function / heritage Agent Q / concept / …).
+ * Polls while open so new writes appear without a manual refresh.
  */
 const POLL_MS = 2500;
 let selectedId = "";

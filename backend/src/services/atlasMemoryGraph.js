@@ -1,12 +1,12 @@
 /**
- * X4: graph over expandable memory.
- * Edges are shared tags and recall-token overlap (the same tokens M1 ranks).
- * Also exposes a live MEMORY snapshot (expandable.json + SQLite concepts) for
- * the plancia panel that polls while open.
+ * X4 / unified CERVELLO: live MEMORY is one Atlas brain (neurons).
+ * Edges are shared tags, kinds and recall-token overlap.
+ * Legacy expandable + sqlite are migrated into neurons via atlasBrain.
  */
 import { atlasMemoryPaths, listExpandableMemory } from "./agentqBridge.js";
 import { getDashboardSnapshot } from "../memory/store.js";
 import { recallTokens } from "./atlasRecall.js";
+import { brainLiveSnapshot } from "./atlasBrain.js";
 
 const GENERIC_TAGS = new Set(["atlas", "agentq", "seed", "voice", "durable", "atlas-session"]);
 
@@ -83,59 +83,9 @@ export function memoryGraph({ limit = 40, query = "" } = {}) {
 }
 
 /**
- * Live MEMORY feed for the plancia UI. `revision` changes whenever expandable
- * notes or SQLite concept counts move — clients skip re-render when unchanged.
+ * Live MEMORY feed for the plancia UI — unified Atlas brain (neurons).
+ * Includes Agent Q heritage. `revision` changes when neurons move.
  */
-export function memoryLiveSnapshot({ limit = 40, query = "" } = {}) {
-  const listed = listExpandableMemory({ limit, query });
-  const entries = Array.isArray(listed.entries) ? listed.entries : [];
-  let concepts = [];
-  let links = [];
-  try {
-    const snap = getDashboardSnapshot();
-    concepts = Array.isArray(snap?.memory?.concepts) ? snap.memory.concepts : [];
-    links = Array.isArray(snap?.memory?.links) ? snap.memory.links : [];
-  } catch {
-    concepts = [];
-    links = [];
-  }
-  const newest = entries[0] || null;
-  const revision = [
-    listed.count ?? entries.length,
-    newest?.id || "",
-    newest?.at || "",
-    concepts.length,
-    links.length,
-  ].join(":");
-  const paths = atlasMemoryPaths();
-  return {
-    ok: true,
-    name: "Atlas",
-    label: "MEMORY",
-    revision,
-    at: new Date().toISOString(),
-    expandable: {
-      path: paths.relative || "backend/data/agentq-memory/expandable.json",
-      count: listed.count ?? entries.length,
-      entries: entries.map((entry) => ({
-        id: entry.id,
-        at: entry.at || null,
-        title: String(entry.title || "Nota").slice(0, 160),
-        text: String(entry.text || "").slice(0, 320),
-        tags: Array.isArray(entry.tags) ? entry.tags.slice(0, 12) : [],
-      })),
-    },
-    sqlite: {
-      path: "backend/data/memory.sqlite",
-      conceptCount: concepts.length,
-      linkCount: links.length,
-      concepts: concepts.slice(0, 24).map((c) => ({
-        id: c.id,
-        label: c.label || c.slug || c.id,
-        importance: c.importance ?? null,
-        dimension: c.dimension ?? null,
-      })),
-    },
-    graph: buildMemoryGraph(entries),
-  };
+export function memoryLiveSnapshot({ limit = 40, query = "", kind = "" } = {}) {
+  return brainLiveSnapshot({ limit, query, kind });
 }
