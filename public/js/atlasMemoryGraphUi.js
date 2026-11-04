@@ -234,7 +234,7 @@ function fitCameraToPoints(camera, controls, points) {
   box.getSize(size);
   box.getCenter(center);
   const span = Math.max(size.x, size.z, 4);
-  // Top-down / wide-angle: high camera, looking at the disk center.
+  // Initial framing only — never call again after the user has orbited/zoomed.
   camera.fov = 58;
   camera.near = 0.1;
   camera.far = 400;
@@ -242,9 +242,16 @@ function fitCameraToPoints(camera, controls, points) {
   camera.lookAt(center.x, 0, center.z);
   camera.updateProjectionMatrix();
   controls.target.copy(center);
-  controls.minDistance = Math.max(3, span * 0.35);
-  controls.maxDistance = Math.max(22, span * 2.8);
+  controls.minDistance = 1.2;
+  controls.maxDistance = Math.max(80, span * 4);
   controls.update();
+}
+
+function scheduleIdleAutoRotate(controls, delayMs = 6000) {
+  clearTimeout(idleResumeTimer);
+  idleResumeTimer = setTimeout(() => {
+    if (runtime?.controls === controls) controls.autoRotate = true;
+  }, delayMs);
 }
 
 function makeLabelSprite(text, kindColor) {
@@ -464,10 +471,13 @@ function buildSceneGraph(live) {
     labelById.set(id, label);
   }
 
-  fitCameraToPoints(camera, controls, points);
-  // Prefer slow yaw around the vertical axis (top-down readable).
-  controls.autoRotate = true;
-  controls.autoRotateSpeed = 0.35;
+  // Fit camera once on first graph; later live refreshes must NOT reset zoom/orbit.
+  if (!runtime.cameraFitted) {
+    fitCameraToPoints(camera, controls, points);
+    runtime.cameraFitted = true;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.35;
+  }
 
   const dead = [...edgeHealth.values()].filter((h) => !h.alive).length;
   setHud(
@@ -586,15 +596,13 @@ export function focusNeuron(id, { toast = true } = {}) {
   const group = runtime.nodeById.get(String(id));
   if (!group) return;
   selectedId = String(id);
-  runtime.controls.target.copy(group.position);
-  // Stay mostly top-down when focusing a neuron.
-  const offset = new THREE.Vector3(0.6, 3.8, 1.4);
-  runtime.camera.position.copy(group.position.clone().add(offset));
-  runtime.controls.autoRotate = false;
-  clearTimeout(idleResumeTimer);
-  idleResumeTimer = setTimeout(() => {
-    if (runtime) runtime.controls.autoRotate = true;
-  }, 5000);
+  const { camera, controls } = runtime;
+  // Keep the user's zoom distance and viewing angle — only retarget the orbit pivot.
+  const offset = camera.position.clone().sub(controls.target);
+  controls.target.copy(group.position);
+  camera.position.copy(group.position.clone().add(offset));
+  controls.autoRotate = false;
+  scheduleIdleAutoRotate(controls);
   const node = runtime.nodes.find((n) => String(n.id) === selectedId);
   if (toast && node) {
     window.dispatchEvent(
@@ -687,24 +695,28 @@ export async function mountMemoryBrainPage(container) {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.07;
-  controls.minDistance = 4;
-  controls.maxDistance = 48;
-  controls.maxPolarAngle = Math.PI * 0.48; // keep mostly aerial
-  controls.minPolarAngle = 0.08;
+  controls.enableZoom = true;
+  controls.enableRotate = true;
+  controls.enablePan = true;
+  controls.minDistance = 1.2;
+  controls.maxDistance = 120;
+  // Free orbit in any direction — no polar clamp fighting the user.
+  controls.minPolarAngle = 0;
+  controls.maxPolarAngle = Math.PI;
   controls.autoRotate = true;
   controls.autoRotateSpeed = 0.35;
-  controls.rotateSpeed = 0.7;
+  controls.rotateSpeed = 0.85;
   controls.zoomSpeed = 1.15;
   controls.target.set(0, 0, 0);
   controls.addEventListener("start", () => {
+    // Any user touch (zoom/rotate/pan) kills auto-rotate immediately.
     controls.autoRotate = false;
     clearTimeout(idleResumeTimer);
+    if (runtime) runtime.userOrbiting = true;
   });
   controls.addEventListener("end", () => {
-    clearTimeout(idleResumeTimer);
-    idleResumeTimer = setTimeout(() => {
-      controls.autoRotate = true;
-    }, 4500);
+    // Resume gentle spin only after idle — never snaps zoom/position.
+    scheduleIdleAutoRotate(controls, 6000);
   });
 
   scene.add(new THREE.AmbientLight(0x7a93a8, 0.55));
@@ -761,6 +773,8 @@ export async function mountMemoryBrainPage(container) {
     container,
     onResize,
     onPointer,
+    cameraFitted: false,
+    userOrbiting: false,
   };
 
   lastRevision = "";
