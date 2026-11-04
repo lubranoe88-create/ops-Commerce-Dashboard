@@ -12,6 +12,8 @@ Pacchetto da copiare sul PC Windows. Nessuna esecuzione automatica.
 | `IDEE_MIGLIORAMENTO.md` | Logging conversazioni, test mattutino, spegnimento dolce |
 | `README.md` | Install llama.cpp, download GGUF, avvio |
 | `INDICE.md` | Questo elenco |
+| `PROGETTO_LOCALE/` | Stack completo sul PC (UI+API+cervello); **separato** da Render — vedi `PROGETTO_LOCALE.md` |
+| `MEMORIA_LOCALE_PC.md` | Puntatore: memoria solo su disco PC |
 | `config/llama-server.env.example` | Env cervello |
 | `config/llama-server.json` | Profilo JSON cervello |
 | `config/llama-router.env.example` | Env router 8B |
