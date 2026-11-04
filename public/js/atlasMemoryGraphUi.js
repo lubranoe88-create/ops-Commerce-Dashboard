@@ -31,7 +31,6 @@ let animId = 0;
 let lastRevision = "";
 let pageOpen = false;
 let lastFetchOk = true;
-let idleResumeTimer = null;
 
 /** @type {null | {
  *  scene: THREE.Scene,
@@ -247,12 +246,6 @@ function fitCameraToPoints(camera, controls, points) {
   controls.update();
 }
 
-function scheduleIdleAutoRotate(controls, delayMs = 6000) {
-  clearTimeout(idleResumeTimer);
-  idleResumeTimer = setTimeout(() => {
-    if (runtime?.controls === controls) controls.autoRotate = true;
-  }, delayMs);
-}
 
 function makeLabelSprite(text, kindColor) {
   const canvas = document.createElement("canvas");
@@ -471,12 +464,11 @@ function buildSceneGraph(live) {
     labelById.set(id, label);
   }
 
-  // Fit camera once on first graph; later live refreshes must NOT reset zoom/orbit.
+  // Fit camera once per Memory page visit (mount). Live refreshes keep the user's view.
+  // Leaving Memory (unmount) clears runtime, so the next visit reframes from scratch.
   if (!runtime.cameraFitted) {
     fitCameraToPoints(camera, controls, points);
     runtime.cameraFitted = true;
-    controls.autoRotate = true;
-    controls.autoRotateSpeed = 0.35;
   }
 
   const dead = [...edgeHealth.values()].filter((h) => !h.alive).length;
@@ -566,8 +558,6 @@ function tick(ts) {
     const pulse = 1 + Math.sin(now / 380 + hash01(id) * 6) * 0.07;
     mesh.scale.setScalar((selectedId === id ? 1.35 : 1) * pulse);
   }
-  // No root spin — OrbitControls autoRotate keeps labels readable top-down.
-
   for (const { key, line } of runtime.edgeCurves) {
     const h = edgeHealth.get(key);
     const dead = !lastFetchOk || (h && !h.alive);
@@ -601,8 +591,6 @@ export function focusNeuron(id, { toast = true } = {}) {
   const offset = camera.position.clone().sub(controls.target);
   controls.target.copy(group.position);
   camera.position.copy(group.position.clone().add(offset));
-  controls.autoRotate = false;
-  scheduleIdleAutoRotate(controls);
   const node = runtime.nodes.find((n) => String(n.id) === selectedId);
   if (toast && node) {
     window.dispatchEvent(
@@ -703,20 +691,13 @@ export async function mountMemoryBrainPage(container) {
   // Free orbit in any direction — no polar clamp fighting the user.
   controls.minPolarAngle = 0;
   controls.maxPolarAngle = Math.PI;
-  controls.autoRotate = true;
-  controls.autoRotateSpeed = 0.35;
+  // No continuous or idle auto-rotation — camera stays exactly where the user left it.
+  controls.autoRotate = false;
   controls.rotateSpeed = 0.85;
   controls.zoomSpeed = 1.15;
   controls.target.set(0, 0, 0);
   controls.addEventListener("start", () => {
-    // Any user touch (zoom/rotate/pan) kills auto-rotate immediately.
-    controls.autoRotate = false;
-    clearTimeout(idleResumeTimer);
     if (runtime) runtime.userOrbiting = true;
-  });
-  controls.addEventListener("end", () => {
-    // Resume gentle spin only after idle — never snaps zoom/position.
-    scheduleIdleAutoRotate(controls, 6000);
   });
 
   scene.add(new THREE.AmbientLight(0x7a93a8, 0.55));
