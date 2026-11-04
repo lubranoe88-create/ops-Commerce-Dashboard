@@ -333,7 +333,6 @@ function disposeRuntime() {
   const { renderer, container, onResize, onPointer, scene } = runtime;
   window.removeEventListener("resize", onResize);
   renderer.domElement.removeEventListener("pointerdown", onPointer);
-  clearTimeout(idleResumeTimer);
   scene.traverse((obj) => {
     if (obj.geometry) obj.geometry.dispose?.();
     if (obj.material) {
