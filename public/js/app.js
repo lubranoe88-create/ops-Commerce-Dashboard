@@ -52,7 +52,7 @@ import {
   mountMemoryBrainPage,
   unmountMemoryBrainPage,
   wireMemoryGraphUi,
-} from "./atlasMemoryGraphUi.js?v=rail-41-memory-3d";
+} from "./atlasMemoryGraphUi.js?v=rail-42-memory-spiral";
 import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-40-mic-clone";
 import { VOICE_DUPLEX, reduceCall, shouldYieldToCall, wakeWordStatus } from "./atlasCall.js?v=rail-40-mic-clone";
 import {
@@ -64,7 +64,7 @@ import {
   wakeCommandRemainder,
 } from "./atlasWake.js?v=rail-40-mic-clone";
 
-const BUILD_ID = "rail-41-memory-3d";
+const BUILD_ID = "rail-42-memory-spiral";
 const CHAT_MODEL_STORAGE_KEY = "ops_chat_model";
 const COMPANY_NOTES_KEY = "ops_company_notes";
 const TOPS_ORDER_KEY_PREFIX = "ops_tops_order_";

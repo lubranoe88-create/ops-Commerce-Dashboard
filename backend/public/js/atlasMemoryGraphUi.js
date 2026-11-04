@@ -1,13 +1,17 @@
 /**
  * MEMORY page — permanent full-viewport 3D neural brain (not a popup).
- * Three.js: labeled neurons, kind colors, orbit/zoom, idle auto-rotate,
- * live synapse packets, glow. Replaces the old 5D concept hologram.
+ * Layout inspired by vasturiano/3d-force-graph: force-separated nodes +
+ * directional synapse particles, wide top-down camera so every neuron is
+ * individually visible (no lobe clustering / no overlapping blobs).
  */
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const POLL_MS = 2000;
-const FETCH_LIMIT = 200;
+const FETCH_LIMIT = 500;
+/** Minimum center-to-center gap so N neurons stay countable and non-overlapping. */
+const MIN_SEP = 0.72;
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
 const KIND_COLOR = {
   heritage: 0xd4a84b,
@@ -104,51 +108,116 @@ function colorForKind(kind) {
   return new THREE.Color(KIND_COLOR[kind] ?? KIND_COLOR.concept);
 }
 
-function neuronTitle(node) {
+function neuronTitle(node, maxLen = 28) {
   const raw = String(node?.title || node?.label || node?.id || "neurone").trim();
-  return raw.length > 42 ? `${raw.slice(0, 40)}…` : raw;
+  return raw.length > maxLen ? `${raw.slice(0, maxLen - 1)}…` : raw;
 }
 
-/** Organic two-lobe 3D brain layout (stable per id). */
-function layoutBrain3d(nodes) {
-  const points = new Map();
+/**
+ * Wide top-down packing (3d-force-graph style):
+ * 1) golden-angle sunflower seed on XZ plane — unique slot per neuron
+ * 2) link springs pull related pairs slightly
+ * 3) strong collision repulsion so nothing stacks into blobs
+ * Y stays nearly flat for a readable aerial view.
+ */
+function layoutForceDisk(nodes, edges = []) {
   const n = Math.max(nodes.length, 1);
+  const points = new Map();
+  // Area scales with N so 100 neurons stay individually countable.
+  const radiusScale = Math.max(4.2, Math.sqrt(n) * 0.95);
+
   nodes.forEach((node, index) => {
     const id = String(node.id);
-    const h = hash01(id);
-    const lobe = h < 0.5 ? -1 : 1;
-    const ring = 0.35 + hash01(`${id}:r`) * 0.65;
-    const a0 = lobe < 0 ? Math.PI * 0.55 : -Math.PI * 0.55;
-    const sweep = Math.PI * 0.95;
-    const t = (index / n + h * 0.17) % 1;
-    const angle = a0 + t * sweep * lobe;
-    const cx = lobe * 1.15;
-    const cy = (hash01(`${id}:y`) - 0.5) * 0.9;
-    const rx = 2.35 * ring;
-    const ry = 1.85 * ring;
-    const jz = (hash01(`${id}:z`) - 0.5) * 1.4;
-    points.set(
-      id,
-      new THREE.Vector3(
-        cx + Math.cos(angle) * rx + (hash01(`${id}:jx`) - 0.5) * 0.35,
-        cy + Math.sin(angle) * ry * 0.85,
-        Math.sin(angle * 0.7) * 1.1 + jz,
-      ),
-    );
+    const r = radiusScale * Math.sqrt((index + 0.5) / n);
+    const theta = index * GOLDEN_ANGLE + hash01(id) * 0.08;
+    const y = (hash01(`${id}:y`) - 0.5) * 0.18;
+    points.set(id, new THREE.Vector3(Math.cos(theta) * r, y, Math.sin(theta) * r));
   });
+
   const ids = [...points.keys()];
-  for (let pass = 0; pass < 4; pass += 1) {
+  const edgeList = (edges || [])
+    .map((e) => [String(e.from), String(e.to)])
+    .filter(([a, b]) => points.has(a) && points.has(b) && a !== b);
+
+  const iterations = Math.min(90, 36 + Math.floor(n / 3));
+  for (let iter = 0; iter < iterations; iter += 1) {
+    const alpha = 1 - iter / iterations;
+    // Collision / charge
     for (let i = 0; i < ids.length; i += 1) {
       for (let j = i + 1; j < ids.length; j += 1) {
         const a = points.get(ids[i]);
         const b = points.get(ids[j]);
-        const d = a.distanceTo(b) || 0.01;
-        const min = 0.42;
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const d2 = dx * dx + dz * dz || 0.0001;
+        const d = Math.sqrt(d2);
+        const min = MIN_SEP;
         if (d < min) {
-          const push = ((min - d) / 2) * 0.7;
-          const dir = b.clone().sub(a).normalize();
-          a.addScaledVector(dir, -push);
-          b.addScaledVector(dir, push);
+          const push = ((min - d) / 2) * (0.55 + 0.45 * alpha);
+          const ux = dx / d;
+          const uz = dz / d;
+          a.x -= ux * push;
+          a.z -= uz * push;
+          b.x += ux * push;
+          b.z += uz * push;
+        } else if (d < min * 2.4) {
+          // Soft charge so the disk breathes open
+          const force = ((0.08 * alpha) / d2) * 0.35;
+          const ux = dx / d;
+          const uz = dz / d;
+          a.x -= ux * force;
+          a.z -= uz * force;
+          b.x += ux * force;
+          b.z += uz * force;
+        }
+      }
+    }
+    // Mild link springs (keep related neurons near, not collapsed)
+    for (const [from, to] of edgeList) {
+      const a = points.get(from);
+      const b = points.get(to);
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const d = Math.hypot(dx, dz) || 0.0001;
+      const ideal = MIN_SEP * 2.15;
+      const pull = (d - ideal) * 0.012 * alpha;
+      const ux = dx / d;
+      const uz = dz / d;
+      a.x += ux * pull;
+      a.z += uz * pull;
+      b.x -= ux * pull;
+      b.z -= uz * pull;
+    }
+    // Center gravity — keep the whole brain framed
+    for (const id of ids) {
+      const p = points.get(id);
+      p.x *= 1 - 0.008 * alpha;
+      p.z *= 1 - 0.008 * alpha;
+      p.y *= 0.92;
+    }
+  }
+
+  // Final hard separation pass (thousandth-level precision)
+  for (let pass = 0; pass < 12; pass += 1) {
+    for (let i = 0; i < ids.length; i += 1) {
+      for (let j = i + 1; j < ids.length; j += 1) {
+        const a = points.get(ids[i]);
+        const b = points.get(ids[j]);
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dz = b.z - a.z;
+        const d = Math.hypot(dx, dy, dz) || 0.0001;
+        if (d < MIN_SEP) {
+          const push = (MIN_SEP - d) / 2;
+          const ux = dx / d;
+          const uy = dy / d;
+          const uz = dz / d;
+          a.x -= ux * push;
+          a.y -= uy * push * 0.25;
+          a.z -= uz * push;
+          b.x += ux * push;
+          b.y += uy * push * 0.25;
+          b.z += uz * push;
         }
       }
     }
@@ -156,27 +225,49 @@ function layoutBrain3d(nodes) {
   return points;
 }
 
+function fitCameraToPoints(camera, controls, points) {
+  if (!points.size) return;
+  const box = new THREE.Box3();
+  for (const p of points.values()) box.expandByPoint(p);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+  const span = Math.max(size.x, size.z, 4);
+  // Top-down / wide-angle: high camera, looking at the disk center.
+  camera.fov = 58;
+  camera.near = 0.1;
+  camera.far = 400;
+  camera.position.set(center.x, span * 1.15 + 3.2, center.z + span * 0.08);
+  camera.lookAt(center.x, 0, center.z);
+  camera.updateProjectionMatrix();
+  controls.target.copy(center);
+  controls.minDistance = Math.max(3, span * 0.35);
+  controls.maxDistance = Math.max(22, span * 2.8);
+  controls.update();
+}
+
 function makeLabelSprite(text, kindColor) {
   const canvas = document.createElement("canvas");
-  canvas.width = 512;
-  canvas.height = 96;
+  canvas.width = 384;
+  canvas.height = 72;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const grad = ctx.createLinearGradient(0, 0, 0, 96);
-  grad.addColorStop(0, "rgba(4,14,22,0.92)");
-  grad.addColorStop(1, "rgba(2,8,14,0.55)");
+  const grad = ctx.createLinearGradient(0, 0, 0, 72);
+  grad.addColorStop(0, "rgba(4,14,22,0.88)");
+  grad.addColorStop(1, "rgba(2,8,14,0.4)");
   ctx.fillStyle = grad;
-  roundRect(ctx, 8, 18, 496, 60, 12);
+  roundRect(ctx, 6, 14, 372, 44, 10);
   ctx.fill();
-  ctx.strokeStyle = `rgba(${Math.round(kindColor.r * 255)},${Math.round(kindColor.g * 255)},${Math.round(kindColor.b * 255)},0.75)`;
-  ctx.lineWidth = 2;
-  roundRect(ctx, 8, 18, 496, 60, 12);
+  ctx.strokeStyle = `rgba(${Math.round(kindColor.r * 255)},${Math.round(kindColor.g * 255)},${Math.round(kindColor.b * 255)},0.7)`;
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, 6, 14, 372, 44, 10);
   ctx.stroke();
   ctx.fillStyle = "#eaf6ff";
-  ctx.font = "600 28px Sora, IBM Plex Sans, system-ui, sans-serif";
+  ctx.font = "600 22px Sora, IBM Plex Sans, system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(text, 256, 50);
+  ctx.fillText(text, 192, 38);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.SpriteMaterial({
@@ -184,9 +275,10 @@ function makeLabelSprite(text, kindColor) {
     transparent: true,
     depthTest: false,
     depthWrite: false,
+    opacity: 0.92,
   });
   const spr = new THREE.Sprite(mat);
-  spr.scale.set(1.55, 0.29, 1);
+  spr.scale.set(1.05, 0.2, 1);
   spr.center.set(0.5, 0);
   return spr;
 }
@@ -232,7 +324,7 @@ function setHud(summaryText) {
   const summary = document.getElementById("memoryGraphSummary");
   if (summary) summary.textContent = summaryText;
   const legend = document.getElementById("moduleLegend");
-  if (legend && pageOpen) legend.textContent = "MEMORY · cervello neurale 3D · drag ruota · scroll zoom";
+  if (legend && pageOpen) legend.textContent = "MEMORY · vista dall'alto · drag orbita · scroll zoom";
 }
 
 function disposeRuntime() {
@@ -260,7 +352,7 @@ function disposeRuntime() {
 
 function buildSceneGraph(live) {
   if (!runtime) return;
-  const { root, packetGroup, nodeById, labelById } = runtime;
+  const { root, packetGroup, nodeById, labelById, camera, controls } = runtime;
   while (root.children.length) root.remove(root.children[0]);
   packetGroup.clear();
   root.add(packetGroup);
@@ -269,42 +361,34 @@ function buildSceneGraph(live) {
   runtime.edgeCurves = [];
 
   const graph = live?.graph || { nodes: [], edges: [] };
-  const nodes = graph.nodes || [];
+  // Prefer full neuron list when graph.nodes is truncated / missing titles.
+  const byId = new Map();
+  for (const n of graph.nodes || []) byId.set(String(n.id), n);
+  for (const n of live?.neurons || []) {
+    const id = String(n.id);
+    if (!byId.has(id)) byId.set(id, n);
+    else byId.set(id, { ...byId.get(id), ...n });
+  }
+  const nodes = [...byId.values()];
   const edges = graph.edges || [];
   runtime.nodes = nodes;
   runtime.edges = edges;
-  const points = layoutBrain3d(nodes);
+  const points = layoutForceDisk(nodes, edges);
 
-  // Soft lobe volumes
-  for (const side of [-1, 1]) {
-    const lobe = new THREE.Mesh(
-      new THREE.SphereGeometry(2.05, 48, 48),
-      new THREE.MeshStandardMaterial({
-        color: 0x0a2a38,
-        emissive: 0x123848,
-        emissiveIntensity: 0.35,
-        transparent: true,
-        opacity: 0.14,
-        roughness: 0.85,
-        metalness: 0.05,
-        depthWrite: false,
-      }),
-    );
-    lobe.position.set(side * 1.05, 0.05, 0);
-    lobe.scale.set(1.05, 0.92, 0.88);
-    root.add(lobe);
-  }
-
-  // Core glow
-  const core = new THREE.Mesh(
-    new THREE.SphereGeometry(0.55, 32, 32),
+  // Subtle ground plane glow (not lobe blobs) so the disk reads as one field.
+  const floor = new THREE.Mesh(
+    new THREE.CircleGeometry(Math.max(6, Math.sqrt(nodes.length) * 1.15), 64),
     new THREE.MeshBasicMaterial({
-      color: 0x3dd6ff,
+      color: 0x0a2030,
       transparent: true,
-      opacity: 0.12,
+      opacity: 0.22,
+      depthWrite: false,
+      side: THREE.DoubleSide,
     }),
   );
-  root.add(core);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -0.12;
+  root.add(floor);
 
   for (const edge of edges) {
     const a = points.get(String(edge.from));
@@ -312,18 +396,17 @@ function buildSceneGraph(live) {
     if (!a || !b) continue;
     const key = edgeKey(edge.from, edge.to, edge.reason);
     const mid = a.clone().lerp(b, 0.5);
-    mid.y += 0.25 + hash01(key) * 0.45;
-    mid.x += (hash01(`${key}:mx`) - 0.5) * 0.35;
+    mid.y += 0.12 + hash01(key) * 0.22;
     const curve = new THREE.QuadraticBezierCurve3(a, mid, b);
-    const pts = curve.getPoints(28);
+    const pts = curve.getPoints(20);
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
     const recall = String(edge.reason || "").startsWith("recall:");
     const line = new THREE.Line(
       geo,
       new THREE.LineBasicMaterial({
-        color: recall ? 0x9ad8ff : 0x4a90a8,
+        color: recall ? 0x9ad8ff : 0x3a7088,
         transparent: true,
-        opacity: recall ? 0.42 : 0.28,
+        opacity: recall ? 0.38 : 0.2,
       }),
     );
     line.userData = { key, kind: "edge" };
@@ -342,22 +425,22 @@ function buildSceneGraph(live) {
     group.position.copy(pos);
 
     const halo = new THREE.Mesh(
-      new THREE.SphereGeometry(0.22, 24, 24),
+      new THREE.SphereGeometry(0.14, 16, 16),
       new THREE.MeshBasicMaterial({
         color,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.16,
         depthWrite: false,
       }),
     );
     group.add(halo);
 
     const mesh = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.11, 1),
+      new THREE.IcosahedronGeometry(0.07, 1),
       new THREE.MeshStandardMaterial({
         color,
         emissive: color,
-        emissiveIntensity: 0.55,
+        emissiveIntensity: 0.6,
         metalness: 0.35,
         roughness: 0.28,
       }),
@@ -366,14 +449,14 @@ function buildSceneGraph(live) {
     group.add(mesh);
 
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.16, 0.008, 8, 40),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55 }),
+      new THREE.TorusGeometry(0.105, 0.006, 6, 28),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5 }),
     );
     ring.rotation.x = Math.PI / 2;
     group.add(ring);
 
-    const label = makeLabelSprite(neuronTitle(node), color);
-    label.position.set(0, 0.28, 0);
+    const label = makeLabelSprite(neuronTitle(node, 22), color);
+    label.position.set(0, 0.16, 0);
     group.add(label);
 
     root.add(group);
@@ -381,10 +464,15 @@ function buildSceneGraph(live) {
     labelById.set(id, label);
   }
 
+  fitCameraToPoints(camera, controls, points);
+  // Prefer slow yaw around the vertical axis (top-down readable).
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 0.35;
+
   const dead = [...edgeHealth.values()].filter((h) => !h.alive).length;
   setHud(
     [
-      `${live?.count ?? nodes.length} neuroni`,
+      `${nodes.length} neuroni`,
       `${edges.length} sinapsi`,
       lastFetchOk ? "flusso live" : "segnale assente",
       dead ? `${dead} archi spenti` : null,
@@ -393,7 +481,7 @@ function buildSceneGraph(live) {
       .join(" · "),
   );
 
-  spawnPackets(8);
+  spawnPackets(10);
   if (selectedId && nodeById.has(selectedId)) focusNeuron(selectedId, { toast: false });
 }
 
@@ -468,7 +556,7 @@ function tick(ts) {
     const pulse = 1 + Math.sin(now / 380 + hash01(id) * 6) * 0.07;
     mesh.scale.setScalar((selectedId === id ? 1.35 : 1) * pulse);
   }
-  root.rotation.y += dt * 0.02;
+  // No root spin — OrbitControls autoRotate keeps labels readable top-down.
 
   for (const { key, line } of runtime.edgeCurves) {
     const h = edgeHealth.get(key);
@@ -499,7 +587,8 @@ export function focusNeuron(id, { toast = true } = {}) {
   if (!group) return;
   selectedId = String(id);
   runtime.controls.target.copy(group.position);
-  const offset = new THREE.Vector3(2.2, 1.4, 2.6);
+  // Stay mostly top-down when focusing a neuron.
+  const offset = new THREE.Vector3(0.6, 3.8, 1.4);
   runtime.camera.position.copy(group.position.clone().add(offset));
   runtime.controls.autoRotate = false;
   clearTimeout(idleResumeTimer);
@@ -582,10 +671,12 @@ export async function mountMemoryBrainPage(container) {
   let w = container.clientWidth || 960;
   let h = container.clientHeight || 640;
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x03060c, 0.022);
+  scene.fog = new THREE.FogExp2(0x03060c, 0.012);
   scene.background = new THREE.Color(0x03060c);
-  const camera = new THREE.PerspectiveCamera(42, w / Math.max(h, 1), 0.1, 200);
-  camera.position.set(0, 1.6, 7.2);
+  const camera = new THREE.PerspectiveCamera(58, w / Math.max(h, 1), 0.1, 400);
+  // Start top-down / wide — fitCameraToPoints refines after layout.
+  camera.position.set(0, 14, 0.8);
+  camera.lookAt(0, 0, 0);
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
   renderer.setSize(w, h, false);
@@ -596,12 +687,15 @@ export async function mountMemoryBrainPage(container) {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.07;
-  controls.minDistance = 2.8;
-  controls.maxDistance = 18;
+  controls.minDistance = 4;
+  controls.maxDistance = 48;
+  controls.maxPolarAngle = Math.PI * 0.48; // keep mostly aerial
+  controls.minPolarAngle = 0.08;
   controls.autoRotate = true;
-  controls.autoRotateSpeed = 0.55;
-  controls.rotateSpeed = 0.8;
-  controls.zoomSpeed = 1.1;
+  controls.autoRotateSpeed = 0.35;
+  controls.rotateSpeed = 0.7;
+  controls.zoomSpeed = 1.15;
+  controls.target.set(0, 0, 0);
   controls.addEventListener("start", () => {
     controls.autoRotate = false;
     clearTimeout(idleResumeTimer);

@@ -391,8 +391,11 @@ export function rememberNeuron({ kind, title, body, text, tags, links, weight, s
   return { ok: true, name: "Atlas", neuron: presentNeuron(entry), count: data.neurons.length };
 }
 
-export function buildNeuronGraph(neurons = []) {
-  const source = (Array.isArray(neurons) ? neurons : []).filter((n) => n?.id).slice(0, 80);
+export function buildNeuronGraph(neurons = [], { maxNodes = 500 } = {}) {
+  // Include every neuron individually — no coarse 80-cap that hid most of the brain.
+  const source = (Array.isArray(neurons) ? neurons : [])
+    .filter((n) => n?.id)
+    .slice(0, Math.max(1, Number(maxNodes) || 500));
   const nodes = source.map((n) => ({
     id: String(n.id),
     kind: n.kind || "fact",
@@ -415,16 +418,24 @@ export function buildNeuronGraph(neurons = []) {
     for (let j = i + 1; j < nodes.length; j += 1) {
       const a = nodes[i];
       const b = nodes[j];
-      if (a.kind && a.kind === b.kind) add(a.id, b.id, `kind:${a.kind}`);
+      // Do NOT fully clique same-kind pairs — that collapsed the 3D view into blobs.
+      // Keep precise associations: shared tags, title recall tokens, explicit links.
+      let linked = false;
       for (const tag of a.tags) {
-        if (b.tags.includes(tag)) add(a.id, b.id, `tag:${tag}`);
-      }
-      const tokensA = new Set(recallTokens(a.title).filter((token) => token.length >= 4));
-      const tokensB = new Set(recallTokens(b.title));
-      for (const token of tokensA) {
-        if (tokensB.has(token)) {
-          add(a.id, b.id, `recall:${token}`);
+        if (b.tags.includes(tag)) {
+          add(a.id, b.id, `tag:${tag}`);
+          linked = true;
           break;
+        }
+      }
+      if (!linked) {
+        const tokensA = new Set(recallTokens(a.title).filter((token) => token.length >= 4));
+        const tokensB = new Set(recallTokens(b.title));
+        for (const token of tokensA) {
+          if (tokensB.has(token)) {
+            add(a.id, b.id, `recall:${token}`);
+            break;
+          }
         }
       }
       const explicit = Array.isArray(source[i]?.links) ? source[i].links : [];
