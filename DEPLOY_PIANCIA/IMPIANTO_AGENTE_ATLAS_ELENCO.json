@@ -1,0 +1,314 @@
+{
+  "at": "2026-11-04T16:47:15.709Z",
+  "project": "Agente Atlas",
+  "total": 51,
+  "fails": [],
+  "implanted": [
+    {
+      "n": 1,
+      "title": "AGENTE ATLAS · progetto giorno intero (ieri)",
+      "kind": "heritage",
+      "id": "m-mw2cnhad-c8z5"
+    },
+    {
+      "n": 2,
+      "title": "ATLAS·FN · atlasAutonomyPolicy",
+      "kind": "function",
+      "id": "m-mw2cnhel-mkjh"
+    },
+    {
+      "n": 3,
+      "title": "ATLAS·FN · atlasBrain",
+      "kind": "function",
+      "id": "m-mw2cnhjo-djku"
+    },
+    {
+      "n": 4,
+      "title": "ATLAS·FN · atlasCatalogPack",
+      "kind": "prompt",
+      "id": "m-mw2cnhnz-2u51"
+    },
+    {
+      "n": 5,
+      "title": "ATLAS·FN · atlasCockpit",
+      "kind": "function",
+      "id": "m-mw2cnhsn-501g"
+    },
+    {
+      "n": 6,
+      "title": "ATLAS·FN · atlasCuriosity",
+      "kind": "function",
+      "id": "m-mw2cnhwb-nnzr"
+    },
+    {
+      "n": 7,
+      "title": "ATLAS·FN · atlasDecisionLog",
+      "kind": "function",
+      "id": "m-mw2cni0g-kfqg"
+    },
+    {
+      "n": 8,
+      "title": "ATLAS·FN · atlasHabits",
+      "kind": "function",
+      "id": "m-mw2cni46-5orc"
+    },
+    {
+      "n": 9,
+      "title": "ATLAS·FN · atlasHandsPlan",
+      "kind": "function",
+      "id": "m-mw2cni89-mfam"
+    },
+    {
+      "n": 10,
+      "title": "ATLAS·FN · atlasIntegrityStore",
+      "kind": "function",
+      "id": "m-mw2cnic7-tbs1"
+    },
+    {
+      "n": 11,
+      "title": "ATLAS·FN · atlasMcp",
+      "kind": "function",
+      "id": "m-mw2cnig1-t3uw"
+    },
+    {
+      "n": 12,
+      "title": "ATLAS·FN · atlasMemoryGraph",
+      "kind": "function",
+      "id": "m-mw2cnik5-ca93"
+    },
+    {
+      "n": 13,
+      "title": "ATLAS·FN · atlasNewsLiteracy",
+      "kind": "function",
+      "id": "m-mw2cninv-3z7h"
+    },
+    {
+      "n": 14,
+      "title": "ATLAS·FN · atlasPersonality",
+      "kind": "heritage",
+      "id": "m-mw2cnir5-4wcd"
+    },
+    {
+      "n": 15,
+      "title": "ATLAS·FN · atlasProblemResolve",
+      "kind": "function",
+      "id": "m-mw2cniva-ri2j"
+    },
+    {
+      "n": 16,
+      "title": "ATLAS·FN · atlasPromptCanon",
+      "kind": "heritage",
+      "id": "m-mw2cnizd-y83t"
+    },
+    {
+      "n": 17,
+      "title": "ATLAS·FN · atlasProve",
+      "kind": "function",
+      "id": "m-mw2cnj3e-vce1"
+    },
+    {
+      "n": 18,
+      "title": "ATLAS·FN · atlasRecall",
+      "kind": "function",
+      "id": "m-mw2cnj7b-2xdj"
+    },
+    {
+      "n": 19,
+      "title": "ATLAS·FN · atlasReliability",
+      "kind": "function",
+      "id": "m-mw2cnjb4-cauu"
+    },
+    {
+      "n": 20,
+      "title": "ATLAS·FN · atlasResident",
+      "kind": "function",
+      "id": "m-mw2cnjeo-vbuh"
+    },
+    {
+      "n": 21,
+      "title": "ATLAS·FN · atlasResidentBus",
+      "kind": "function",
+      "id": "m-mw2cnji1-f7ii"
+    },
+    {
+      "n": 22,
+      "title": "ATLAS·FN · atlasRoute",
+      "kind": "function",
+      "id": "m-mw2cnjqf-f4n7"
+    },
+    {
+      "n": 23,
+      "title": "ATLAS·FN · atlasRuns",
+      "kind": "function",
+      "id": "m-mw2cnjto-4tng"
+    },
+    {
+      "n": 24,
+      "title": "ATLAS·FN · atlasSchedule",
+      "kind": "function",
+      "id": "m-mw2cnjx5-cv6j"
+    },
+    {
+      "n": 25,
+      "title": "ATLAS·FN · atlasSearchGate",
+      "kind": "function",
+      "id": "m-mw2cnk1g-spwg"
+    },
+    {
+      "n": 26,
+      "title": "ATLAS·FN · atlasSelfHeal",
+      "kind": "function",
+      "id": "m-mw2cnk4y-20d3"
+    },
+    {
+      "n": 27,
+      "title": "ATLAS·FN · atlasSessionStore",
+      "kind": "function",
+      "id": "m-mw2cnk8i-ox1y"
+    },
+    {
+      "n": 28,
+      "title": "ATLAS·FN · atlasSpecialists",
+      "kind": "function",
+      "id": "m-mw2cnkgp-b0hw"
+    },
+    {
+      "n": 29,
+      "title": "ATLAS·FN · atlasSpend",
+      "kind": "function",
+      "id": "m-mw2cnkkb-xjpt"
+    },
+    {
+      "n": 30,
+      "title": "ATLAS·FN · atlasStartupIntegrity",
+      "kind": "function",
+      "id": "m-mw2cnknx-vvh2"
+    },
+    {
+      "n": 31,
+      "title": "ATLAS·FN · atlasStateAnswer",
+      "kind": "function",
+      "id": "m-mw2cnkre-346b"
+    },
+    {
+      "n": 32,
+      "title": "ATLAS·FN · atlasSuggestions",
+      "kind": "function",
+      "id": "m-mw2cnkuv-dlf4"
+    },
+    {
+      "n": 33,
+      "title": "ATLAS·FN · atlasToolLog",
+      "kind": "function",
+      "id": "m-mw2cnkyr-g89c"
+    },
+    {
+      "n": 34,
+      "title": "ATLAS·FN · atlasTrust",
+      "kind": "function",
+      "id": "m-mw2cnl2h-m5ra"
+    },
+    {
+      "n": 35,
+      "title": "ATLAS·FN · atlasTruthPack",
+      "kind": "prompt",
+      "id": "m-mw2cnl7g-z2gq"
+    },
+    {
+      "n": 36,
+      "title": "ATLAS·FN · atlasUrgency",
+      "kind": "function",
+      "id": "m-mw2cnlbd-h60f"
+    },
+    {
+      "n": 37,
+      "title": "ATLAS·FN · atlasWorkflows",
+      "kind": "function",
+      "id": "m-mw2cnlf4-hvca"
+    },
+    {
+      "n": 38,
+      "title": "AGENTE ATLAS · lista lavoro vocale completa",
+      "kind": "heritage",
+      "id": "m-mw2cnlio-p3rx"
+    },
+    {
+      "n": 39,
+      "title": "AGENTE ATLAS · esito finale 2026-11-02",
+      "kind": "heritage",
+      "id": "m-mw2cnlmd-2j9l"
+    },
+    {
+      "n": 40,
+      "title": "AGENTE ATLAS · concordato Agent Q Jarvis",
+      "kind": "heritage",
+      "id": "m-mw2cnlpw-6ldr"
+    },
+    {
+      "n": 41,
+      "title": "AGENTE ATLAS · ATP plancia vocale (1/2)",
+      "kind": "heritage",
+      "id": "m-mw2cnlti-w9wl"
+    },
+    {
+      "n": 42,
+      "title": "AGENTE ATLAS · ATP plancia vocale (2/2)",
+      "kind": "heritage",
+      "id": "m-mw2cnlx0-yc8i"
+    },
+    {
+      "n": 43,
+      "title": "AGENTE ATLAS · ispezione plancia",
+      "kind": "heritage",
+      "id": "m-mw2cnm0k-q7ii"
+    },
+    {
+      "n": 44,
+      "title": "ATLAS·MEM · appendExpandableMemory / rememberDurableNote",
+      "kind": "function",
+      "id": "m-mw2cnm3z-1af0"
+    },
+    {
+      "n": 45,
+      "title": "ATLAS·MEM · listExpandableMemory + memory/live API",
+      "kind": "function",
+      "id": "m-mw2cnm7y-9wqv"
+    },
+    {
+      "n": 46,
+      "title": "ATLAS·MEM · upsertTaggedMemory sticky packs",
+      "kind": "function",
+      "id": "m-mw2cnmc2-o3z0"
+    },
+    {
+      "n": 47,
+      "title": "ATLAS·MEM · automatic_recall M1",
+      "kind": "function",
+      "id": "m-mw2cnmfj-5w1z"
+    },
+    {
+      "n": 48,
+      "title": "ATLAS·MEM · search gate C3",
+      "kind": "function",
+      "id": "m-mw2cnmja-dp0r"
+    },
+    {
+      "n": 49,
+      "title": "ATLAS·CFG · L3 autonomy AUTO vs ASK",
+      "kind": "prompt",
+      "id": "m-mw2cnmmu-2put"
+    },
+    {
+      "n": 50,
+      "title": "ATLAS·CFG · voice Flash Whisper barge wake",
+      "kind": "prompt",
+      "id": "m-mw2cnmqd-lqsl"
+    },
+    {
+      "n": 51,
+      "title": "ATLAS·CFG · OpenRouter completeChat choke point",
+      "kind": "prompt",
+      "id": "m-mw2cnmtz-rtf3"
+    }
+  ]
+}

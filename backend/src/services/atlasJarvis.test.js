@@ -505,11 +505,13 @@ describe("Atlas rail-34 jarvis", { concurrency: false }, () => {
     assert.match(read("backend/src/server.js"), /build:\s*"rail-40-mic-clone"/);
     assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-40-mic-clone"/);
     assert.match(read("public/index.html"), /id="cockpitPanel"/);
-    assert.match(read("public/index.html"), /id="memoryGraphPanel"/);
+    assert.match(read("public/index.html"), /id="memoryBottom"/);
     assert.match(read("public/index.html"), /data-holo-action="cockpit"/);
-    assert.match(read("public/index.html"), /data-holo-action="memory-graph"/);
+    assert.match(read("public/index.html"), /data-holo-action="memory"/);
+    assert.equal(read("public/index.html").includes('data-holo-action="memory-graph"'), false);
+    assert.equal(read("public/index.html").includes(">LIVE<"), false);
     assert.match(read("public/js/app.js"), /case "cockpit"/);
-    assert.match(read("public/js/app.js"), /Apri MEMORY live/);
+    assert.match(read("public/js/app.js"), /cervello olografico/);
     assert.match(read("public/js/atlasMemoryGraphUi.js"), /memory\/live/);
     assert.match(read("backend/src/routes/ai.js"), /\/agentq\/memory\/live/);
     assert.match(read("public/js/agentqUi.js"), /routeAtlasTurn/);
@@ -524,5 +526,6 @@ describe("Atlas rail-34 jarvis", { concurrency: false }, () => {
     assert.match(read("backend/src/routes/ai.js"), /\/agentq\/runs\/:id\/resume/);
     assert.match(read("public/css/app.css"), /\.cockpit-body/);
     assert.match(read("public/css/app.css"), /\.memory-graph-svg/);
+    assert.match(read("public/css/app.css"), /\.memory-bottom/);
   });
 });

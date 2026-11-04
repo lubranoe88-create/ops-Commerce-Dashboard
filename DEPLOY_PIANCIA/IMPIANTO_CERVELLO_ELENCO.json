@@ -1,0 +1,1174 @@
+{
+  "at": "2026-11-04T16:47:15.709Z",
+  "note": "Batch1 project + batch2 Agente Atlas",
+  "total": 109,
+  "batch1": 58,
+  "batch2_agente_atlas": 51,
+  "implanted": [
+    {
+      "n": 1,
+      "title": "DEPLOY · RIEPILOGO LLM plancia (1/3)",
+      "kind": "prompt",
+      "id": "m-mw2clzp8-h2u6",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "deploy",
+        "llm"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "DEPLOY · RIEPILOGO LLM plancia (2/3)",
+      "kind": "prompt",
+      "id": "m-mw2clztv-dfrk",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "deploy",
+        "llm"
+      ]
+    },
+    {
+      "n": 3,
+      "title": "DEPLOY · RIEPILOGO LLM plancia (3/3)",
+      "kind": "prompt",
+      "id": "m-mw2clzxp-v6a9",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "deploy",
+        "llm"
+      ]
+    },
+    {
+      "n": 4,
+      "title": "DEPLOY · CHECKLIST PC Windows (1/2)",
+      "kind": "prompt",
+      "id": "m-mw2cm02d-ft96",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "deploy",
+        "checklist"
+      ]
+    },
+    {
+      "n": 5,
+      "title": "DEPLOY · CHECKLIST PC Windows (2/2)",
+      "kind": "prompt",
+      "id": "m-mw2cm06z-84qf",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "deploy",
+        "checklist"
+      ]
+    },
+    {
+      "n": 6,
+      "title": "DEPLOY · CONFIG_LOCALE flag llama.cpp",
+      "kind": "fact",
+      "id": "m-mw2cm0au-g0zm",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "deploy",
+        "config"
+      ]
+    },
+    {
+      "n": 7,
+      "title": "DEPLOY · ROUTER_PICCOLO 8B fallback 35B (1/3)",
+      "kind": "prompt",
+      "id": "m-mw2cm0er-ladi",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "deploy",
+        "router"
+      ]
+    },
+    {
+      "n": 8,
+      "title": "DEPLOY · ROUTER_PICCOLO 8B fallback 35B (2/3)",
+      "kind": "prompt",
+      "id": "m-mw2cm0iy-4t7m",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "deploy",
+        "router"
+      ]
+    },
+    {
+      "n": 9,
+      "title": "DEPLOY · ROUTER_PICCOLO 8B fallback 35B (3/3)",
+      "kind": "prompt",
+      "id": "m-mw2cm0mn-w93c",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "deploy",
+        "router"
+      ]
+    },
+    {
+      "n": 10,
+      "title": "DEPLOY · COLLEGAMENTO_PLANCIA openrouter.js",
+      "kind": "fact",
+      "id": "m-mw2cm0qj-pxaf",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "deploy",
+        "link"
+      ]
+    },
+    {
+      "n": 11,
+      "title": "DEPLOY · IDEE_MIGLIORAMENTO logging test soft-stop",
+      "kind": "fact",
+      "id": "m-mw2cm0us-yl2d",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "deploy",
+        "ideas"
+      ]
+    },
+    {
+      "n": 12,
+      "title": "DEPLOY · INDICE cartella",
+      "kind": "fact",
+      "id": "m-mw2cm0zz-unxp",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "deploy",
+        "index"
+      ]
+    },
+    {
+      "n": 13,
+      "title": "DEPLOY · README llama Windows",
+      "kind": "fact",
+      "id": "m-mw2cm13y-8f5q",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "deploy",
+        "readme"
+      ]
+    },
+    {
+      "n": 14,
+      "title": "DEPLOY · PIANO_MEMORIA_NEURONI cervello unico",
+      "kind": "fact",
+      "id": "m-mw2cm181-17ws",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "deploy",
+        "memory"
+      ]
+    },
+    {
+      "n": 15,
+      "title": "DEPLOY · prompt system-voice-plancia",
+      "kind": "prompt",
+      "id": "m-mw2cm1bu-yqa8",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "deploy",
+        "prompt"
+      ]
+    },
+    {
+      "n": 16,
+      "title": "DEPLOY · prompt system-router",
+      "kind": "prompt",
+      "id": "m-mw2cm1ff-931y",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "deploy",
+        "prompt"
+      ]
+    },
+    {
+      "n": 17,
+      "title": "DEPLOY · llama-server.env.example",
+      "kind": "fact",
+      "id": "m-mw2cm1j0-aup5",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "deploy",
+        "config"
+      ]
+    },
+    {
+      "n": 18,
+      "title": "DEPLOY · llama-router.env.example",
+      "kind": "fact",
+      "id": "m-mw2cm1n4-whpd",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "deploy",
+        "config"
+      ]
+    },
+    {
+      "n": 19,
+      "title": "DEPLOY · llama-server.json profilo",
+      "kind": "fact",
+      "id": "m-mw2cm1qx-4pet",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "deploy",
+        "config"
+      ]
+    },
+    {
+      "n": 20,
+      "title": "DEPLOY · plancia_tools.json allowlist",
+      "kind": "fact",
+      "id": "m-mw2cm1v1-ojqa",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "deploy",
+        "tools"
+      ]
+    },
+    {
+      "n": 21,
+      "title": "DEPLOY · schema_validator.js tool host-side",
+      "kind": "function",
+      "id": "m-mw2cm1yp-nbd6",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "function",
+        "deploy",
+        "code",
+        "tools"
+      ]
+    },
+    {
+      "n": 22,
+      "title": "DEPLOY · router_logic.js hybrid 8B→35B",
+      "kind": "function",
+      "id": "m-mw2cm22i-k1xd",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "function",
+        "deploy",
+        "code",
+        "router"
+      ]
+    },
+    {
+      "n": 23,
+      "title": "DEPLOY · start-llama-server.ps1 cervello 35B",
+      "kind": "function",
+      "id": "m-mw2cm265-32gh",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "function",
+        "deploy",
+        "script"
+      ]
+    },
+    {
+      "n": 24,
+      "title": "DEPLOY · start-llama-router.ps1 router 8B",
+      "kind": "function",
+      "id": "m-mw2cm2bs-i1of",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "function",
+        "deploy",
+        "script"
+      ]
+    },
+    {
+      "n": 25,
+      "title": "DEPLOY · example_client.mjs + hybrid_voice_client.mjs",
+      "kind": "function",
+      "id": "m-mw2cm2ks-ouma",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "function",
+        "deploy",
+        "client"
+      ]
+    },
+    {
+      "n": 26,
+      "title": "STORICO · ATP plancia vocale (1/2)",
+      "kind": "fact",
+      "id": "m-mw2cm2oe-bu09",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "storico"
+      ]
+    },
+    {
+      "n": 27,
+      "title": "STORICO · ATP plancia vocale (2/2)",
+      "kind": "fact",
+      "id": "m-mw2cm2s5-sydp",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "storico"
+      ]
+    },
+    {
+      "n": 28,
+      "title": "STORICO · concordato Agent Q Jarvis",
+      "kind": "fact",
+      "id": "m-mw2cm2vn-ujll",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "storico",
+        "agentq"
+      ]
+    },
+    {
+      "n": 29,
+      "title": "STORICO · esito finale Agent Q 2026-11-02",
+      "kind": "fact",
+      "id": "m-mw2cm2zx-9wvs",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "storico",
+        "agentq"
+      ]
+    },
+    {
+      "n": 30,
+      "title": "STORICO · ispezione plancia 2026-11-02",
+      "kind": "fact",
+      "id": "m-mw2cm33o-ndrc",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "storico"
+      ]
+    },
+    {
+      "n": 31,
+      "title": "STORICO · lista lavoro Agent Q plancia",
+      "kind": "fact",
+      "id": "m-mw2cm37e-dx7i",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "storico",
+        "agentq"
+      ]
+    },
+    {
+      "n": 32,
+      "title": "STORICO · pending 40 features BLOCKED",
+      "kind": "fact",
+      "id": "m-mw2cm3b7-tsce",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "storico"
+      ]
+    },
+    {
+      "n": 33,
+      "title": "HARDWARE · MSI Infinity S3 RTX 5070 12GB + 32GB RAM",
+      "kind": "fact",
+      "id": "m-mw2cm3ev-wov5",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "hardware"
+      ]
+    },
+    {
+      "n": 34,
+      "title": "PROBLEMA · Qwen3 32B denso in sforzo voce",
+      "kind": "fact",
+      "id": "m-mw2cm3ie-jtik",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "llm",
+        "problema"
+      ]
+    },
+    {
+      "n": 35,
+      "title": "VERDETTO · Qwen3.5-35B-A3B primario + router 8B/14B",
+      "kind": "prompt",
+      "id": "m-mw2cm3lt-axtg",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "llm",
+        "verdetto"
+      ]
+    },
+    {
+      "n": 36,
+      "title": "TOP5 · candidati MoE valutati",
+      "kind": "fact",
+      "id": "m-mw2cm3pn-b7d9",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "llm",
+        "top5"
+      ]
+    },
+    {
+      "n": 37,
+      "title": "RAIL · rail-40-mic-clone Safari iPad",
+      "kind": "function",
+      "id": "m-mw2cm3xe-kikc",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "function",
+        "rail",
+        "voice"
+      ]
+    },
+    {
+      "n": 38,
+      "title": "RAIL · rail-38-closeout ATLAS_MEMORY_DIR",
+      "kind": "fact",
+      "id": "m-mw2cm41t-id5r",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "rail",
+        "memory"
+      ]
+    },
+    {
+      "n": 39,
+      "title": "LIVE · URL plancia Render",
+      "kind": "fact",
+      "id": "m-mw2cm45v-fz4e",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "live",
+        "url"
+      ]
+    },
+    {
+      "n": 40,
+      "title": "TIMER · live-ops-monitor ogni 5 ore",
+      "kind": "fact",
+      "id": "m-mw2cm49k-yltu",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "ops",
+        "timer"
+      ]
+    },
+    {
+      "n": 41,
+      "title": "CURSOR · Windows x64 User vs System",
+      "kind": "fact",
+      "id": "m-mw2cm4dg-ixgu",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "cursor",
+        "install"
+      ]
+    },
+    {
+      "n": 42,
+      "title": "WINDOWS · verificare 64-bit",
+      "kind": "fact",
+      "id": "m-mw2cm4hg-ucb6",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "windows"
+      ]
+    },
+    {
+      "n": 43,
+      "title": "MEMORIA · unificata cervello neuroni atlasBrain.js",
+      "kind": "prompt",
+      "id": "m-mw2cm4l2-u2v0",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "memory",
+        "brain"
+      ]
+    },
+    {
+      "n": 44,
+      "title": "MEMORIA · conteggio live pre-migrazione",
+      "kind": "fact",
+      "id": "m-mw2cm4og-kke0",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "memory",
+        "count"
+      ]
+    },
+    {
+      "n": 45,
+      "title": "COLLEGAMENTO · plancia → llama.cpp (unica via)",
+      "kind": "prompt",
+      "id": "m-mw2cm4rz-fq8o",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "link",
+        "local"
+      ]
+    },
+    {
+      "n": 46,
+      "title": "STACK · ibrido voce STT LLM TTS",
+      "kind": "prompt",
+      "id": "m-mw2cm4w0-laxs",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "prompt",
+        "stack",
+        "voice"
+      ]
+    },
+    {
+      "n": 47,
+      "title": "WEB-SKILL · pacchetto 122 da fonti (re-seed)",
+      "kind": "skill",
+      "id": "m-mw2cm4zq-gjfj",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "skill",
+        "web-skill",
+        "seed"
+      ]
+    },
+    {
+      "n": 48,
+      "title": "AGENT Q · heritage nel cervello",
+      "kind": "heritage",
+      "id": "m-mw2cm53c-6q9a",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "heritage",
+        "agentq",
+        "heritage"
+      ]
+    },
+    {
+      "n": 49,
+      "title": "CHIAMATA · setup locale + domanda modifica",
+      "kind": "fact",
+      "id": "m-mw2cm56w-hwtt",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "call",
+        "todo"
+      ]
+    },
+    {
+      "n": 50,
+      "title": "CHIAMATA · memoria vista puntini",
+      "kind": "fact",
+      "id": "m-mw2cm5ay-xy5z",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "call",
+        "ui"
+      ]
+    },
+    {
+      "n": 51,
+      "title": "DOCS · CHECKPOINT-2026-10-31.md",
+      "kind": "fact",
+      "id": "m-mw2cm5fl-u70e",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "docs"
+      ]
+    },
+    {
+      "n": 52,
+      "title": "DOCS · atlas-prove.md",
+      "kind": "fact",
+      "id": "m-mw2cm5jq-em8f",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "docs"
+      ]
+    },
+    {
+      "n": 53,
+      "title": "DOCS · chat-module-design.md",
+      "kind": "fact",
+      "id": "m-mw2cm5nk-mq0b",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "docs"
+      ]
+    },
+    {
+      "n": 54,
+      "title": "DOCS · corrections-and-coverage-design.md",
+      "kind": "fact",
+      "id": "m-mw2cm5rh-gbhl",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "docs"
+      ]
+    },
+    {
+      "n": 55,
+      "title": "DOCS · map-module-design.md",
+      "kind": "fact",
+      "id": "m-mw2cm5zq-wyor",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "docs"
+      ]
+    },
+    {
+      "n": 56,
+      "title": "DOCS · memory-graph-module-design.md",
+      "kind": "fact",
+      "id": "m-mw2cm639-hz28",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "docs"
+      ]
+    },
+    {
+      "n": 57,
+      "title": "DOCS · palantir-visual-references.md",
+      "kind": "fact",
+      "id": "m-mw2cm673-1w76",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "docs"
+      ]
+    },
+    {
+      "n": 58,
+      "title": "DOCS · pipeline-graph-module-design.md",
+      "kind": "fact",
+      "id": "m-mw2cm6b8-x0k2",
+      "tags": [
+        "sticky",
+        "durable",
+        "project",
+        "atlas-brain",
+        "fact",
+        "docs"
+      ]
+    },
+    {
+      "n": 59,
+      "title": "AGENTE ATLAS · progetto giorno intero (ieri)",
+      "kind": "heritage",
+      "id": "m-mw2cnhad-c8z5"
+    },
+    {
+      "n": 60,
+      "title": "ATLAS·FN · atlasAutonomyPolicy",
+      "kind": "function",
+      "id": "m-mw2cnhel-mkjh"
+    },
+    {
+      "n": 61,
+      "title": "ATLAS·FN · atlasBrain",
+      "kind": "function",
+      "id": "m-mw2cnhjo-djku"
+    },
+    {
+      "n": 62,
+      "title": "ATLAS·FN · atlasCatalogPack",
+      "kind": "prompt",
+      "id": "m-mw2cnhnz-2u51"
+    },
+    {
+      "n": 63,
+      "title": "ATLAS·FN · atlasCockpit",
+      "kind": "function",
+      "id": "m-mw2cnhsn-501g"
+    },
+    {
+      "n": 64,
+      "title": "ATLAS·FN · atlasCuriosity",
+      "kind": "function",
+      "id": "m-mw2cnhwb-nnzr"
+    },
+    {
+      "n": 65,
+      "title": "ATLAS·FN · atlasDecisionLog",
+      "kind": "function",
+      "id": "m-mw2cni0g-kfqg"
+    },
+    {
+      "n": 66,
+      "title": "ATLAS·FN · atlasHabits",
+      "kind": "function",
+      "id": "m-mw2cni46-5orc"
+    },
+    {
+      "n": 67,
+      "title": "ATLAS·FN · atlasHandsPlan",
+      "kind": "function",
+      "id": "m-mw2cni89-mfam"
+    },
+    {
+      "n": 68,
+      "title": "ATLAS·FN · atlasIntegrityStore",
+      "kind": "function",
+      "id": "m-mw2cnic7-tbs1"
+    },
+    {
+      "n": 69,
+      "title": "ATLAS·FN · atlasMcp",
+      "kind": "function",
+      "id": "m-mw2cnig1-t3uw"
+    },
+    {
+      "n": 70,
+      "title": "ATLAS·FN · atlasMemoryGraph",
+      "kind": "function",
+      "id": "m-mw2cnik5-ca93"
+    },
+    {
+      "n": 71,
+      "title": "ATLAS·FN · atlasNewsLiteracy",
+      "kind": "function",
+      "id": "m-mw2cninv-3z7h"
+    },
+    {
+      "n": 72,
+      "title": "ATLAS·FN · atlasPersonality",
+      "kind": "heritage",
+      "id": "m-mw2cnir5-4wcd"
+    },
+    {
+      "n": 73,
+      "title": "ATLAS·FN · atlasProblemResolve",
+      "kind": "function",
+      "id": "m-mw2cniva-ri2j"
+    },
+    {
+      "n": 74,
+      "title": "ATLAS·FN · atlasPromptCanon",
+      "kind": "heritage",
+      "id": "m-mw2cnizd-y83t"
+    },
+    {
+      "n": 75,
+      "title": "ATLAS·FN · atlasProve",
+      "kind": "function",
+      "id": "m-mw2cnj3e-vce1"
+    },
+    {
+      "n": 76,
+      "title": "ATLAS·FN · atlasRecall",
+      "kind": "function",
+      "id": "m-mw2cnj7b-2xdj"
+    },
+    {
+      "n": 77,
+      "title": "ATLAS·FN · atlasReliability",
+      "kind": "function",
+      "id": "m-mw2cnjb4-cauu"
+    },
+    {
+      "n": 78,
+      "title": "ATLAS·FN · atlasResident",
+      "kind": "function",
+      "id": "m-mw2cnjeo-vbuh"
+    },
+    {
+      "n": 79,
+      "title": "ATLAS·FN · atlasResidentBus",
+      "kind": "function",
+      "id": "m-mw2cnji1-f7ii"
+    },
+    {
+      "n": 80,
+      "title": "ATLAS·FN · atlasRoute",
+      "kind": "function",
+      "id": "m-mw2cnjqf-f4n7"
+    },
+    {
+      "n": 81,
+      "title": "ATLAS·FN · atlasRuns",
+      "kind": "function",
+      "id": "m-mw2cnjto-4tng"
+    },
+    {
+      "n": 82,
+      "title": "ATLAS·FN · atlasSchedule",
+      "kind": "function",
+      "id": "m-mw2cnjx5-cv6j"
+    },
+    {
+      "n": 83,
+      "title": "ATLAS·FN · atlasSearchGate",
+      "kind": "function",
+      "id": "m-mw2cnk1g-spwg"
+    },
+    {
+      "n": 84,
+      "title": "ATLAS·FN · atlasSelfHeal",
+      "kind": "function",
+      "id": "m-mw2cnk4y-20d3"
+    },
+    {
+      "n": 85,
+      "title": "ATLAS·FN · atlasSessionStore",
+      "kind": "function",
+      "id": "m-mw2cnk8i-ox1y"
+    },
+    {
+      "n": 86,
+      "title": "ATLAS·FN · atlasSpecialists",
+      "kind": "function",
+      "id": "m-mw2cnkgp-b0hw"
+    },
+    {
+      "n": 87,
+      "title": "ATLAS·FN · atlasSpend",
+      "kind": "function",
+      "id": "m-mw2cnkkb-xjpt"
+    },
+    {
+      "n": 88,
+      "title": "ATLAS·FN · atlasStartupIntegrity",
+      "kind": "function",
+      "id": "m-mw2cnknx-vvh2"
+    },
+    {
+      "n": 89,
+      "title": "ATLAS·FN · atlasStateAnswer",
+      "kind": "function",
+      "id": "m-mw2cnkre-346b"
+    },
+    {
+      "n": 90,
+      "title": "ATLAS·FN · atlasSuggestions",
+      "kind": "function",
+      "id": "m-mw2cnkuv-dlf4"
+    },
+    {
+      "n": 91,
+      "title": "ATLAS·FN · atlasToolLog",
+      "kind": "function",
+      "id": "m-mw2cnkyr-g89c"
+    },
+    {
+      "n": 92,
+      "title": "ATLAS·FN · atlasTrust",
+      "kind": "function",
+      "id": "m-mw2cnl2h-m5ra"
+    },
+    {
+      "n": 93,
+      "title": "ATLAS·FN · atlasTruthPack",
+      "kind": "prompt",
+      "id": "m-mw2cnl7g-z2gq"
+    },
+    {
+      "n": 94,
+      "title": "ATLAS·FN · atlasUrgency",
+      "kind": "function",
+      "id": "m-mw2cnlbd-h60f"
+    },
+    {
+      "n": 95,
+      "title": "ATLAS·FN · atlasWorkflows",
+      "kind": "function",
+      "id": "m-mw2cnlf4-hvca"
+    },
+    {
+      "n": 96,
+      "title": "AGENTE ATLAS · lista lavoro vocale completa",
+      "kind": "heritage",
+      "id": "m-mw2cnlio-p3rx"
+    },
+    {
+      "n": 97,
+      "title": "AGENTE ATLAS · esito finale 2026-11-02",
+      "kind": "heritage",
+      "id": "m-mw2cnlmd-2j9l"
+    },
+    {
+      "n": 98,
+      "title": "AGENTE ATLAS · concordato Agent Q Jarvis",
+      "kind": "heritage",
+      "id": "m-mw2cnlpw-6ldr"
+    },
+    {
+      "n": 99,
+      "title": "AGENTE ATLAS · ATP plancia vocale (1/2)",
+      "kind": "heritage",
+      "id": "m-mw2cnlti-w9wl"
+    },
+    {
+      "n": 100,
+      "title": "AGENTE ATLAS · ATP plancia vocale (2/2)",
+      "kind": "heritage",
+      "id": "m-mw2cnlx0-yc8i"
+    },
+    {
+      "n": 101,
+      "title": "AGENTE ATLAS · ispezione plancia",
+      "kind": "heritage",
+      "id": "m-mw2cnm0k-q7ii"
+    },
+    {
+      "n": 102,
+      "title": "ATLAS·MEM · appendExpandableMemory / rememberDurableNote",
+      "kind": "function",
+      "id": "m-mw2cnm3z-1af0"
+    },
+    {
+      "n": 103,
+      "title": "ATLAS·MEM · listExpandableMemory + memory/live API",
+      "kind": "function",
+      "id": "m-mw2cnm7y-9wqv"
+    },
+    {
+      "n": 104,
+      "title": "ATLAS·MEM · upsertTaggedMemory sticky packs",
+      "kind": "function",
+      "id": "m-mw2cnmc2-o3z0"
+    },
+    {
+      "n": 105,
+      "title": "ATLAS·MEM · automatic_recall M1",
+      "kind": "function",
+      "id": "m-mw2cnmfj-5w1z"
+    },
+    {
+      "n": 106,
+      "title": "ATLAS·MEM · search gate C3",
+      "kind": "function",
+      "id": "m-mw2cnmja-dp0r"
+    },
+    {
+      "n": 107,
+      "title": "ATLAS·CFG · L3 autonomy AUTO vs ASK",
+      "kind": "prompt",
+      "id": "m-mw2cnmmu-2put"
+    },
+    {
+      "n": 108,
+      "title": "ATLAS·CFG · voice Flash Whisper barge wake",
+      "kind": "prompt",
+      "id": "m-mw2cnmqd-lqsl"
+    },
+    {
+      "n": 109,
+      "title": "ATLAS·CFG · OpenRouter completeChat choke point",
+      "kind": "prompt",
+      "id": "m-mw2cnmtz-rtf3"
+    }
+  ],
+  "fails": []
+}
