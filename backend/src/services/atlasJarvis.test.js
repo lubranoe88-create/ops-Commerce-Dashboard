@@ -491,7 +491,7 @@ describe("Atlas rail-34 jarvis", { concurrency: false }, () => {
     }
   });
 
-  test("rail-40-mic-clone is stamped and the cockpit mirrors match", () => {
+  test("rail-44-memory-still is stamped and the cockpit mirrors match", () => {
     assert.equal(read("backend/src/services/atlasRoute.js"), read("public/js/atlasRoute.js"));
     assert.equal(read("public/js/atlasRoute.js"), read("backend/public/js/atlasRoute.js"));
     assert.equal(read("public/js/atlasCockpitUi.js"), read("backend/public/js/atlasCockpitUi.js"));
@@ -501,17 +501,17 @@ describe("Atlas rail-34 jarvis", { concurrency: false }, () => {
     assert.equal(read("public/index.html"), read("backend/public/index.html"));
     assert.equal(read("public/css/app.css"), read("backend/public/css/app.css"));
 
-    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-40-mic-clone"/);
-    assert.match(read("backend/src/server.js"), /build:\s*"rail-40-mic-clone"/);
-    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-40-mic-clone"/);
+    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-44-memory-still"/);
+    assert.match(read("backend/src/server.js"), /build:\s*"rail-44-memory-still"/);
+    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-44-memory-still"/);
     assert.match(read("public/index.html"), /id="cockpitPanel"/);
-    assert.match(read("public/index.html"), /id="memoryBottom"/);
+    assert.match(read("public/index.html"), /id="memoryPage"/);
     assert.match(read("public/index.html"), /data-holo-action="cockpit"/);
     assert.match(read("public/index.html"), /data-holo-action="memory"/);
     assert.equal(read("public/index.html").includes('data-holo-action="memory-graph"'), false);
     assert.equal(read("public/index.html").includes(">LIVE<"), false);
     assert.match(read("public/js/app.js"), /case "cockpit"/);
-    assert.match(read("public/js/app.js"), /cervello olografico/);
+    assert.match(read("public/js/app.js"), /mountMemoryBrainPage/);
     assert.match(read("public/js/atlasMemoryGraphUi.js"), /memory\/live/);
     assert.match(read("backend/src/routes/ai.js"), /\/agentq\/memory\/live/);
     assert.match(read("public/js/agentqUi.js"), /routeAtlasTurn/);
@@ -519,13 +519,14 @@ describe("Atlas rail-34 jarvis", { concurrency: false }, () => {
     assert.equal(read("backend/src/services/atlasResident.js").includes("setInterval("), false);
     assert.match(read("public/js/atlasCockpitUi.js"), /pendingAsk/);
     assert.match(read("public/js/atlasCockpitUi.js"), /toolCalls/);
-    assert.match(read("public/js/atlasMemoryGraphUi.js"), /memory-edge--recall/);
+    assert.match(read("public/js/atlasMemoryGraphUi.js"), /layoutForceDisk/);
+    assert.match(read("public/js/atlasMemoryGraphUi.js"), /autoRotate = false/);
     assert.match(read("backend/src/routes/ai.js"), /\/agentq\/mcp/);
     assert.match(read("backend/src/routes/ai.js"), /\/agentq\/schedule/);
     assert.match(read("backend/src/routes/ai.js"), /\/agentq\/workflows\/run/);
     assert.match(read("backend/src/routes/ai.js"), /\/agentq\/runs\/:id\/resume/);
     assert.match(read("public/css/app.css"), /\.cockpit-body/);
-    assert.match(read("public/css/app.css"), /\.memory-graph-svg/);
+    assert.match(read("public/css/app.css"), /\.memory-page/);
     assert.match(read("public/css/app.css"), /\.memory-bottom/);
   });
 });
