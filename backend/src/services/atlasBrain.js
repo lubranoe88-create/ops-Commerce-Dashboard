@@ -178,6 +178,52 @@ export function presentNeuron(neuron) {
   };
 }
 
+/** Fingerprint for near-duplicate collapse (same body / same title). */
+export function neuronContentKey(neuron) {
+  const body = String(neuron?.body || neuron?.text || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+  if (body.length >= 48) return `b:${body}`;
+  const title = String(neuron?.title || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  return `t:${title || neuron?.id || ""}`;
+}
+
+function pickBetterNeuron(a, b) {
+  const score = (n) => {
+    let s = Number(n.weight) || 0;
+    if (n.kind === "heritage") s += 100;
+    if (String(n.source || "").startsWith("canon:")) s += 50;
+    if (/^storico\b/i.test(String(n.title || ""))) s -= 5;
+    if (/^agente atlas\b/i.test(String(n.title || ""))) s += 2;
+    return s;
+  };
+  const sa = score(a);
+  const sb = score(b);
+  if (sb !== sa) return sb > sa ? b : a;
+  return String(b.at || "") > String(a.at || "") ? b : a;
+}
+
+/**
+ * Collapse true duplicates (same body fingerprint or identical title).
+ * Keeps heritage / higher-weight / non-STORICO copies.
+ */
+export function dedupeNeurons(neurons = []) {
+  const best = new Map();
+  for (const n of Array.isArray(neurons) ? neurons : []) {
+    if (!n?.id && !n?.title) continue;
+    const key = neuronContentKey(n);
+    if (!key || key === "t:") continue;
+    const prev = best.get(key);
+    best.set(key, prev ? pickBetterNeuron(prev, n) : n);
+  }
+  return [...best.values()];
+}
+
 function upsertNeuron(data, neuron) {
   const source = neuron.source ? String(neuron.source) : "";
   let idx = -1;
@@ -197,9 +243,13 @@ function upsertNeuron(data, neuron) {
     weight: Number(neuron.weight) || 0,
     source: source || null,
   };
-  if (idx >= 0) data.neurons[idx] = entry;
+  if (idx < 0) {
+    const key = neuronContentKey(entry);
+    idx = data.neurons.findIndex((n) => neuronContentKey(n) === key);
+  }
+  if (idx >= 0) data.neurons[idx] = pickBetterNeuron(data.neurons[idx], entry);
   else data.neurons.unshift(entry);
-  return entry;
+  return idx >= 0 ? data.neurons[idx] : entry;
 }
 
 function entryToNeuron(entry) {
@@ -268,6 +318,7 @@ export function ensureAtlasBrain({ force = false } = {}) {
   if (!data.neurons.some((n) => n.kind === "heritage" || (n.tags || []).includes(ATLAS_AGENTQ_TAG))) {
     seedAgentQHeritageNeurons(data);
   }
+  data.neurons = dedupeNeurons(data.neurons);
   data.neurons.sort((a, b) => {
     const dw = (Number(b.weight) || 0) - (Number(a.weight) || 0);
     if (dw) return dw;
@@ -276,6 +327,27 @@ export function ensureAtlasBrain({ force = false } = {}) {
   const saved = writeBrainFile(data);
   migratedOnce = true;
   return saved;
+}
+
+/** Force a dedupe pass and persist (recovery / implant cleanup). */
+export function dedupeAtlasBrain() {
+  const data = readBrainFile();
+  const before = data.neurons.length;
+  data.neurons = dedupeNeurons(data.neurons);
+  data.neurons.sort((a, b) => {
+    const dw = (Number(b.weight) || 0) - (Number(a.weight) || 0);
+    if (dw) return dw;
+    return String(b.at || "").localeCompare(String(a.at || ""));
+  });
+  const saved = writeBrainFile(data);
+  migratedOnce = true;
+  return {
+    ok: true,
+    before,
+    after: saved.neurons.length,
+    removed: Math.max(0, before - saved.neurons.length),
+    path: atlasBrainPath(),
+  };
 }
 
 export function listNeurons({ limit = 80, query = "", kind = "" } = {}) {

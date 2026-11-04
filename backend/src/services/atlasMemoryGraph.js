@@ -6,7 +6,9 @@
 import { atlasMemoryPaths, listExpandableMemory } from "./agentqBridge.js";
 import { getDashboardSnapshot } from "../memory/store.js";
 import { recallTokens } from "./atlasRecall.js";
-import { brainLiveSnapshot } from "./atlasBrain.js";
+import { brainLiveSnapshot, dedupeAtlasBrain, dedupeNeurons } from "./atlasBrain.js";
+
+export { dedupeAtlasBrain, dedupeNeurons };
 
 const GENERIC_TAGS = new Set(["atlas", "agentq", "seed", "voice", "durable", "atlas-session"]);
 
@@ -85,6 +87,7 @@ export function memoryGraph({ limit = 40, query = "" } = {}) {
 /**
  * Live MEMORY feed for the plancia UI — unified Atlas brain (neurons).
  * Includes Agent Q heritage. `revision` changes when neurons move.
+ * Dedup happens inside ensureAtlasBrain / dedupeAtlasBrain.
  */
 export function memoryLiveSnapshot({ limit = 40, query = "", kind = "" } = {}) {
   return brainLiveSnapshot({ limit, query, kind });

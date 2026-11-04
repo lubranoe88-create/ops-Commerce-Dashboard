@@ -2314,9 +2314,12 @@ function runHoloAction(action, opts = {}) {
     }
     case "memory-graph":
     case "grafo": {
-      toggleMemoryGraphPanel();
-      showToast(`MEMORY · ${src}`);
-      return Promise.resolve();
+      // LIVE unito in MEMORY (terza funzione / sezione in basso)
+      return showModule("memory").then(() => {
+        syncHoloActive("memory");
+        openMemoryGraphPanel();
+        showToast(`MEMORY · ${src}`);
+      });
     }
     case "status":
     case "health":
@@ -2664,17 +2667,12 @@ function sideForModule(mod, snap) {
       });
     }
   } else if (mod === "memory") {
-    title.textContent = "MEMORY · concepts + live notes";
+    title.textContent = "MEMORY · cervello olografico";
     const hint = document.createElement("div");
     hint.className = "card muted";
-    hint.textContent = "Clicca un concetto 3D per centrarlo. Apri MEMORY live per le note expandable aggiornate in tempo reale.";
+    hint.textContent = "Il flusso neurale live è nella sezione MEMORY in basso. Clicca un concetto 3D per centrarlo sul globo.";
     body.appendChild(hint);
-    const graphBtn = document.createElement("button");
-    graphBtn.type = "button";
-    graphBtn.className = "pill-btn";
-    graphBtn.textContent = "Apri MEMORY live";
-    graphBtn.addEventListener("click", () => openMemoryGraphPanel());
-    body.appendChild(graphBtn);
+    openMemoryGraphPanel();
     (snap.memory?.concepts || []).forEach((c) => {
       const el = document.createElement("div");
       el.className = "card";
