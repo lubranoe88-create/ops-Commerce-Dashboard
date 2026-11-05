@@ -124,7 +124,7 @@ describe("Atlas C1 chat", () => {
     assert.equal(appJs.includes("loadChat({ introduce: true })"), true);
     assert.equal(appJs.includes('title: "Atlas"'), true);
     assert.equal(appJs.includes('title: "Session"'), false);
-    assert.equal(appJs.includes('const BUILD_ID = "rail-40-mic-clone"'), true);
+    assert.equal(appJs.includes('const BUILD_ID = "rail-44-memory-still"'), true);
     assert.equal(appJs.includes("rail-27-x1"), false);
     assert.equal(appJs.includes("rail-28-c1"), false);
 
@@ -132,15 +132,15 @@ describe("Atlas C1 chat", () => {
     assert.match(html, /class="chat-who"/);
     assert.match(html, /placeholder="Chiedi ad Atlas…"/);
     assert.match(html, /aria-label="Messaggio per Atlas"/);
-    assert.match(html, /src="\/js\/app\.js\?v=rail-40-mic-clone"/);
-    assert.match(html, /href="\/css\/app\.css\?v=rail-40-mic-clone"/);
+    assert.match(html, /src="\/js\/app\.js\?v=rail-44-memory-still"/);
+    assert.match(html, /href="\/css\/app\.css\?v=rail-44-memory-still"/);
     assert.equal(html.includes("poi Atlas apre il giorno"), true);
     assert.equal(html.includes("rail-27-x1"), false);
 
     assert.match(css, /content:\s*"Atlas"/);
     assert.match(css, /\.chat-who/);
 
-    assert.equal(read("backend/src/server.js").includes('build: "rail-40-mic-clone"'), true);
+    assert.equal(read("backend/src/server.js").includes('build: "rail-44-memory-still"'), true);
 
     function filesUnder(dir) {
       const out = [];

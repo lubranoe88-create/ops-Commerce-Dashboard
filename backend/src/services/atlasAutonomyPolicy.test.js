@@ -277,7 +277,7 @@ describe("Atlas X1 progressive autonomy", { concurrency: false }, () => {
     }
   });
 
-  test("build stamp, hands approve call, and public mirror stay on rail-40-mic-clone", () => {
+  test("build stamp, hands approve call, and public mirror stay on rail-44-memory-still", () => {
     const files = [
       "public/js/app.js",
       "public/index.html",
@@ -296,10 +296,10 @@ describe("Atlas X1 progressive autonomy", { concurrency: false }, () => {
     }
     for (const rel of ["public/js/app.js", "backend/public/js/app.js", "public/index.html", "backend/public/index.html", "backend/src/server.js"]) {
       const text = files.find((item) => item.rel === rel).text;
-      assert.equal(text.includes("rail-40-mic-clone"), true, rel);
+      assert.equal(text.includes("rail-44-memory-still"), true, rel);
     }
-    assert.match(files.find((item) => item.rel === "backend/src/server.js").text, /build:\s*"rail-40-mic-clone"/);
-    assert.match(files.find((item) => item.rel === "public/js/app.js").text, /const BUILD_ID = "rail-40-mic-clone"/);
+    assert.match(files.find((item) => item.rel === "backend/src/server.js").text, /build:\s*"rail-44-memory-still"/);
+    assert.match(files.find((item) => item.rel === "public/js/app.js").text, /const BUILD_ID = "rail-44-memory-still"/);
 
     for (const rel of ["public/js/agentqUi.js", "backend/public/js/agentqUi.js"]) {
       const text = files.find((item) => item.rel === rel).text;
