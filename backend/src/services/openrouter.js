@@ -176,33 +176,46 @@ export async function completeChat({
   const messages = assembleChatMessages({ system, prompt, messages: priorMessages });
 
   if (localLlmEnabled()) {
-    const endpoint = await resolveLocalChatEndpoint();
-    const modelId =
-      (typeof model === "string" && model.trim()) ||
-      localLlmModelId() ||
-      resolveChatModel(model);
-    const key = localLlmApiKey();
-    const run = ({ signal }) =>
-      postChat({
-        url: endpoint.chatUrl,
-        key,
-        modelId,
-        messages,
-        maxTokens,
-        temperature,
-        signal,
-        local: true,
+    let endpoint = null;
+    try {
+      endpoint = await resolveLocalChatEndpoint();
+    } catch (err) {
+      // LM Studio down on LAN: fall through to OpenRouter if configured, else mechanical.
+      const hasOpenRouter =
+        config.openRouterApiKey &&
+        !/CHANGE_ME|PLACEHOLDER|your-key/i.test(config.openRouterApiKey);
+      if (!hasOpenRouter) {
+        return mechanicalChat(err?.code === "NO_LOCAL_LLM" ? "local_llm" : "mechanical");
+      }
+    }
+    if (endpoint?.chatUrl) {
+      const modelId =
+        (typeof model === "string" && model.trim()) ||
+        localLlmModelId() ||
+        resolveChatModel(model);
+      const key = localLlmApiKey();
+      const run = ({ signal }) =>
+        postChat({
+          url: endpoint.chatUrl,
+          key,
+          modelId,
+          messages,
+          maxTokens,
+          temperature,
+          signal,
+          local: true,
+        });
+      return runProvider({
+        provider: "local-llm",
+        run,
+        alternate: null,
+        mechanical: ({ reason }) => mechanicalChat(reason),
+        attempts: 2,
+        timeoutMs: config.localLlmTimeoutMs || 120000,
+        baseDelayMs: 200,
+        budgetMs: Math.max(180000, (config.localLlmTimeoutMs || 120000) + 30000),
       });
-    return runProvider({
-      provider: "local-llm",
-      run,
-      alternate: null,
-      mechanical: ({ reason }) => mechanicalChat(reason),
-      attempts: 2,
-      timeoutMs: config.localLlmTimeoutMs || 120000,
-      baseDelayMs: 200,
-      budgetMs: Math.max(180000, (config.localLlmTimeoutMs || 120000) + 30000),
-    });
+    }
   }
 
   const modelId = resolveChatModel(model);

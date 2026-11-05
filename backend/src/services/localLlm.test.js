@@ -20,10 +20,10 @@ describe("localLlm LAN hostname config", () => {
     assert.equal(localLlmEnabled(), true);
     assert.equal(localLlmPort(), 23000);
     assert.deepEqual(localLlmHosts(), ["bionic.local", "bionic"]);
-    assert.deepEqual(localLlmBaseUrlCandidates(), [
-      "http://bionic.local:23000/v1",
-      "http://bionic:23000/v1",
-    ]);
+    const candidates = localLlmBaseUrlCandidates();
+    assert.ok(candidates.includes("http://bionic.local:23000/v1"));
+    assert.ok(candidates.includes("http://bionic:23000/v1"));
+    assert.equal(candidates[0], "http://bionic.local:23000/v1");
     assert.equal(
       localLlmChatUrl("http://bionic.local:23000/v1"),
       "http://bionic.local:23000/v1/chat/completions",

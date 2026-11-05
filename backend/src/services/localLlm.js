@@ -31,13 +31,13 @@ export function localLlmPort() {
  * Otherwise build from host list + port.
  */
 export function localLlmBaseUrlCandidates() {
-  const explicit = String(config.localLlmBaseUrl || "").trim().replace(/\/+$/, "");
-  if (explicit) {
-    const withV1 = /\/v1$/i.test(explicit) ? explicit : `${explicit}/v1`;
-    return [withV1];
-  }
   const port = localLlmPort();
-  return localLlmHosts().map((host) => `http://${host}:${port}/v1`);
+  const fromHosts = localLlmHosts().map((host) => `http://${host}:${port}/v1`);
+  const explicit = String(config.localLlmBaseUrl || "").trim().replace(/\/+$/, "");
+  if (!explicit) return fromHosts;
+  const withV1 = /\/v1$/i.test(explicit) ? explicit : `${explicit}/v1`;
+  // Prefer explicit URL, then the hostname list (bionic.local → bionic).
+  return [...new Set([withV1, ...fromHosts])];
 }
 
 export function localLlmChatUrl(baseUrl) {
