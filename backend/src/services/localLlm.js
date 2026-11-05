@@ -58,8 +58,7 @@ export function localLlmApiKey() {
 export function localLlmModelId() {
   return (
     String(config.localLlmModel || "").trim() ||
-    String(config.openRouterModel || "").trim() ||
-    "local-model"
+    "Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-MTP-GGUF"
   );
 }
 

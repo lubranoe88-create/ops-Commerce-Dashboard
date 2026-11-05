@@ -11,9 +11,11 @@ LOCAL_LLM_ENABLED=true
 LOCAL_LLM_HOSTS=bionic.local,bionic
 LOCAL_LLM_PORT=23000
 LOCAL_LLM_BASE_URL=http://bionic.local:23000/v1
-LOCAL_LLM_MODEL=local-model
+LOCAL_LLM_MODEL=Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-MTP-GGUF
 LOCAL_LLM_API_KEY=lm-studio
 ```
+
+Modello caricato in LM Studio: **Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-MTP-GGUF**, quant **Q4_K**.
 
 Copia da `PROGETTO_LOCALE/env.plancia-locale.example` se parti da zero.  
 Sul desktop Bionic il browser apre `http://localhost:23000`; dalla plancia in LAN si usa **`http://bionic.local:23000`**.

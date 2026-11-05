@@ -10,7 +10,7 @@ Profilo **voce plancia**: latenza e stabilità tool prima del contesto lungo.
 | Host LAN | `bionic.local` (mDNS) → fallback `bionic` |
 | Porta UI/API | **23000** (browser: `http://localhost:23000`) |
 | Base URL plancia | `http://bionic.local:23000/v1` |
-| Modello | Qwen 3.x 35B-A3B (GGUF Q4_K_M o equivalente caricato in LM Studio) |
+| Modello | `Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-MTP-GGUF` (**Q4_K**) |
 | Env | `LOCAL_LLM_*` in `PROGETTO_LOCALE/env.plancia-locale.example` |
 
 **Non** usare `127.0.0.1` sul server Cursor/cloud: LM Studio non è lì.  

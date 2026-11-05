@@ -157,8 +157,7 @@ export const config = {
   localLlmBaseUrl: process.env.LOCAL_LLM_BASE_URL?.trim() || "",
   localLlmModel:
     process.env.LOCAL_LLM_MODEL?.trim() ||
-    process.env.OPENROUTER_MODEL?.trim() ||
-    "local-model",
+    "Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-MTP-GGUF",
   localLlmApiKey: process.env.LOCAL_LLM_API_KEY?.trim() || "lm-studio",
   /** Local 35B can be slow on first token; keep chat timeout generous. */
   localLlmTimeoutMs: intEnv("LOCAL_LLM_TIMEOUT_MS", 120000),

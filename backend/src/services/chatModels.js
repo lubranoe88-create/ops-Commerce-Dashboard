@@ -72,6 +72,7 @@ if (config.openRouterModel) ALLOWED.add(config.openRouterModel);
 if (config.aiRouterModel) ALLOWED.add(config.aiRouterModel);
 if (config.aiGrokModel) ALLOWED.add(config.aiGrokModel);
 if (config.localLlmModel) ALLOWED.add(config.localLlmModel);
+ALLOWED.add("Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-MTP-GGUF");
 ALLOWED.add("local-model");
 
 export function isAllowedChatModel(modelId) {
