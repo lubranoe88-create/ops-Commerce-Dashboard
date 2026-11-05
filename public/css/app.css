@@ -2158,6 +2158,11 @@ body[data-module="map"] #app.clear-globe-layout #glCanvas {
 .mem-kind--skill { background: rgba(61, 255, 154, 0.14); border-color: rgba(61, 255, 154, 0.4); color: #9dffc8; }
 .mem-kind--prompt { background: rgba(61, 214, 255, 0.14); border-color: rgba(61, 214, 255, 0.4); color: #9fe8ff; }
 .mem-kind--function { background: rgba(183, 148, 246, 0.16); border-color: rgba(183, 148, 246, 0.45); color: #d4c0ff; }
+
+.mem-kind--fact { --mk: #7eb6ff; }
+.mem-kind--tool { --mk: #ff9f43; }
+.mem-kind--session { --mk: #ff7ab8; }
+
 .mem-kind--concept { background: rgba(154, 163, 173, 0.14); border-color: rgba(154, 163, 173, 0.4); color: #c5ccd3; }
 .memory-page-hint {
   margin: 0;
