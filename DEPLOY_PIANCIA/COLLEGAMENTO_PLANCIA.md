@@ -1,24 +1,30 @@
-# Far parlare la plancia col modello locale
+# Far parlare la plancia con LM Studio (desktop Bionic)
 
-## 1) Cosa serve (solo 3 cose)
-1. Il PC Windows acceso, con il modello già avviato (`start-llama-server.bat`).
-2. La plancia che gira sullo **stesso PC**.
-3. Un editor di testo per cambiare **una riga** nel file `openrouter.js`.
+## Cosa serve
+1. **LM Studio** avviato sul desktop **Bionic** (Ubuntu), con il modello Qwen caricato e **Server** acceso in rete locale (non solo “This PC” se la plancia gira su un’altra macchina).
+2. La **plancia** in esecuzione (stesso PC o altro host sulla LAN) con `LOCAL_LLM_ENABLED=true`.
+3. Risoluzione hostname: **`bionic.local`** (mDNS) oppure **`bionic`** (DNS LAN). **Non** serve l’IP se il nome risolve.
 
-## 2) Comandi (copia e incolla uno alla volta)
-1. Avvia il modello: doppio clic su `start-llama-server.bat` e attendi che finisca di caricare.
-2. Apri `openrouter.js` (nella cartella `backend` della plancia).
-3. Trova la riga con `openrouter.ai` e sostituiscila con:
-   `http://127.0.0.1:8080/v1/chat/completions`
-4. Salva il file.
-5. Riavvia la plancia (chiudi e riapri il server della dashboard).
+## Config plancia (`.env`)
+```env
+LOCAL_LLM_ENABLED=true
+LOCAL_LLM_HOSTS=bionic.local,bionic
+LOCAL_LLM_PORT=23000
+LOCAL_LLM_BASE_URL=http://bionic.local:23000/v1
+LOCAL_LLM_MODEL=local-model
+LOCAL_LLM_API_KEY=lm-studio
+```
 
-## 3) Come verificare
-1. Nella plancia, manda un messaggio breve: «Ciao».
-2. Se risponde Atlas in italiano → collegamento ok.
-3. (Opzionale) Nel terminale del modello vedi attività mentre parli.
+Copia da `PROGETTO_LOCALE/env.plancia-locale.example` se parti da zero.  
+Sul desktop Bionic il browser apre `http://localhost:23000`; dalla plancia in LAN si usa **`http://bionic.local:23000`**.
 
-## 4) Se non va
-1. Controlla che `start-llama-server.bat` sia ancora aperto e senza errori.
-2. Controlla di aver salvato `openrouter.js` e riavviato la plancia.
-3. Riprova «Ciao». Se ancora no: spegni tutto, riavvia prima il modello, poi la plancia.
+## Verifica
+1. Sul PC della plancia: `curl http://bionic.local:23000/v1/models` (fallback: `http://bionic:23000/v1/models`).
+2. Avvia la plancia → `GET /health` deve mostrare `localLlm.ok: true` e l’elenco modelli.
+3. Messaggio «Ciao» in chat → risposta Atlas via Qwen locale.
+
+## Se non va
+1. LM Studio: server in ascolto su **0.0.0.0** / rete, firewall Ubuntu aperto su **23000**.
+2. Controlla che `bionic.local` risolva sulla macchina della plancia (`ping bionic.local`).
+3. Se l’API non è sotto `/v1` sulla 23000, prova senza path o la porta Developer API mostrata in LM Studio.
+4. Il **server Cursor/cloud non è in LAN**: da lì `bionic` non risolve — il test vale solo dalla rete di casa.

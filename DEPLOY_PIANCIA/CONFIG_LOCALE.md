@@ -1,6 +1,24 @@
-# CONFIG_LOCALE — flag llama.cpp per RTX 5070 12 GB + 32 GB RAM
+# CONFIG_LOCALE — runtime locale plancia (LM Studio su Bionic)
 
 Profilo **voce plancia**: latenza e stabilità tool prima del contesto lungo.
+
+## Runtime attuale (Emilio)
+
+| Voce | Valore |
+|------|--------|
+| Motore | **LM Studio** sul desktop **Bionic** (Ubuntu 24.04) |
+| Host LAN | `bionic.local` (mDNS) → fallback `bionic` |
+| Porta UI/API | **23000** (browser: `http://localhost:23000`) |
+| Base URL plancia | `http://bionic.local:23000/v1` |
+| Modello | Qwen 3.x 35B-A3B (GGUF Q4_K_M o equivalente caricato in LM Studio) |
+| Env | `LOCAL_LLM_*` in `PROGETTO_LOCALE/env.plancia-locale.example` |
+
+**Non** usare `127.0.0.1` sul server Cursor/cloud: LM Studio non è lì.  
+Dettaglio collegamento: **`COLLEGAMENTO_PLANCIA.md`**.
+
+---
+
+## Alternativa: flag llama.cpp (se non usi LM Studio)
 
 Modello primario (cervello): **Qwen3.5-35B-A3B** (alternativa: Qwen3.6-35B-A3B)  
 Quant: **Q4_K_M** (accettabili UD-Q4_K_M / UD-Q4_K_XL Unsloth)

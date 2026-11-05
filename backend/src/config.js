@@ -141,6 +141,27 @@ export const config = {
   browserUseRateLimitPerMin: intEnv("BROWSER_USE_RATE_LIMIT_PER_MIN", 6),
   browserUseEnabled:
     (process.env.BROWSER_USE_ENABLED || "true").trim().toLowerCase() !== "false",
+  /**
+   * Local LM Studio on the user's desktop (LAN hostname), not on this server.
+   * Default hosts: bionic.local then bionic (mDNS / LAN DNS). Override port/base
+   * via LOCAL_LLM_PORT or LOCAL_LLM_BASE_URL — never assume the cloud loopback.
+   */
+  localLlmEnabled: /^(1|true|on|yes)$/i.test(
+    String(process.env.LOCAL_LLM_ENABLED ?? "").trim() || "",
+  ),
+  localLlmHosts:
+    process.env.LOCAL_LLM_HOSTS?.trim() || "bionic.local,bionic",
+  /** LM Studio web/API on Bionic desktop (browser opens localhost:23000). */
+  localLlmPort: intEnv("LOCAL_LLM_PORT", 23000),
+  /** Full base e.g. http://bionic.local:1234/v1 — if set, skips host list. */
+  localLlmBaseUrl: process.env.LOCAL_LLM_BASE_URL?.trim() || "",
+  localLlmModel:
+    process.env.LOCAL_LLM_MODEL?.trim() ||
+    process.env.OPENROUTER_MODEL?.trim() ||
+    "local-model",
+  localLlmApiKey: process.env.LOCAL_LLM_API_KEY?.trim() || "lm-studio",
+  /** Local 35B can be slow on first token; keep chat timeout generous. */
+  localLlmTimeoutMs: intEnv("LOCAL_LLM_TIMEOUT_MS", 120000),
 };
 
 export function assertRuntimeSecrets() {
@@ -149,9 +170,15 @@ export function assertRuntimeSecrets() {
       "[warn] SITE_PASSWORD is still a placeholder — set it in the host env before sharing widely.",
     );
   }
-  if (config.openRouterApiKey.includes("CHANGE_ME")) {
+  if (config.openRouterApiKey.includes("CHANGE_ME") && !config.localLlmEnabled) {
     console.warn(
       "[warn] OPENROUTER_API_KEY is still a placeholder — chat uses local fallback until set.",
+    );
+  }
+  if (config.localLlmEnabled) {
+    console.info(
+      `[info] Local LLM (LM Studio) enabled — hosts ${config.localLlmHosts} port ${config.localLlmPort}` +
+        (config.localLlmBaseUrl ? ` base ${config.localLlmBaseUrl}` : ""),
     );
   }
 }

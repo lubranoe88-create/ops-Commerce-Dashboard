@@ -33,10 +33,13 @@ browser ──► http://127.0.0.1:8787
           ├─ atlasBrain.js → brain-neurons.json
           └─ expandable.json
 
-(opz.) llama-server :8080  — solo sul PC (COLLEGAMENTO_PLANCIA.md)
+LM Studio su desktop Bionic (LAN)
+  http://bionic.local:23000/v1  — Qwen locale (COLLEGAMENTO_PLANCIA.md)
+  (fallback hostname: bionic)
 
 Render ── (nessuna freccia) ── non fa parte di questo diagramma
 ```
+
 
 Un processo Node sul PC serve UI + API + memoria (same-origin). Nessun URL Render nelle chiamate.
 
@@ -80,7 +83,8 @@ Memoria fuori repo (opzionale): `set ATLAS_MEMORY_DIR=D:\AtlasMemory`
 | Servizio | Porta |
 |----------|------:|
 | Plancia UI+API+memoria | **8787** → `http://127.0.0.1:8787` |
-| llama.cpp (opz.) | 8080 |
+| LM Studio su Bionic (LAN) | **23000** → `http://bionic.local:23000` |
+| llama.cpp (opz., alternativa) | 8080 |
 | router (opz.) | 8070 |
 
 `HOST=127.0.0.1` — niente esposizione Internet. Nessuna porta verso Render.

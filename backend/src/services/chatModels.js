@@ -71,6 +71,8 @@ const ALLOWED = new Set(
 if (config.openRouterModel) ALLOWED.add(config.openRouterModel);
 if (config.aiRouterModel) ALLOWED.add(config.aiRouterModel);
 if (config.aiGrokModel) ALLOWED.add(config.aiGrokModel);
+if (config.localLlmModel) ALLOWED.add(config.localLlmModel);
+ALLOWED.add("local-model");
 
 export function isAllowedChatModel(modelId) {
   return typeof modelId === "string" && ALLOWED.has(modelId.trim());
@@ -101,7 +103,27 @@ export function alternateChatModel(primary) {
 }
 
 export function listChatModels() {
-  // Prefer DeepSeek V4.1 Flash as UI default unless env points at another allow-listed model.
+  const groups = [...CHAT_MODEL_GROUPS];
+  if (config.localLlmEnabled) {
+    const localId = config.localLlmModel || "local-model";
+    groups.unshift({
+      id: "local",
+      label: "Locale · LM Studio (Bionic)",
+      models: [
+        {
+          id: localId,
+          label: "Qwen su LM Studio (bionic.local)",
+        },
+      ],
+    });
+  }
+  // Prefer local LM Studio when enabled; else DeepSeek unless env names another allow-listed model.
+  if (config.localLlmEnabled) {
+    return {
+      default: config.localLlmModel || "local-model",
+      groups,
+    };
+  }
   const envDefault = config.openRouterModel?.trim();
   const defaultModel =
     envDefault && isAllowedChatModel(envDefault) && envDefault !== "meta-llama/llama-3.2-3b-instruct"
@@ -109,6 +131,6 @@ export function listChatModels() {
       : DEFAULT_CHAT_MODEL;
   return {
     default: defaultModel,
-    groups: CHAT_MODEL_GROUPS,
+    groups,
   };
 }
