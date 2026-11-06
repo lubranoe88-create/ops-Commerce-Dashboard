@@ -446,11 +446,11 @@ describe("Atlas rail-33 proactive", { concurrency: false }, () => {
     assert.equal(observed.kind, "news");
   });
 
-  test("rail-40-mic-clone is stamped and the public mirrors match", () => {
-    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-40-mic-clone"/);
-    assert.match(read("backend/src/server.js"), /build:\s*"rail-40-mic-clone"/);
-    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-40-mic-clone"/);
-    assert.match(read("public/index.html"), /href="\/css\/app\.css\?v=rail-40-mic-clone"/);
+  test("rail-44-memory-still is stamped and the public mirrors match", () => {
+    assert.match(read("public/js/app.js"), /const BUILD_ID = "rail-44-memory-still"/);
+    assert.match(read("backend/src/server.js"), /build:\s*"rail-44-memory-still"/);
+    assert.match(read("public/index.html"), /src="\/js\/app\.js\?v=rail-44-memory-still"/);
+    assert.match(read("public/index.html"), /href="\/css\/app\.css\?v=rail-44-memory-still"/);
     assert.match(read("backend/src/server.js"), /runStartupIntegrity\(\{\s*reason:\s*"boot"\s*\}\)/);
     assert.match(read("backend/src/server.js"), /attemptSelfHeal\(/);
     assert.equal(read("public/js/app.js"), read("backend/public/js/app.js"));

@@ -24,6 +24,7 @@ import { attemptSelfHeal } from "./services/atlasSelfHeal.js";
 import { applyBrowserUseRuntimeEnv } from "./services/browserUseRuntime.js";
 import { runtimeProve, summarizeProve } from "./services/atlasProve.js";
 import { wakeWordStatus } from "../public/js/atlasCall.js";
+import { localLlmEnabled, probeLocalLlm } from "./services/localLlm.js";
 
 applyBrowserUseRuntimeEnv();
 
@@ -99,7 +100,7 @@ app.get("/health", async (_req, res) => {
   } catch (err) {
     prove = {
       ok: false,
-      build: "rail-40-mic-clone",
+      build: "rail-44-memory-still",
       depth: "runtime",
       passed: 0,
       total: 0,
@@ -110,9 +111,36 @@ app.get("/health", async (_req, res) => {
     };
   }
   const wake = wakeWordStatus(config.voiceAlwaysOn, { desktop: false });
+  let localLlm = {
+    enabled: localLlmEnabled(),
+    ok: false,
+    baseUrl: null,
+    models: [],
+    hostTried: [],
+    detail: localLlmEnabled() ? "not probed" : "disabled",
+  };
+  if (localLlmEnabled()) {
+    try {
+      const probe = await probeLocalLlm({ timeoutMs: 2000 });
+      localLlm = {
+        enabled: true,
+        ok: probe.ok === true,
+        baseUrl: probe.baseUrl || null,
+        models: probe.models || [],
+        model: probe.model || config.localLlmModel,
+        hostTried: probe.hostTried || [],
+        detail: probe.ok
+          ? `reachable ${probe.baseUrl}`
+          : (probe.errors || []).map((e) => `${e.base}:${e.detail}`).join("; ").slice(0, 300) ||
+            "unreachable",
+      };
+    } catch (err) {
+      localLlm.detail = String(err?.message || err).slice(0, 200);
+    }
+  }
   res.json({
     ok: true,
-    build: "rail-40-mic-clone",
+    build: "rail-44-memory-still",
     prove,
     voice: {
       duplex: "barge-cancel",
@@ -129,7 +157,8 @@ app.get("/health", async (_req, res) => {
       return { ok: report.ok === true, at: report.at || null, failures: report.failures || [] };
     })(),
     browserProbe: "example-1",
-    model: config.openRouterModel,
+    model: localLlm.ok ? localLlm.model || config.localLlmModel : config.openRouterModel,
+    localLlm,
     routerModel: config.aiRouterModel,
     grokModel: config.aiGrokModel,
     purpose: "dashboard_ops",
@@ -137,6 +166,7 @@ app.get("/health", async (_req, res) => {
     secrets_configured: {
       site_password: !config.sitePassword.includes("CHANGE_ME"),
       openrouter: !config.openRouterApiKey.includes("CHANGE_ME"),
+      local_llm: localLlmEnabled(),
     },
   });
 });

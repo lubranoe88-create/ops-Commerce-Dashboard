@@ -92,6 +92,7 @@ export const FUNCTION_CATALOG = [
   { id: "budget-openrouter", label: "Budget OpenRouter", group: "ai-stack" },
   { id: "auto-router", label: "Auto-router", group: "ai-stack" },
   { id: "openrouter-key", label: "OPENROUTER_API_KEY", group: "ai-stack" },
+  { id: "local-llm", label: "LM Studio locale (Bionic)", group: "ai-stack" },
   { id: "cross-thread-memory", label: "Memoria cross-thread", group: "ai-stack" },
   { id: "chat-attachments", label: "Allegati chat", group: "ai-stack" },
   { id: "proactive-mechanical", label: "Proactive meccanico", group: "ai-stack" },
@@ -126,9 +127,32 @@ function softUnverified(id, detail = "Non verificata da probe server") {
   return cell(id, "unverified", null, detail);
 }
 
+function probeLocalLlmCell() {
+  if (!config.localLlmEnabled) {
+    return cell("local-llm", "unverified", null, "LOCAL_LLM_ENABLED off");
+  }
+  const host = String(config.localLlmHosts || "bionic.local").split(",")[0]?.trim() || "bionic.local";
+  const port = config.localLlmPort || 23000;
+  const model = config.localLlmModel || "local-model";
+  return cell(
+    "local-llm",
+    "ok",
+    null,
+    `Chat locale → http://${host}:${port}/v1 · ${model}`,
+  );
+}
+
 function probeOpenRouterKey() {
   const key = config.openRouterApiKey || "";
   if (!key || /CHANGE_ME|PLACEHOLDER|your-key/i.test(key)) {
+    if (config.localLlmEnabled) {
+      return cell(
+        "openrouter-key",
+        "ok",
+        null,
+        "OpenRouter assente · chat via LM Studio locale (Bionic)",
+      );
+    }
     return cell(
       "openrouter-key",
       "error",
@@ -165,6 +189,14 @@ function probeBudget() {
 }
 
 function probeAutoRouter() {
+  if (config.localLlmEnabled) {
+    return cell(
+      "auto-router",
+      "ok",
+      null,
+      `Locale LM Studio · ${config.localLlmModel || "model"} (OpenRouter router in standby)`,
+    );
+  }
   const key = probeOpenRouterKey();
   if (key.status === "error") {
     return cell(
@@ -237,6 +269,14 @@ function probeProactiveMechanical() {
 }
 
 function probeProactiveAi() {
+  if (config.localLlmEnabled) {
+    return cell(
+      "proactive-ai",
+      "ok",
+      null,
+      `Suggestion via LM Studio locale · TTS mode=${config.aiProactiveTts}`,
+    );
+  }
   const key = probeOpenRouterKey();
   if (key.status === "error") {
     return cell("proactive-ai", "error", key.errorType, "Suggestion AI richiede OpenRouter");
@@ -273,6 +313,9 @@ function probeAttachments() {
 function probePaidTurn() {
   if (!isAiPaid()) {
     return cell("paid-ai-turn", "error", "AI_PAYMENT_REQUIRED", "Entitlement free");
+  }
+  if (config.localLlmEnabled) {
+    return cell("paid-ai-turn", "ok", null, "Paid + LM Studio locale pronti");
   }
   const key = probeOpenRouterKey();
   if (key.status === "error") {
@@ -326,6 +369,7 @@ export async function buildFunctionBoard() {
   probed.push(probeBudget());
   probed.push(probeAutoRouter());
   probed.push(probeOpenRouterKey());
+  probed.push(probeLocalLlmCell());
   probed.push(probeCrossThread());
   probed.push(probeAttachments());
   probed.push(probeProactiveMechanical());

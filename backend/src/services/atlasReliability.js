@@ -138,7 +138,9 @@ export function classifyProviderFailure(err) {
   const code = String(err.code || "");
   const name = String(err.name || "");
   const message = String(err.message || "");
-  if (code === "NO_OPENROUTER") return { retryable: false, fatal: true, reason: "not_configured" };
+  if (code === "NO_OPENROUTER" || code === "NO_LOCAL_LLM") {
+    return { retryable: false, fatal: true, reason: "not_configured" };
+  }
   if (code === "PROVIDER_BUDGET") return { retryable: false, fatal: true, reason: "budget" };
   if (status === 408 || status === 429 || (status >= 500 && status <= 599)) {
     return { retryable: true, fatal: false, reason: `http_${status}` };

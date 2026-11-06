@@ -3,6 +3,13 @@ import { alternateChatModel, resolveChatModel } from "./chatModels.js";
 import { asAtlasLine, presentAtlasChatText, withAtlasPersona } from "./atlasPersonality.js";
 import { normalizeSpeakText } from "../../public/js/atlasSpeak.js";
 import {
+  localLlmApiKey,
+  localLlmChatUrl,
+  localLlmEnabled,
+  localLlmModelId,
+  probeLocalLlm,
+} from "./localLlm.js";
+import {
   classifyProviderFailure,
   isCircuitOpen,
   noteProviderFailure,
@@ -20,6 +27,9 @@ export function setOpenRouterFetchForTests(fn) {
 }
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+/** Cached LAN base for LM Studio after a successful probe in this process. */
+let cachedLocalBaseUrl = "";
 
 /**
  * Atlas is the only system message. Extra system turns are dropped so a caller
@@ -53,6 +63,25 @@ function requireOpenRouterKey() {
   return key;
 }
 
+async function resolveLocalChatEndpoint() {
+  if (cachedLocalBaseUrl) {
+    return { baseUrl: cachedLocalBaseUrl, chatUrl: localLlmChatUrl(cachedLocalBaseUrl) };
+  }
+  const probe = await probeLocalLlm({ fetchImpl, timeoutMs: 2500 });
+  if (!probe.ok || !probe.baseUrl) {
+    const err = new Error(
+      probe.errors?.map((e) => `${e.base}: ${e.detail}`).join("; ") ||
+        "LM Studio non raggiungibile su bionic / bionic.local",
+    );
+    err.code = "NO_LOCAL_LLM";
+    err.status = 503;
+    err.probe = probe;
+    throw err;
+  }
+  cachedLocalBaseUrl = probe.baseUrl;
+  return { baseUrl: probe.baseUrl, chatUrl: probe.chatUrl, model: probe.model };
+}
+
 function mechanicalChat(reason) {
   return {
     content: asAtlasLine(
@@ -64,10 +93,19 @@ function mechanicalChat(reason) {
   };
 }
 
-async function postChat({ key, modelId, messages, maxTokens, temperature, signal }) {
+async function postChat({
+  url = OPENROUTER_URL,
+  key,
+  modelId,
+  messages,
+  maxTokens,
+  temperature,
+  signal,
+  local = false,
+}) {
   let response;
   try {
-    response = await fetchImpl(OPENROUTER_URL, {
+    response = await fetchImpl(url, {
       method: "POST",
       signal,
       headers: {
@@ -96,7 +134,7 @@ async function postChat({ key, modelId, messages, maxTokens, temperature, signal
     const detail =
       payload?.error?.message ||
       payload?.message ||
-      `OpenRouter HTTP ${response.status}`;
+      `${local ? "LM Studio" : "OpenRouter"} HTTP ${response.status}`;
     const err = new Error(detail);
     err.status = response.status >= 400 && response.status < 600 ? response.status : 502;
     err.upstream = true;
@@ -120,7 +158,8 @@ async function postChat({ key, modelId, messages, maxTokens, temperature, signal
 }
 
 /**
- * Call OpenRouter chat completions. API key stays server-side.
+ * Chat completions: LM Studio on LAN (bionic / bionic.local) when enabled,
+ * otherwise OpenRouter. API keys stay server-side.
  * Returns usage for budget metering. Every chat path gets the Atlas persona.
  * A failed call retries transient errors, then an alternate model, then a
  * mechanical reply. An open circuit skips the network (M2, M3, X3).
@@ -135,6 +174,50 @@ export async function completeChat({
 } = {}) {
   // Every chat completion (dashboard chat, /api/chat, agent turns, hands) gets Atlas.
   const messages = assembleChatMessages({ system, prompt, messages: priorMessages });
+
+  if (localLlmEnabled()) {
+    let endpoint = null;
+    try {
+      endpoint = await resolveLocalChatEndpoint();
+    } catch (err) {
+      // LM Studio down on LAN: fall through to OpenRouter if configured, else mechanical.
+      const hasOpenRouter =
+        config.openRouterApiKey &&
+        !/CHANGE_ME|PLACEHOLDER|your-key/i.test(config.openRouterApiKey);
+      if (!hasOpenRouter) {
+        return mechanicalChat(err?.code === "NO_LOCAL_LLM" ? "local_llm" : "mechanical");
+      }
+    }
+    if (endpoint?.chatUrl) {
+      const modelId =
+        (typeof model === "string" && model.trim()) ||
+        localLlmModelId() ||
+        resolveChatModel(model);
+      const key = localLlmApiKey();
+      const run = ({ signal }) =>
+        postChat({
+          url: endpoint.chatUrl,
+          key,
+          modelId,
+          messages,
+          maxTokens,
+          temperature,
+          signal,
+          local: true,
+        });
+      return runProvider({
+        provider: "local-llm",
+        run,
+        alternate: null,
+        mechanical: ({ reason }) => mechanicalChat(reason),
+        attempts: 2,
+        timeoutMs: config.localLlmTimeoutMs || 120000,
+        baseDelayMs: 200,
+        budgetMs: Math.max(180000, (config.localLlmTimeoutMs || 120000) + 30000),
+      });
+    }
+  }
+
   const modelId = resolveChatModel(model);
   const key = requireOpenRouterKey();
   const alternateId = alternateChatModel(modelId);
