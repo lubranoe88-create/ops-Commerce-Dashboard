@@ -1,16 +1,17 @@
-# AVVIO PC — start Plancia locale
+# AVVIO_PC launcher
 
-## Important
-**Do not double-click the `.bat` from inside the zip / Temp.**  
-That path looks like `...\AppData\Local\Temp\...zip...\AVVIO_PC` and will fail.
+## Before double-click
+Look at File Explorer address bar. It MUST contain `Documents` and must NOT contain `Temp`.
 
-## Steps
-1. Download `ops-Commerce-Dashboard` zip from GitHub `main`
-2. Right-click zip → **Extract All…**
-3. Extract to: `%USERPROFILE%\Documents\ops-Commerce-Dashboard`
-4. Open: `Documents\ops-Commerce-Dashboard\DEPLOY_PIANCIA\AVVIO_PC`
-5. Double-click `start-plancia-locale.bat`
-6. Wait for **Dashboard listening**
-7. Browser: http://127.0.0.1:8787
+Wrong: `C:\Users\...\AppData\Local\Temp\...zip...\AVVIO_PC`
+Right: `C:\Users\...\Documents\ops-Commerce-Dashboard\...\DEPLOY_PIANCIA\AVVIO_PC`
 
-Need Node.js 20+: https://nodejs.org
+## Setup
+1. Clone or Download ZIP from GitHub main
+2. Extract All to Documents, then delete/close the zip
+3. Open the extracted `DEPLOY_PIANCIA\AVVIO_PC` (address bar = Documents)
+4. Double-click `start-plancia-locale.bat`
+5. Read the first lines: RUNNING FROM THIS PATH — confirm no Temp
+6. Wait for Dashboard listening → http://127.0.0.1:8787
+
+Needs: full repo with `backend\`, Node 20+. LM Studio optional for boot.

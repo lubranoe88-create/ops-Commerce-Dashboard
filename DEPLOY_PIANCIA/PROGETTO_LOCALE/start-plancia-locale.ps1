@@ -1,23 +1,20 @@
-# Start full Atlas stack on this PC only (UI + API + local brain).
-# Completely separate from Render — no proxy, no shared data, no API link.
-# Lives in DEPLOY_PIANCIA/AVVIO_PC (or PROGETTO_LOCALE); finds repo root by walking up.
-$ErrorActionPreference = "Stop"
+# Launcher for full repo (requires backend\ above DEPLOY_PIANCIA).
+$ErrorActionPreference = 'Stop'
 
-function Wait-Exit([int]$Code, [string]$Message) {
-  Write-Host ""
-  Write-Host "ERROR: $Message" -ForegroundColor Red
-  Write-Host "Exit code: $Code"
-  Write-Host ""
-  Write-Host "Press Enter to close this window..." -ForegroundColor Yellow
-  try { [void][System.Console]::ReadLine() } catch { Start-Sleep -Seconds 30 }
+function Hold-Window([string]$Message, [int]$Code = 1) {
+  Write-Host ''
+  Write-Host $Message -ForegroundColor Red
+  Write-Host ''
+  Write-Host 'Press Enter to close...' -ForegroundColor Yellow
+  try { Read-Host | Out-Null } catch { Start-Sleep -Seconds 120 }
+  try { cmd /c pause } catch {}
   exit $Code
 }
 
 function Find-RepoRoot([string]$StartDir) {
-  $dir = (Resolve-Path $StartDir).Path
-  for ($i = 0; $i -lt 6; $i++) {
-    $pkg = Join-Path $dir "backend\package.json"
-    if (Test-Path $pkg) { return $dir }
+  $dir = (Resolve-Path -LiteralPath $StartDir).Path
+  for ($i = 0; $i -lt 8; $i++) {
+    if (Test-Path -LiteralPath (Join-Path $dir 'backend\package.json')) { return $dir }
     $parent = Split-Path -Parent $dir
     if (-not $parent -or $parent -eq $dir) { break }
     $dir = $parent
@@ -27,104 +24,45 @@ function Find-RepoRoot([string]$StartDir) {
 
 try {
   $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+  Write-Host ('RUNNING PS1 FROM: ' + $ScriptDir)
   $Root = Find-RepoRoot $ScriptDir
   if (-not $Root) {
-    Wait-Exit 1 @"
-Could not find backend\package.json above this folder.
-
-Keep this AVVIO_PC folder inside the full repo unzip/clone:
-  ops-Commerce-Dashboard\
-    backend\package.json
-    DEPLOY_PIANCIA\AVVIO_PC\start-plancia-locale.bat
-
-Do not run the .bat from a copy of AVVIO_PC alone — the rest of the project must sit next to it.
-"@
+    Hold-Window '[ERROR] backend\package.json not found. Need FULL repo, not AVVIO_PC alone.' 1
   }
-
-  $Backend = Join-Path $Root "backend"
-  $Pkg = Join-Path $Backend "package.json"
-
-  Write-Host "Script dir : $ScriptDir"
-  Write-Host "Repo root  : $Root"
-  Write-Host "Backend    : $Backend"
-  Write-Host ""
-
-  if (-not (Test-Path $Pkg)) {
-    Wait-Exit 2 "backend\package.json not found at $Pkg"
-  }
-
-  $node = Get-Command node -ErrorAction SilentlyContinue
-  $npm = Get-Command npm -ErrorAction SilentlyContinue
-  if (-not $node) {
-    Wait-Exit 3 "Node.js not found on PATH. Install Node 20+ from https://nodejs.org then reopen this .bat."
-  }
-  if (-not $npm) {
-    Wait-Exit 4 "npm not found on PATH (comes with Node.js). Reinstall Node from https://nodejs.org and retry."
-  }
-
-  Write-Host "Node: $($node.Source)"
-  Write-Host "npm : $($npm.Source)"
+  $Backend = Join-Path $Root 'backend'
+  Write-Host ('Repo root: ' + $Root)
+  Write-Host ('Backend  : ' + $Backend)
+  if (-not (Get-Command node -EA SilentlyContinue)) { Hold-Window '[ERROR] Install Node 20+ from https://nodejs.org' 3 }
+  if (-not (Get-Command npm -EA SilentlyContinue)) { Hold-Window '[ERROR] npm missing — reinstall Node.js' 4 }
+  Write-Host ((node -v) + ' / ' + (npm -v))
   try {
-    Write-Host "Node version: $(node -v)"
-    Write-Host "npm  version: $(npm -v)"
-  } catch {}
-  Write-Host ""
-
-  $nodeModules = Join-Path $Backend "node_modules"
-  if (-not (Test-Path $nodeModules)) {
-    Write-Host "node_modules missing — running first-time install (npm ci --ignore-scripts)..." -ForegroundColor Cyan
-    Set-Location $Backend
+    $null = Invoke-WebRequest -Uri 'http://bionic.local:23000/v1/models' -UseBasicParsing -TimeoutSec 2
+    Write-Host '[OK] LM Studio reachable' -ForegroundColor Green
+  } catch {
+    Write-Host '[WARN] LM Studio not reachable — dashboard still starts; local chat may fall back.' -ForegroundColor Yellow
+  }
+  Set-Location -LiteralPath $Backend
+  if (-not (Test-Path 'node_modules')) {
+    Write-Host 'npm ci --ignore-scripts...'
     npm ci --ignore-scripts
     if ($LASTEXITCODE -ne 0) {
-      Write-Host "npm ci failed; trying npm install --ignore-scripts..." -ForegroundColor Yellow
       npm install --ignore-scripts
-      if ($LASTEXITCODE -ne 0) {
-        Wait-Exit 5 "Dependency install failed in $Backend. Check network / Node version (>=20)."
-      }
+      if ($LASTEXITCODE -ne 0) { Hold-Window '[ERROR] npm install failed' 5 }
     }
   }
-
-  $envFile = Join-Path $Backend ".env"
-  $envExampleCandidates = @(
-    (Join-Path $ScriptDir "env.plancia-locale.example"),
-    (Join-Path $Root "DEPLOY_PIANCIA\PROGETTO_LOCALE\env.plancia-locale.example"),
-    (Join-Path $Root "DEPLOY_PIANCIA\AVVIO_PC\env.plancia-locale.example")
-  )
-  if (-not (Test-Path $envFile)) {
-    $copied = $false
-    foreach ($ex in $envExampleCandidates) {
-      if (Test-Path $ex) {
-        Copy-Item -Force $ex $envFile
-        Write-Host "Created backend\.env from $ex" -ForegroundColor Cyan
-        Write-Host "Edit SITE_PASSWORD in backend\.env before using the UI." -ForegroundColor Yellow
-        $copied = $true
-        break
-      }
-    }
-    if (-not $copied) {
-      Write-Host "WARNING: no backend\.env — server may refuse login." -ForegroundColor Yellow
-    }
+  $ex = Join-Path $Root 'DEPLOY_PIANCIA\PROGETTO_LOCALE\env.plancia-locale.example'
+  if ((-not (Test-Path '.env')) -and (Test-Path $ex)) {
+    Copy-Item -LiteralPath $ex -Destination '.env' -Force
+    Write-Host 'Created backend\.env — edit SITE_PASSWORD' -ForegroundColor Yellow
   }
-
-  Set-Location $Backend
-  $env:HOST = if ($env:HOST) { $env:HOST } else { "127.0.0.1" }
-  $env:PORT = if ($env:PORT) { $env:PORT } else { "8787" }
-  if (-not $env:ATLAS_MEMORY_DIR) {
-    $env:ATLAS_MEMORY_DIR = (Join-Path $Backend "data\agentq-memory")
-  }
+  $env:HOST = if ($env:HOST) { $env:HOST } else { '127.0.0.1' }
+  $env:PORT = if ($env:PORT) { $env:PORT } else { '8787' }
+  if (-not $env:ATLAS_MEMORY_DIR) { $env:ATLAS_MEMORY_DIR = Join-Path $Backend 'data\agentq-memory' }
   New-Item -ItemType Directory -Force -Path $env:ATLAS_MEMORY_DIR | Out-Null
-
-  Write-Host "ATLAS_MEMORY_DIR=$($env:ATLAS_MEMORY_DIR)"
-  Write-Host "Local-only stack. When you see 'Dashboard listening', open:"
-  Write-Host "  http://127.0.0.1:$($env:PORT)" -ForegroundColor Green
-  Write-Host "Do not use the Render URL for this brain."
-  Write-Host ""
-
+  Write-Host ('Wait for Dashboard listening, then open http://127.0.0.1:' + $env:PORT) -ForegroundColor Green
   npm start
-  if ($LASTEXITCODE -ne 0) {
-    Wait-Exit 6 "npm start failed (code $LASTEXITCODE). See messages above."
-  }
-}
-catch {
-  Wait-Exit 99 ($_.Exception.Message)
+  if ($LASTEXITCODE -ne 0) { Hold-Window ('[ERROR] npm start failed ' + $LASTEXITCODE) 6 }
+  cmd /c pause
+} catch {
+  Hold-Window ('[ERROR] ' + $_.Exception.Message) 99
 }
