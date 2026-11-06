@@ -1,20 +1,13 @@
 # AVVIO_PC launcher
 
-## Before double-click
-Look at File Explorer address bar. It MUST contain `Documents` and must NOT contain `Temp`.
+## Access denied / Accesso negato
+1. Right-click `start-plancia-locale.bat` -> Properties -> if you see Unblock, check it -> Apply -> OK
+2. Same for `start-plancia-locale.ps1`
+3. If Documents is OneDrive: right-click the folder -> Always keep on this device
+4. Or move the whole `ops-Commerce-Dashboard-main` folder to `C:\Atlas\` (outside OneDrive) and run from there
+5. Open last-run.txt in AVVIO_PC (or `%TEMP%\plancia-avvio-last-run.txt`) and read it aloud
 
-Wrong: `C:\Users\...\AppData\Local\Temp\...zip...\AVVIO_PC`
-Right: `C:\Users\...\Documents\ops-Commerce-Dashboard\...\DEPLOY_PIANCIA\AVVIO_PC`
+## Normal start
+Extract full repo to a local folder -> open DEPLOY_PIANCIA\AVVIO_PC -> double-click the bat -> wait for Dashboard listening -> http://127.0.0.1:8787
 
-## Setup
-1. Clone or Download ZIP from GitHub main
-2. Extract All to Documents, then delete/close the zip
-3. Open the extracted `DEPLOY_PIANCIA\AVVIO_PC` (address bar = Documents)
-4. Double-click `start-plancia-locale.bat`
-5. Read the first lines: RUNNING FROM THIS PATH — confirm no Temp
-6. Wait for Dashboard listening → http://127.0.0.1:8787
-
-Needs: full repo with `backend\`, Node 20+. LM Studio optional for boot.
-
-## If the window closes too fast
-Open `last-run.txt` in this same folder and read it aloud. It always records the bat path and the error.
+Needs Node 20+. LM Studio optional for boot.

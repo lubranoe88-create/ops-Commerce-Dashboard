@@ -1,18 +1,25 @@
 @echo off
 setlocal EnableExtensions
 
-REM Write last-run.txt FIRST so Emilio can read it even if the window flashes.
+REM --- Unblock Mark-of-the-Web from GitHub zip (common "Accesso negato" cause) ---
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Unblock-File -LiteralPath '%~f0' -ErrorAction SilentlyContinue; Unblock-File -LiteralPath '%~dp0start-plancia-locale.ps1' -ErrorAction SilentlyContinue } catch {}" >nul 2>&1
+
+REM Prefer log beside bat; if Access denied (OneDrive), fall back to %TEMP%
 set "LOG=%~dp0last-run.txt"
-> "%LOG%" echo ===== LAST RUN =====
+> "%LOG%" echo ===== LAST RUN ===== 2>nul
+if errorlevel 1 (
+  set "LOG=%TEMP%\plancia-avvio-last-run.txt"
+  > "%LOG%" echo ===== LAST RUN =====
+)
 >> "%LOG%" echo time=%DATE% %TIME%
 >> "%LOG%" echo bat=%~f0
 >> "%LOG%" echo folder=%~dp0
 >> "%LOG%" echo arg1=%~1
 
-REM Force a kept-open console (fixes instant-close / unreadable flash).
+REM Keep console open WITHOUT nested start (start/call can hit Accesso negato).
 if /I not "%~1"=="KEEPOPEN" (
-  >> "%LOG%" echo action=relaunch_cmd_k
-  start "Atlas Plancia Locale" cmd /k call "%~f0" KEEPOPEN
+  >> "%LOG%" echo action=relaunch_cmd_k_call
+  cmd /k call "%~f0" KEEPOPEN
   exit /b 0
 )
 
@@ -26,8 +33,8 @@ echo  LOG FILE:
 echo  %LOG%
 echo ============================================================
 echo.
-echo A log is always written to last-run.txt in this folder.
-echo If you cannot read the window, open last-run.txt and read it aloud.
+echo If you saw Accesso negato: right-click this .bat - Properties - Unblock - Apply.
+echo Also check OneDrive: Documents may be cloud-only. Keep files "Always keep on this device".
 echo.
 
 echo %~dp0 | findstr /I "\\Temp\\ AppData\\Local\\Temp .zip" >nul
@@ -36,7 +43,6 @@ if not errorlevel 1 (
   echo # STOP - TEMP OR ZIP COPY
   echo ############################################################
   >> "%LOG%" echo error=TEMP_OR_ZIP_PATH
-  >> "%LOG%" echo detail=%~dp0
   goto FAIL
 )
 
@@ -65,26 +71,22 @@ echo.
 if not exist "%PKG%" (
   echo [ERROR] backend\package.json NOT FOUND.
   >> "%LOG%" echo error=BACKEND_MISSING
-  >> "%LOG%" echo expected=%PKG%
   goto FAIL
 )
 
 where node >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Node.js not on PATH. Install https://nodejs.org
-  echo After install, CLOSE this window, open a NEW Explorer window, run the bat again.
+  echo Close ALL windows, open a NEW File Explorer, run the bat again.
   >> "%LOG%" echo error=NODE_NOT_ON_PATH
-  >> "%LOG%" echo hint=Reboot or open new Explorer after Node install so PATH updates
   goto FAIL
 )
-
 where npm >nul 2>&1
 if errorlevel 1 (
-  echo [ERROR] npm not on PATH. Reinstall Node.js.
+  echo [ERROR] npm not on PATH.
   >> "%LOG%" echo error=NPM_NOT_ON_PATH
   goto FAIL
 )
-
 where powershell >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] PowerShell not found.
@@ -149,15 +151,13 @@ goto END
 :FAIL
 echo.
 echo *** FAILED ***
-echo Open this file and read it aloud:
-echo   %LOG%
+echo Read log aloud: %LOG%
 echo.
 >> "%LOG%" echo status=FAILED
-timeout /t 15 >nul
+timeout /t 10 >nul
 
 :END
 echo.
-echo Log written to:
-echo   %LOG%
+echo Log: %LOG%
 echo.
 pause
