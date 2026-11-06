@@ -1,3 +1,3 @@
 # AVVIO_PC
 
-Double-click the Plancia icon on the desktop.
+Everything runs locally from `C:\Atlas`. Double-click the Plancia icon or `start-plancia.bat`. No internet needed.
