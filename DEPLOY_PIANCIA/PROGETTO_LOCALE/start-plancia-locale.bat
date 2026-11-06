@@ -1,40 +1,46 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
-title Atlas Plancia Locale
 
 echo.
 echo ============================================================
-echo  RUNNING FROM THIS PATH (read this aloud if it fails):
-echo  %CD%
-echo  Bat file: %~f0
+echo  RUNNING BAT FILE:
+echo  %~f0
+echo  BAT FOLDER:
+echo  %~dp0
 echo ============================================================
 echo.
+echo If this window closes instantly, you are not running this new bat.
+echo Re-download main from GitHub, Extract All to Documents, delete the zip.
+echo.
 
-echo %CD% | findstr /I "\Temp\ AppData\Local\Temp .zip" >nul
+REM Big Temp/zip warning using the bat's own folder (%~dp0), not explorer address bar.
+echo %~dp0 | findstr /I "\\Temp\\ AppData\\Local\\Temp .zip" >nul
 if not errorlevel 1 (
-  echo [STOP] This is still a TEMP or ZIP path — NOT Documents.
+  echo ############################################################
+  echo # STOP - TEMP OR ZIP COPY
+  echo # Windows launched the bat from inside the zip / Temp.
+  echo # This is NOT your Documents copy.
+  echo ############################################################
   echo.
-  echo You double-clicked the bat INSIDE the zip, or a Temp copy.
+  echo Fix:
+  echo  1. Close zip windows
+  echo  2. Extract All to %USERPROFILE%\Documents\ops-Commerce-Dashboard
+  echo  3. Delete or close the .zip
+  echo  4. Open Documents folder in Explorer - address bar must say Documents
+  echo  5. Open DEPLOY_PIANCIA\AVVIO_PC
+  echo  6. Double-click start-plancia-locale.bat there
   echo.
-  echo Do this instead:
-  echo  1. Close ALL zip windows and this window
-  echo  2. Delete or ignore the .zip file after extract
-  echo  3. Open File Explorer address bar and type:
-  echo     %%USERPROFILE%%\Documents\ops-Commerce-Dashboard
-  echo  4. If you see ops-Commerce-Dashboard-main inside, open that
-  echo  5. Open DEPLOY_PIANCIA then AVVIO_PC
-  echo  6. Look at the address bar — it must say Documents, not Temp
-  echo  7. Only then double-click start-plancia-locale.bat
-  echo.
-  echo Or with Git:
-  echo   cd %%USERPROFILE%%\Documents
-  echo   git clone https://github.com/lubranoe88-create/ops-Commerce-Dashboard.git
-  echo   cd ops-Commerce-Dashboard\DEPLOY_PIANCIA\AVVIO_PC
-  echo   start-plancia-locale.bat
-  echo.
-  goto :FAIL
+  goto FAIL
 )
+
+cd /d "%~dp0"
+if errorlevel 1 (
+  echo [ERROR] Cannot cd to bat folder: %~dp0
+  goto FAIL
+)
+
+echo Current directory now: %CD%
+echo.
 
 set "REPO_ROOT=%~dp0..\.."
 for %%I in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fI"
@@ -47,27 +53,26 @@ echo.
 
 if not exist "%PKG%" (
   echo [ERROR] backend\package.json NOT FOUND.
-  echo AVVIO_PC alone is not enough — need the FULL repo with backend\.
-  echo Expected:
+  echo AVVIO_PC needs the FULL repo next to it:
   echo   ops-Commerce-Dashboard\backend\package.json
-  echo   ops-Commerce-Dashboard\DEPLOY_PIANCIA\AVVIO_PC\start-plancia-locale.bat
-  goto :FAIL
+  echo   ops-Commerce-Dashboard\DEPLOY_PIANCIA\AVVIO_PC\
+  goto FAIL
 )
 
 where node >nul 2>&1
 if errorlevel 1 (
-  echo [ERROR] Node.js not on PATH. Install from https://nodejs.org
-  goto :FAIL
+  echo [ERROR] Node.js not on PATH. Install https://nodejs.org
+  goto FAIL
 )
 where npm >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] npm not on PATH. Reinstall Node.js.
-  goto :FAIL
+  goto FAIL
 )
 where powershell >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] PowerShell not found.
-  goto :FAIL
+  goto FAIL
 )
 
 echo Node:
@@ -79,10 +84,10 @@ echo.
 
 set "PS1=%~dp0start-plancia-locale.ps1"
 if exist "%PS1%" (
-  echo Launching PowerShell: %PS1%
+  echo Launching: %PS1%
   powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
 ) else (
-  echo [WARN] ps1 missing next to bat — npm start fallback.
+  echo [WARN] ps1 missing - using npm start fallback.
   pushd "%BACKEND%"
   if not exist "node_modules\" (
     echo Installing dependencies...
@@ -91,7 +96,7 @@ if exist "%PS1%" (
     if errorlevel 1 (
       echo [ERROR] npm install failed
       popd
-      goto :FAIL
+      goto FAIL
     )
   )
   if not exist ".env" if exist "%REPO_ROOT%\DEPLOY_PIANCIA\PROGETTO_LOCALE\env.plancia-locale.example" (
@@ -108,15 +113,18 @@ if exist "%PS1%" (
 
 set "ERR=%ERRORLEVEL%"
 if not "%ERR%"=="0" (
-  echo *** exited with code %ERR% ***
-  goto :FAIL
+  echo *** process exited with code %ERR% ***
+  goto FAIL
 )
 echo Server process ended.
-pause
-exit /b 0
+goto END
 
 :FAIL
 echo.
-echo *** FAILED — window stays open. Read RUNNING FROM path at the top. ***
+echo *** FAILED - read RUNNING BAT FILE path at the top ***
+echo.
+
+:END
+echo.
 pause
-exit /b 1
+endlocal
