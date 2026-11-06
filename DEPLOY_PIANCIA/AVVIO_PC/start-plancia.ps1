@@ -36,6 +36,32 @@ function Find-RepoRoot([string]$StartDir) {
   return $null
 }
 
+function Ensure-DesktopShortcut([string]$AvvioDir) {
+  $bat = Join-Path $AvvioDir "start-plancia.bat"
+  if (-not (Test-Path -LiteralPath $bat)) {
+    Write-Host "AVVISO: start-plancia.bat non trovato, shortcut Desktop saltata." -ForegroundColor Yellow
+    return
+  }
+  try {
+    $desktop = [Environment]::GetFolderPath("Desktop")
+    if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE "Desktop" }
+    $lnkPath = Join-Path $desktop "Plancia.lnk"
+    $w = New-Object -ComObject WScript.Shell
+    $s = $w.CreateShortcut($lnkPath)
+    $s.TargetPath = $bat
+    $s.WorkingDirectory = $AvvioDir
+    $s.WindowStyle = 1
+    $s.Description = "Atlas Plancia Locale (auto-update + avvio)"
+    # Globe-ish shell icon
+    $s.IconLocation = "$env:SystemRoot\System32\shell32.dll,14"
+    $s.Save()
+    Write-Host "Icona Desktop: $lnkPath" -ForegroundColor Green
+    Write-Host "  -> $bat" -ForegroundColor DarkGray
+  } catch {
+    Write-Host "AVVISO: impossibile creare icona Desktop: $($_.Exception.Message)" -ForegroundColor Yellow
+  }
+}
+
 function Get-RemoteMainSha {
   $headers = @{ "User-Agent" = "plancia-avvio"; "Accept" = "application/vnd.github+json" }
   if ($env:PLANCIA_GH_TOKEN) { $headers["Authorization"] = "Bearer $($env:PLANCIA_GH_TOKEN)" }
@@ -204,7 +230,17 @@ try {
     Fail "backend\package.json non trovato. Serve il repo completo sotto C:\Atlas (non solo AVVIO_PC)."
   }
 
+  # Icona Desktop "Plancia" (creata/aggiornata se manca o dopo update)
+  $avvioDir = Join-Path $Root "DEPLOY_PIANCIA\AVVIO_PC"
+  if (-not (Test-Path -LiteralPath $avvioDir)) { $avvioDir = $ScriptDir }
+  Ensure-DesktopShortcut -AvvioDir $avvioDir
+
   Ensure-Updated -Root $Root
+
+  # Dopo SkipUpdate (rilancio), ricrea shortcut sul path aggiornato
+  $avvioDir = Join-Path $Root "DEPLOY_PIANCIA\AVVIO_PC"
+  if (-not (Test-Path -LiteralPath $avvioDir)) { $avvioDir = $ScriptDir }
+  Ensure-DesktopShortcut -AvvioDir $avvioDir
 
   # --- avvio backend (dopo update / SkipUpdate) ---
   $Backend = Join-Path $Root "backend"
