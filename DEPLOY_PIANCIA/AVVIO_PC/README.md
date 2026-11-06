@@ -1,13 +1,14 @@
-# AVVIO_PC launcher
+# AVVIO_PC
 
-## Access denied / Accesso negato
-1. Right-click `start-plancia-locale.bat` -> Properties -> if you see Unblock, check it -> Apply -> OK
-2. Same for `start-plancia-locale.ps1`
-3. If Documents is OneDrive: right-click the folder -> Always keep on this device
-4. Or move the whole `ops-Commerce-Dashboard-main` folder to `C:\Atlas\` (outside OneDrive) and run from there
-5. Open last-run.txt in AVVIO_PC (or `%TEMP%\plancia-avvio-last-run.txt`) and read it aloud
+## Accesso negato
+Usually OneDrive locking files under Documents.
 
-## Normal start
-Extract full repo to a local folder -> open DEPLOY_PIANCIA\AVVIO_PC -> double-click the bat -> wait for Dashboard listening -> http://127.0.0.1:8787
+1. Move whole ops-Commerce-Dashboard-main to C:\Atlas\ops-Commerce-Dashboard-main
+2. Right-click start-plancia-locale.bat -> Properties -> Unblock -> Apply
+3. Run from C:\Atlas\...\DEPLOY_PIANCIA\AVVIO_PC
+4. Read log: %TEMP%\plancia-avvio-last-run.txt
 
-Needs Node 20+. LM Studio optional for boot.
+## Start
+Double-click bat -> wait for Dashboard listening -> http://127.0.0.1:8787
+
+Needs Node 20+. LM Studio optional. Memory: %LOCALAPPDATA%\AtlasPlancia\agentq-memory

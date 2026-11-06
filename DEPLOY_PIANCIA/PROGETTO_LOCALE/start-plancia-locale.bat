@@ -1,26 +1,14 @@
 @echo off
 setlocal EnableExtensions
+cd /d "%~dp0"
 
-REM --- Unblock Mark-of-the-Web from GitHub zip (common "Accesso negato" cause) ---
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Unblock-File -LiteralPath '%~f0' -ErrorAction SilentlyContinue; Unblock-File -LiteralPath '%~dp0start-plancia-locale.ps1' -ErrorAction SilentlyContinue } catch {}" >nul 2>&1
-
-REM Prefer log beside bat; if Access denied (OneDrive), fall back to %TEMP%
-set "LOG=%~dp0last-run.txt"
-> "%LOG%" echo ===== LAST RUN ===== 2>nul
-if errorlevel 1 (
-  set "LOG=%TEMP%\plancia-avvio-last-run.txt"
-  > "%LOG%" echo ===== LAST RUN =====
-)
->> "%LOG%" echo time=%DATE% %TIME%
->> "%LOG%" echo bat=%~f0
->> "%LOG%" echo folder=%~dp0
->> "%LOG%" echo arg1=%~1
-
-REM Keep console open WITHOUT nested start (start/call can hit Accesso negato).
-if /I not "%~1"=="KEEPOPEN" (
-  >> "%LOG%" echo action=relaunch_cmd_k_call
-  cmd /k call "%~f0" KEEPOPEN
-  exit /b 0
+REM Log ONLY to TEMP. Writing into OneDrive Documents causes Accesso negato spam.
+set "LOG=%TEMP%\plancia-avvio-last-run.txt"
+> "%LOG%" (
+  echo ===== LAST RUN =====
+  echo time=%DATE% %TIME%
+  echo bat=%~f0
+  echo folder=%~dp0
 )
 
 echo.
@@ -29,33 +17,29 @@ echo  RUNNING BAT FILE:
 echo  %~f0
 echo  BAT FOLDER:
 echo  %~dp0
-echo  LOG FILE:
+echo  LOG FILE (Temp only):
 echo  %LOG%
 echo ============================================================
 echo.
-echo If you saw Accesso negato: right-click this .bat - Properties - Unblock - Apply.
-echo Also check OneDrive: Documents may be cloud-only. Keep files "Always keep on this device".
-echo.
+
+echo %~dp0 | findstr /I "OneDrive \\Documents\\" >nul
+if not errorlevel 1 (
+  echo [WARN] Project is under Documents/OneDrive.
+  echo OneDrive often blocks npm with Accesso negato.
+  echo Best fix: move the whole folder to:
+  echo   C:\Atlas\ops-Commerce-Dashboard-main
+  echo then run:
+  echo   C:\Atlas\ops-Commerce-Dashboard-main\DEPLOY_PIANCIA\AVVIO_PC\start-plancia-locale.bat
+  echo.
+  >> "%LOG%" echo warn=ONEDRIVE_OR_DOCUMENTS_PATH
+)
 
 echo %~dp0 | findstr /I "\\Temp\\ AppData\\Local\\Temp .zip" >nul
 if not errorlevel 1 (
-  echo ############################################################
-  echo # STOP - TEMP OR ZIP COPY
-  echo ############################################################
-  >> "%LOG%" echo error=TEMP_OR_ZIP_PATH
+  echo [STOP] TEMP/zip path. Extract to C:\Atlas instead.
+  >> "%LOG%" echo error=TEMP_OR_ZIP
   goto FAIL
 )
-
-cd /d "%~dp0"
-if errorlevel 1 (
-  echo [ERROR] Cannot cd to bat folder
-  >> "%LOG%" echo error=CD_FAILED
-  goto FAIL
-)
-
->> "%LOG%" echo cd=%CD%
-echo Current directory now: %CD%
-echo.
 
 set "REPO_ROOT=%~dp0..\.."
 for %%I in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fI"
@@ -65,99 +49,101 @@ set "PKG=%BACKEND%\package.json"
 echo Repo root: %REPO_ROOT%
 echo Backend  : %BACKEND%
 >> "%LOG%" echo repo=%REPO_ROOT%
->> "%LOG%" echo backend=%BACKEND%
 echo.
 
 if not exist "%PKG%" (
-  echo [ERROR] backend\package.json NOT FOUND.
+  echo [ERROR] backend\package.json NOT FOUND
   >> "%LOG%" echo error=BACKEND_MISSING
   goto FAIL
 )
 
 where node >nul 2>&1
 if errorlevel 1 (
-  echo [ERROR] Node.js not on PATH. Install https://nodejs.org
-  echo Close ALL windows, open a NEW File Explorer, run the bat again.
+  echo [ERROR] Node.js not on PATH. https://nodejs.org
   >> "%LOG%" echo error=NODE_NOT_ON_PATH
   goto FAIL
 )
 where npm >nul 2>&1
 if errorlevel 1 (
-  echo [ERROR] npm not on PATH.
+  echo [ERROR] npm not on PATH
   >> "%LOG%" echo error=NPM_NOT_ON_PATH
-  goto FAIL
-)
-where powershell >nul 2>&1
-if errorlevel 1 (
-  echo [ERROR] PowerShell not found.
-  >> "%LOG%" echo error=POWERSHELL_MISSING
   goto FAIL
 )
 
 echo Node:
 node -v
 npm -v
->> "%LOG%" echo node_ok=
+>> "%LOG%" echo node_version=
 node -v >> "%LOG%" 2>&1
-npm -v >> "%LOG%" 2>&1
-echo.
-echo [INFO] LM Studio on Bionic is OPTIONAL for boot.
 echo.
 
-set "PS1=%~dp0start-plancia-locale.ps1"
-if exist "%PS1%" (
-  echo Launching: %PS1%
-  >> "%LOG%" echo action=powershell_ps1
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
-) else (
-  echo [WARN] ps1 missing - npm start fallback.
-  >> "%LOG%" echo action=npm_fallback
-  pushd "%BACKEND%"
-  if not exist "node_modules\" (
-    echo Installing dependencies...
-    call npm ci --ignore-scripts
-    if errorlevel 1 call npm install --ignore-scripts
-    if errorlevel 1 (
-      echo [ERROR] npm install failed
-      >> "%LOG%" echo error=NPM_INSTALL_FAILED
-      popd
-      goto FAIL
-    )
-  )
-  if not exist ".env" if exist "%REPO_ROOT%\DEPLOY_PIANCIA\PROGETTO_LOCALE\env.plancia-locale.example" (
-    copy /Y "%REPO_ROOT%\DEPLOY_PIANCIA\PROGETTO_LOCALE\env.plancia-locale.example" ".env"
-  )
-  set HOST=127.0.0.1
-  if not defined PORT set PORT=8787
-  if not defined ATLAS_MEMORY_DIR set "ATLAS_MEMORY_DIR=%BACKEND%\data\agentq-memory"
-  if not exist "%ATLAS_MEMORY_DIR%\" mkdir "%ATLAS_MEMORY_DIR%"
-  echo Open http://127.0.0.1:%PORT% after Dashboard listening
-  >> "%LOG%" echo action=npm_start
-  call npm start
-  popd
-)
+if not defined ATLAS_MEMORY_DIR set "ATLAS_MEMORY_DIR=%LOCALAPPDATA%\AtlasPlancia\agentq-memory"
+if not exist "%ATLAS_MEMORY_DIR%\" mkdir "%ATLAS_MEMORY_DIR%" 2>nul
+echo Memory dir: %ATLAS_MEMORY_DIR%
+>> "%LOG%" echo memory=%ATLAS_MEMORY_DIR%
 
-set "ERR=%ERRORLEVEL%"
->> "%LOG%" echo exit_code=%ERR%
-if not "%ERR%"=="0" (
-  echo *** process exited with code %ERR% ***
-  >> "%LOG%" echo error=PROCESS_EXIT_%ERR%
+set "HOST=127.0.0.1"
+if not defined PORT set "PORT=8787"
+
+pushd "%BACKEND%"
+if errorlevel 1 (
+  echo [ERROR] Cannot enter backend folder
+  >> "%LOG%" echo error=PUSHD_BACKEND_FAILED
   goto FAIL
 )
-echo Server process ended.
->> "%LOG%" echo status=SERVER_ENDED
+
+if not exist "node_modules\" (
+  echo Installing dependencies into backend\node_modules ...
+  echo If Accesso negato appears, MOVE the repo to C:\Atlas and retry.
+  call npm ci --ignore-scripts
+  if errorlevel 1 call npm install --ignore-scripts
+  if errorlevel 1 (
+    echo [ERROR] npm install failed - likely OneDrive. Move repo to C:\Atlas\
+    >> "%LOG%" echo error=NPM_INSTALL_FAILED
+    popd
+    goto FAIL
+  )
+)
+
+if not exist ".env" if exist "%REPO_ROOT%\DEPLOY_PIANCIA\PROGETTO_LOCALE\env.plancia-locale.example" (
+  copy /Y "%REPO_ROOT%\DEPLOY_PIANCIA\PROGETTO_LOCALE\env.plancia-locale.example" ".env" >nul 2>&1
+)
+
+echo.
+echo [INFO] LM Studio optional for boot.
+echo Wait for: Dashboard listening
+echo Then open: http://127.0.0.1:%PORT%
+echo.
+>> "%LOG%" echo action=npm_start
+call npm start
+set "ERR=%ERRORLEVEL%"
+popd
+
+>> "%LOG%" echo exit_code=%ERR%
+if not "%ERR%"=="0" (
+  echo *** npm start exited %ERR% ***
+  >> "%LOG%" echo error=NPM_START_%ERR%
+  goto FAIL
+)
+echo Server ended.
+>> "%LOG%" echo status=OK_ENDED
 goto END
 
 :FAIL
 echo.
 echo *** FAILED ***
-echo Read log aloud: %LOG%
+echo Read this log aloud:
+echo   %LOG%
+echo.
+echo Quick fix for Accesso negato:
+echo  1. Move folder to C:\Atlas\ops-Commerce-Dashboard-main
+echo  2. Right-click bat - Properties - Unblock - Apply
+echo  3. Run bat from C:\Atlas\...\AVVIO_PC
 echo.
 >> "%LOG%" echo status=FAILED
-timeout /t 10 >nul
+timeout /t 20
 
 :END
 echo.
 echo Log: %LOG%
-echo.
 pause
