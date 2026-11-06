@@ -177,13 +177,32 @@ function Update-WithZip([string]$Root) {
   return "updated"
 }
 
+function Write-UpdateBanner([string]$Title, [string]$Color) {
+  Write-Host ""
+  Write-Host "============================================================" -ForegroundColor $Color
+  Write-Host " $Title" -ForegroundColor $Color
+  Write-Host "============================================================" -ForegroundColor $Color
+  Write-Host ""
+}
+
+function Write-UpdateLog([string]$Line) {
+  $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+  $text = "[$stamp] $Line"
+  $logA = Join-Path $ScriptDir "last-update.txt"
+  $logB = Join-Path $env:TEMP "plancia-avvio-last-run.txt"
+  try { Add-Content -LiteralPath $logA -Value $text -ErrorAction SilentlyContinue } catch {}
+  try { Add-Content -LiteralPath $logB -Value $text -ErrorAction SilentlyContinue } catch {}
+}
+
 function Ensure-Updated([string]$Root) {
   if ($SkipUpdate) {
     Write-Host "SkipUpdate: nessun controllo aggiornamenti." -ForegroundColor DarkGray
     return
   }
 
+  Write-UpdateBanner "CONTROLLO AGGIORNAMENTO GITHUB (main)" "Cyan"
   Write-Host "Controllo aggiornamenti GitHub ($RepoSlug / $Branch)..." -ForegroundColor Cyan
+  Write-UpdateLog "Controllo aggiornamenti su $Root"
   $result = "skip"
   try {
     $result = Update-WithGit -Root $Root
@@ -191,21 +210,34 @@ function Ensure-Updated([string]$Root) {
       $result = Update-WithZip -Root $Root
     }
   } catch {
-    Write-Host "AVVISO: aggiornamento GitHub non disponibile ($($_.Exception.Message)). Uso i file locali." -ForegroundColor Yellow
+    Write-UpdateBanner "AGGIORNAMENTO FALLITO — uso file locali" "Red"
+    Write-Host "Dettaglio: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "Per riprovare: doppio clic su FORZA-AGGIORNAMENTO.bat" -ForegroundColor Cyan
+    Write-UpdateLog ("FALLITO: " + $_.Exception.Message)
+    Start-Sleep -Seconds 4
     return
   }
 
-  if ($result -ne "updated") {
-    Write-Host "Avvio con i file locali." -ForegroundColor DarkGray
-    return
+  if ($result -eq "updated") {
+    Write-UpdateBanner "AGGIORNAMENTO RIUSCITO" "Green"
+    Write-UpdateLog "RIUSCITO (updated)"
+    $newPs1 = Join-Path $Root "DEPLOY_PIANCIA\AVVIO_PC\start-plancia.ps1"
+    if (-not (Test-Path -LiteralPath $newPs1)) { $newPs1 = Join-Path $ScriptDir "start-plancia.ps1" }
+    Write-Host "Rilancio launcher aggiornato..." -ForegroundColor Cyan
+    $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$newPs1`" -SkipUpdate"
+    Start-Process -FilePath "powershell.exe" -ArgumentList $argList -WorkingDirectory (Split-Path -Parent $newPs1) -Wait
+    exit $LASTEXITCODE
   }
 
-  $newPs1 = Join-Path $Root "DEPLOY_PIANCIA\AVVIO_PC\start-plancia.ps1"
-  if (-not (Test-Path -LiteralPath $newPs1)) { $newPs1 = Join-Path $ScriptDir "start-plancia.ps1" }
-  Write-Host "Rilancio launcher aggiornato..." -ForegroundColor Cyan
-  $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$newPs1`" -SkipUpdate"
-  Start-Process -FilePath "powershell.exe" -ArgumentList $argList -WorkingDirectory (Split-Path -Parent $newPs1) -Wait
-  exit $LASTEXITCODE
+  if ($result -eq "current") {
+    Write-UpdateBanner "GIA' AGGIORNATO — avvio locale" "Green"
+    Write-UpdateLog "GIA AGGIORNATO (current)"
+  } else {
+    Write-UpdateBanner "AGGIORNAMENTO NON ESEGUITO — avvio file locali" "Yellow"
+    Write-Host "Per forzare: doppio clic su FORZA-AGGIORNAMENTO.bat" -ForegroundColor Cyan
+    Write-UpdateLog "NON ESEGUITO (result=$result)"
+    Start-Sleep -Seconds 3
+  }
 }
 
 try {
