@@ -15,3 +15,6 @@ Right: `C:\Users\...\Documents\ops-Commerce-Dashboard\...\DEPLOY_PIANCIA\AVVIO_P
 6. Wait for Dashboard listening → http://127.0.0.1:8787
 
 Needs: full repo with `backend\`, Node 20+. LM Studio optional for boot.
+
+## If the window closes too fast
+Open `last-run.txt` in this same folder and read it aloud. It always records the bat path and the error.
