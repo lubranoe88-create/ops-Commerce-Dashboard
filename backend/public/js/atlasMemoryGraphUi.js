@@ -1,8 +1,6 @@
 /**
- * MEMORY page — permanent full-viewport 3D neural brain (not a popup).
- * Layout inspired by vasturiano/3d-force-graph: force-separated nodes +
- * directional synapse particles, wide top-down camera so every neuron is
- * individually visible (no lobe clustering / no overlapping blobs).
+ * cervello neurale — permanent full-viewport 3D neural brain (not a popup).
+ * Neurons sit on a folded two-hemisphere cortical shell; all synapses kept.
  */
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -113,91 +111,70 @@ function neuronTitle(node, maxLen = 28) {
 }
 
 /**
- * Wide top-down packing (3d-force-graph style):
- * 1) golden-angle sunflower seed on XZ plane — unique slot per neuron
- * 2) link springs pull related pairs slightly
- * 3) strong collision repulsion so nothing stacks into blobs
- * Y stays nearly flat for a readable aerial view.
+ * Humanoid brain silhouette: two hemispheres + folded cortical surface.
+ * Every neuron is kept — only positions change. Mild 3D separation avoids stacks.
  */
-function layoutForceDisk(nodes, edges = []) {
+function layoutBrainShape(nodes, _edges = []) {
   const n = Math.max(nodes.length, 1);
   const points = new Map();
-  // Area scales with N so 100 neurons stay individually countable.
-  const radiusScale = Math.max(4.2, Math.sqrt(n) * 0.95);
+  const scale = Math.max(3.6, Math.sqrt(n) * 0.4);
+  // Brain ellipsoid radii (X lateral, Y superior, Z anterior–posterior)
+  const rx = 1.55;
+  const ry = 1.05;
+  const rz = 1.9;
 
   nodes.forEach((node, index) => {
     const id = String(node.id);
-    const r = radiusScale * Math.sqrt((index + 0.5) / n);
-    const theta = index * GOLDEN_ANGLE + hash01(id) * 0.08;
-    const y = (hash01(`${id}:y`) - 0.5) * 0.18;
-    points.set(id, new THREE.Vector3(Math.cos(theta) * r, y, Math.sin(theta) * r));
+    const h = hash01(id);
+    const h2 = hash01(`${id}:b`);
+    const h3 = hash01(`${id}:c`);
+    const hemi = h < 0.5 ? -1 : 1;
+
+    // Fibonacci sphere seed, then warp into cortical shell
+    const fib = index + 0.5;
+    const y0 = 1 - (2 * fib) / n;
+    const rxy = Math.sqrt(Math.max(0, 1 - y0 * y0));
+    const theta = index * GOLDEN_ANGLE + h * 0.12;
+    let x = Math.cos(theta) * rxy;
+    let z = Math.sin(theta) * rxy;
+    let y = y0;
+
+    // Force left/right hemisphere with longitudinal fissure gap
+    const fissure = 0.14;
+    x = hemi * (Math.abs(x) * 0.92 + fissure + h2 * 0.04);
+
+    // Gyri / sulci folds along the surface
+    const folds =
+      0.1 * Math.sin(x * 9.5 + h * 6) * Math.cos(z * 7.2) +
+      0.07 * Math.sin(z * 11 + y * 5.5) +
+      0.05 * Math.sin((x + z) * 13 + h2 * 4);
+
+    // Temporal lobe drop (lower lateral anterior)
+    const temporal =
+      Math.abs(x) > 0.65 && z > -0.15 && z < 0.9 ? -0.28 * (Math.abs(x) - 0.65) : 0;
+    // Occipital / cerebellar posterior bulge
+    const posterior = z < -0.45 ? -0.12 * (-0.45 - z) + 0.06 * Math.sin(x * 8) : 0;
+
+    const nx = x * (1 + folds * 0.35);
+    const ny = y * (1 + folds * 0.55) + temporal + posterior + folds * 0.45;
+    const nz = z * (1 + folds * 0.28);
+
+    const len = Math.hypot(nx / rx, ny / ry, nz / rz) || 1;
+    points.set(
+      id,
+      new THREE.Vector3(
+        (nx / len) * rx * scale + (h2 - 0.5) * 0.07,
+        (ny / len) * ry * scale * 0.95 + (h3 - 0.5) * 0.05,
+        (nz / len) * rz * scale + (h - 0.5) * 0.07,
+      ),
+    );
   });
 
+  // Soft 3D separation — preserve silhouette, prevent exact overlaps
   const ids = [...points.keys()];
-  const edgeList = (edges || [])
-    .map((e) => [String(e.from), String(e.to)])
-    .filter(([a, b]) => points.has(a) && points.has(b) && a !== b);
-
-  const iterations = Math.min(90, 36 + Math.floor(n / 3));
-  for (let iter = 0; iter < iterations; iter += 1) {
-    const alpha = 1 - iter / iterations;
-    // Collision / charge
-    for (let i = 0; i < ids.length; i += 1) {
-      for (let j = i + 1; j < ids.length; j += 1) {
-        const a = points.get(ids[i]);
-        const b = points.get(ids[j]);
-        const dx = b.x - a.x;
-        const dz = b.z - a.z;
-        const d2 = dx * dx + dz * dz || 0.0001;
-        const d = Math.sqrt(d2);
-        const min = MIN_SEP;
-        if (d < min) {
-          const push = ((min - d) / 2) * (0.55 + 0.45 * alpha);
-          const ux = dx / d;
-          const uz = dz / d;
-          a.x -= ux * push;
-          a.z -= uz * push;
-          b.x += ux * push;
-          b.z += uz * push;
-        } else if (d < min * 2.4) {
-          // Soft charge so the disk breathes open
-          const force = ((0.08 * alpha) / d2) * 0.35;
-          const ux = dx / d;
-          const uz = dz / d;
-          a.x -= ux * force;
-          a.z -= uz * force;
-          b.x += ux * force;
-          b.z += uz * force;
-        }
-      }
-    }
-    // Mild link springs (keep related neurons near, not collapsed)
-    for (const [from, to] of edgeList) {
-      const a = points.get(from);
-      const b = points.get(to);
-      const dx = b.x - a.x;
-      const dz = b.z - a.z;
-      const d = Math.hypot(dx, dz) || 0.0001;
-      const ideal = MIN_SEP * 2.15;
-      const pull = (d - ideal) * 0.012 * alpha;
-      const ux = dx / d;
-      const uz = dz / d;
-      a.x += ux * pull;
-      a.z += uz * pull;
-      b.x -= ux * pull;
-      b.z -= uz * pull;
-    }
-    // Center gravity — keep the whole brain framed
-    for (const id of ids) {
-      const p = points.get(id);
-      p.x *= 1 - 0.008 * alpha;
-      p.z *= 1 - 0.008 * alpha;
-      p.y *= 0.92;
-    }
-  }
-
-  // Final hard separation pass (thousandth-level precision)
-  for (let pass = 0; pass < 12; pass += 1) {
+  const minSep = MIN_SEP * 0.82;
+  for (let pass = 0; pass < 20; pass += 1) {
+    const alpha = 1 - pass / 20;
     for (let i = 0; i < ids.length; i += 1) {
       for (let j = i + 1; j < ids.length; j += 1) {
         const a = points.get(ids[i]);
@@ -206,16 +183,16 @@ function layoutForceDisk(nodes, edges = []) {
         const dy = b.y - a.y;
         const dz = b.z - a.z;
         const d = Math.hypot(dx, dy, dz) || 0.0001;
-        if (d < MIN_SEP) {
-          const push = (MIN_SEP - d) / 2;
+        if (d < minSep) {
+          const push = ((minSep - d) / 2) * (0.35 + 0.65 * alpha);
           const ux = dx / d;
           const uy = dy / d;
           const uz = dz / d;
           a.x -= ux * push;
-          a.y -= uy * push * 0.25;
+          a.y -= uy * push;
           a.z -= uz * push;
           b.x += ux * push;
-          b.y += uy * push * 0.25;
+          b.y += uy * push;
           b.z += uz * push;
         }
       }
@@ -232,13 +209,13 @@ function fitCameraToPoints(camera, controls, points) {
   const center = new THREE.Vector3();
   box.getSize(size);
   box.getCenter(center);
-  const span = Math.max(size.x, size.z, 4);
-  // Initial framing only — never call again after the user has orbited/zoomed.
-  camera.fov = 58;
+  const span = Math.max(size.x, size.y, size.z, 4);
+  // 3/4 view of the brain (not flat top-down)
+  camera.fov = 52;
   camera.near = 0.1;
   camera.far = 400;
-  camera.position.set(center.x, span * 1.15 + 3.2, center.z + span * 0.08);
-  camera.lookAt(center.x, 0, center.z);
+  camera.position.set(center.x + span * 0.85, center.y + span * 0.7, center.z + span * 1.05);
+  camera.lookAt(center.x, center.y, center.z);
   camera.updateProjectionMatrix();
   controls.target.copy(center);
   controls.minDistance = 1.2;
@@ -324,7 +301,7 @@ function setHud(summaryText) {
   const summary = document.getElementById("memoryGraphSummary");
   if (summary) summary.textContent = summaryText;
   const legend = document.getElementById("moduleLegend");
-  if (legend && pageOpen) legend.textContent = "MEMORY · vista dall'alto · drag orbita · scroll zoom";
+  if (legend && pageOpen) legend.textContent = "cervello neurale · drag orbita · scroll zoom";
 }
 
 function disposeRuntime() {
@@ -372,22 +349,7 @@ function buildSceneGraph(live) {
   const edges = graph.edges || [];
   runtime.nodes = nodes;
   runtime.edges = edges;
-  const points = layoutForceDisk(nodes, edges);
-
-  // Subtle ground plane glow (not lobe blobs) so the disk reads as one field.
-  const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(Math.max(6, Math.sqrt(nodes.length) * 1.15), 64),
-    new THREE.MeshBasicMaterial({
-      color: 0x0a2030,
-      transparent: true,
-      opacity: 0.22,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    }),
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -0.12;
-  root.add(floor);
+  const points = layoutBrainShape(nodes, edges);
 
   for (const edge of edges) {
     const a = points.get(String(edge.from));
@@ -635,7 +597,7 @@ export function stopMemoryLivePolling() {
 }
 
 /**
- * Mount the permanent MEMORY page into the main viewport host (glCanvas).
+ * Mount the permanent cervello neurale page into the main viewport host (glCanvas).
  * Caller must clear other engines (Cesium/Three) first.
  */
 export async function mountMemoryBrainPage(container) {
@@ -666,16 +628,17 @@ export async function mountMemoryBrainPage(container) {
   let w = container.clientWidth || 960;
   let h = container.clientHeight || 640;
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x03060c, 0.012);
-  scene.background = new THREE.Color(0x03060c);
-  const camera = new THREE.PerspectiveCamera(58, w / Math.max(h, 1), 0.1, 400);
-  // Start top-down / wide — fitCameraToPoints refines after layout.
-  camera.position.set(0, 14, 0.8);
+  // Solid black backdrop — no fog / starfield atmosphere.
+  scene.fog = null;
+  scene.background = new THREE.Color(0x000000);
+  const camera = new THREE.PerspectiveCamera(52, w / Math.max(h, 1), 0.1, 400);
+  // Start 3/4 view — fitCameraToPoints refines after brain layout.
+  camera.position.set(8, 7, 10);
   camera.lookAt(0, 0, 0);
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
   renderer.setSize(w, h, false);
-  renderer.setClearColor(0x03060c, 1);
+  renderer.setClearColor(0x000000, 1);
   container.appendChild(renderer.domElement);
   Object.assign(renderer.domElement.style, { width: "100%", height: "100%", display: "block" });
 
@@ -707,7 +670,6 @@ export async function mountMemoryBrainPage(container) {
   const rim = new THREE.PointLight(0xb794f6, 0.65, 24);
   rim.position.set(-2.5, 2.2, 3);
   scene.add(key, fill, rim);
-  addStarfield(scene);
 
   const root = new THREE.Group();
   const packetGroup = new THREE.Group();

@@ -52,7 +52,7 @@ import {
   mountMemoryBrainPage,
   unmountMemoryBrainPage,
   wireMemoryGraphUi,
-} from "./atlasMemoryGraphUi.js?v=rail-44-memory-still";
+} from "./atlasMemoryGraphUi.js?v=rail-45-cervello";
 import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-44-memory-still";
 import { VOICE_DUPLEX, reduceCall, shouldYieldToCall, wakeWordStatus } from "./atlasCall.js?v=rail-44-memory-still";
 import {
@@ -2157,7 +2157,7 @@ function runHoloAction(action, opts = {}) {
     case "grafo": {
       return showModule("memory").then(() => {
         syncHoloActive("memory");
-        showToast(`MEMORY · ${src}`);
+        showToast(`cervello neurale · ${src}`);
       });
     }
     case "status":
@@ -2506,7 +2506,7 @@ function sideForModule(mod, snap) {
       });
     }
   } else if (mod === "memory") {
-    title.textContent = "MEMORY · neuroni";
+    title.textContent = "cervello neurale · neuroni";
     const hint = document.createElement("div");
     hint.className = "card muted";
     hint.textContent = "Pagina fissa 3D: drag ruota, scroll zoom, impulsi live sulle sinapsi. Click su un neurone qui o nello spazio.";
@@ -2778,7 +2778,7 @@ async function showModule(mod, opts = {}) {
           }
         }
       } else if (mod === "memory") {
-        $("moduleLegend").textContent = "MEMORY · cervello neurale 3D · drag / scroll";
+        $("moduleLegend").textContent = "cervello neurale · 3D · drag / scroll";
         // Permanent Memory page: own Three.js brain (replaces old 5D concept hologram).
         await mountMemoryBrainPage(gl);
         if (!stillCurrent(epoch, mod)) {

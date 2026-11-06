@@ -2172,9 +2172,7 @@ body[data-module="map"] #app.clear-globe-layout #glCanvas {
   pointer-events: none;
 }
 body.memory-page-active .gl-host {
-  background:
-    radial-gradient(ellipse 55% 45% at 50% 48%, rgba(30, 90, 130, 0.22), transparent 70%),
-    #03060c;
+  background: #000000;
 }
 body.memory-page-active .overlay-hud--minimal {
   opacity: 0.55;
