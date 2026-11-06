@@ -1,5 +1,5 @@
-# Plancia locale launcher (Windows). Solo file locali — nessun GitHub / rete.
-# Double-click start-plancia.bat oppure icona Desktop "Plancia".
+# Plancia locale — solo PC. Nessuna rete / aggiornamento remoto.
+# Doppio clic su start-plancia.bat oppure icona Desktop "Plancia".
 $ErrorActionPreference = "Stop"
 
 function Wait-Key([string]$Message, [string]$Color = "Yellow") {
@@ -18,26 +18,34 @@ function Fail([string]$Message) {
 }
 
 function Find-RepoRoot([string]$StartDir) {
+  $candidates = New-Object System.Collections.Generic.List[string]
   $dir = $StartDir
   for ($i = 0; $i -lt 8; $i++) {
-    if (Test-Path -LiteralPath (Join-Path $dir "backend\package.json")) { return $dir }
+    [void]$candidates.Add($dir)
     $parent = Split-Path -Parent $dir
     if (-not $parent -or $parent -eq $dir) { break }
     $dir = $parent
+  }
+  foreach ($extra in @("C:\Atlas", "C:\Atlas\ops-Commerce-Dashboard", "C:\Atlas\ops-Commerce-Dashboard-main")) {
+    if (Test-Path -LiteralPath $extra) { [void]$candidates.Add($extra) }
+  }
+  foreach ($c in $candidates) {
+    if (Test-Path -LiteralPath (Join-Path $c "backend\package.json")) { return $c }
   }
   return $null
 }
 
 function Ensure-DesktopShortcut([string]$AvvioDir) {
   $bat = Join-Path $AvvioDir "start-plancia.bat"
-  if (-not (Test-Path -LiteralPath $bat)) {
-    Write-Host "AVVISO: start-plancia.bat non trovato, shortcut Desktop saltata." -ForegroundColor Yellow
-    return
-  }
+  if (-not (Test-Path -LiteralPath $bat)) { return }
   try {
     $desktop = [Environment]::GetFolderPath("Desktop")
     if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE "Desktop" }
     $lnkPath = Join-Path $desktop "Plancia.lnk"
+    if (Test-Path -LiteralPath $lnkPath) {
+      Write-Host "Icona Desktop gia' presente: $lnkPath" -ForegroundColor DarkGray
+      return
+    }
     $w = New-Object -ComObject WScript.Shell
     $s = $w.CreateShortcut($lnkPath)
     $s.TargetPath = $bat
@@ -46,9 +54,9 @@ function Ensure-DesktopShortcut([string]$AvvioDir) {
     $s.Description = "Atlas Plancia Locale (solo PC)"
     $s.IconLocation = "$env:SystemRoot\System32\shell32.dll,14"
     $s.Save()
-    Write-Host "Icona Desktop: $lnkPath" -ForegroundColor Green
+    Write-Host "Creata icona Desktop: $lnkPath" -ForegroundColor Green
   } catch {
-    Write-Host "AVVISO: impossibile creare icona Desktop: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "AVVISO: icona Desktop non creata: $($_.Exception.Message)" -ForegroundColor Yellow
   }
 }
 
@@ -56,7 +64,6 @@ try {
   $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
   Set-Location -LiteralPath $ScriptDir
 
-  # Self-elevate
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
   $principal = New-Object Security.Principal.WindowsPrincipal($identity)
   if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -67,53 +74,48 @@ try {
       Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $argList -WorkingDirectory $ScriptDir | Out-Null
       exit 0
     } catch {
-      Fail "Impossibile elevare i privilegi. Tasto destro su start-plancia.bat -> Esegui come amministratore. Dettaglio: $($_.Exception.Message)"
+      Fail "Impossibile elevare i privilegi. Tasto destro su start-plancia.bat -> Esegui come amministratore."
     }
   }
 
   Write-Host "============================================================"
-  Write-Host " Atlas Plancia Locale (solo C:\Atlas — nessuna rete)"
+  Write-Host " Atlas Plancia Locale — SOLO PC (nessuna rete)"
   Write-Host " Cartella: $ScriptDir"
   Write-Host "============================================================"
   Write-Host ""
 
+  # Sblocca Mark-of-the-Web su tutti i file in questa cartella
   Get-ChildItem -LiteralPath $ScriptDir -File -ErrorAction SilentlyContinue | ForEach-Object {
     try { Unblock-File -LiteralPath $_.FullName -ErrorAction SilentlyContinue } catch {}
   }
 
   if ($ScriptDir -match '(?i)\\Temp\\|AppData\\Local\\Temp|\.zip') {
-    Fail "Stai eseguendo da TEMP/ZIP. Usa la copia in C:\Atlas\ops-Commerce-Dashboard-main\DEPLOY_PIANCIA\AVVIO_PC."
+    Fail "Esecuzione da TEMP/ZIP. Copia i file in C:\Atlas\DEPLOY_PIANCIA\AVVIO_PC e rilancia da li."
   }
 
   $Root = Find-RepoRoot $ScriptDir
   if (-not $Root) {
-    Fail "backend\package.json non trovato. Serve il progetto completo sotto C:\Atlas (non solo AVVIO_PC)."
+    Fail "backend\package.json non trovato. Metti il progetto completo sotto C:\Atlas (con cartella backend) oppure C:\Atlas\ops-Commerce-Dashboard-main."
   }
 
   $avvioDir = Join-Path $Root "DEPLOY_PIANCIA\AVVIO_PC"
-  if (-not (Test-Path -LiteralPath $avvioDir)) { $avvioDir = $ScriptDir }
+  if (-not (Test-Path -LiteralPath (Join-Path $avvioDir "start-plancia.bat"))) { $avvioDir = $ScriptDir }
   Ensure-DesktopShortcut -AvvioDir $avvioDir
 
   $Backend = Join-Path $Root "backend"
-  Write-Host "Repo:    $Root"
-  Write-Host "Backend: $Backend"
+  Write-Host "Progetto: $Root"
+  Write-Host "Backend:  $Backend"
+  Write-Host "PROGETTO_LOCALE (docs/env): $(Join-Path $Root 'DEPLOY_PIANCIA\PROGETTO_LOCALE')"
   Write-Host ""
 
-  $node = Get-Command node -ErrorAction SilentlyContinue
-  $npm = Get-Command npm -ErrorAction SilentlyContinue
-  if (-not $node) {
-    Fail "Node.js non e' nel PATH. Installa Node 20 LTS da https://nodejs.org (Add to PATH), riavvia il PC, rilancia."
+  if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    Fail "Node.js non e' nel PATH. Installa Node 20 LTS da https://nodejs.org (spunta Add to PATH), riavvia il PC, poi rilancia."
   }
-  if (-not $npm) {
+  if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     Fail "npm non e' nel PATH. Reinstalla Node da https://nodejs.org e riavvia il PC."
   }
   Write-Host "Node: $(node -v)   npm: $(npm -v)"
   Write-Host ""
-
-  if ($ScriptDir -match '(?i)OneDrive|\\Documents\\') {
-    Write-Host "AVVISO: Documents/OneDrive. Preferisci C:\Atlas per evitare Accesso negato." -ForegroundColor Yellow
-    Write-Host ""
-  }
 
   if (-not $env:ATLAS_MEMORY_DIR) {
     $env:ATLAS_MEMORY_DIR = Join-Path $env:LOCALAPPDATA "AtlasPlancia\agentq-memory"
@@ -129,12 +131,12 @@ try {
   Set-Location -LiteralPath $Backend
 
   if (-not (Test-Path -LiteralPath "node_modules")) {
-    Write-Host "Installazione dipendenze locali (npm ci --ignore-scripts)..." -ForegroundColor Cyan
+    Write-Host "Installazione dipendenze locali..." -ForegroundColor Cyan
     npm ci --ignore-scripts
     if ($LASTEXITCODE -ne 0) {
       npm install --ignore-scripts
       if ($LASTEXITCODE -ne 0) {
-        Fail "npm install non riuscito. Sposta il progetto in C:\Atlas e riprova."
+        Fail "npm install non riuscito. Verifica che la cartella backend sia completa sotto C:\Atlas."
       }
     }
   }
@@ -142,7 +144,7 @@ try {
   $envExample = Join-Path $Root "DEPLOY_PIANCIA\PROGETTO_LOCALE\env.plancia-locale.example"
   if ((-not (Test-Path -LiteralPath ".env")) -and (Test-Path -LiteralPath $envExample)) {
     Copy-Item -LiteralPath $envExample -Destination ".env" -Force
-    Write-Host "Creato backend\.env — modifica SITE_PASSWORD se serve." -ForegroundColor Yellow
+    Write-Host "Creato backend\.env da PROGETTO_LOCALE — modifica SITE_PASSWORD se serve." -ForegroundColor Yellow
   }
 
   Write-Host ""
