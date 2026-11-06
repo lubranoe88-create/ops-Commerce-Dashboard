@@ -1,4 +1,5 @@
-# Aggiorna Plancia da GitHub main. Messaggi chiari in italiano (niente silenzio).
+﻿# Aggiorna Plancia da GitHub main. Messaggi chiari in italiano (niente silenzio).
+# ASCII-only strings: Windows PowerShell 5.1 breaks on UTF-8 em-dashes / fancy quotes.
 param(
   [switch]$Interactive
 )
@@ -29,24 +30,23 @@ function Show-Banner([string]$Title, [string]$Color) {
 }
 
 function Resolve-Install {
-  # 1) Portable pack: ...\Plancia-Locale\ with app\backend
   $packApp = Join-Path $ScriptDir "app\backend\package.json"
   if (Test-Path -LiteralPath $packApp) {
     return [pscustomobject]@{
-      Kind = "pack"
-      Root = $ScriptDir
-      Dest = (Join-Path $ScriptDir "app")
+      Kind  = "pack"
+      Root  = $ScriptDir
+      Dest  = (Join-Path $ScriptDir "app")
       Stamp = (Join-Path $ScriptDir ".plancia-commit")
     }
   }
-  # 2) Script inside DEPLOY_PIANCIA\AVVIO_PC → climb to repo root
+
   $dir = $ScriptDir
   for ($i = 0; $i -lt 8; $i++) {
     if (Test-Path -LiteralPath (Join-Path $dir "backend\package.json")) {
       return [pscustomobject]@{
-        Kind = "repo"
-        Root = $dir
-        Dest = $dir
+        Kind  = "repo"
+        Root  = $dir
+        Dest  = $dir
         Stamp = (Join-Path $dir ".plancia-commit")
       }
     }
@@ -54,20 +54,21 @@ function Resolve-Install {
     if (-not $parent -or $parent -eq $dir) { break }
     $dir = $parent
   }
+
   foreach ($extra in @("C:\Atlas\ops-Commerce-Dashboard", "C:\Atlas\ops-Commerce-Dashboard-main", "C:\Atlas")) {
     if (Test-Path -LiteralPath (Join-Path $extra "backend\package.json")) {
       return [pscustomobject]@{
-        Kind = "repo"
-        Root = $extra
-        Dest = $extra
+        Kind  = "repo"
+        Root  = $extra
+        Dest  = $extra
         Stamp = (Join-Path $extra ".plancia-commit")
       }
     }
     if (Test-Path -LiteralPath (Join-Path $extra "app\backend\package.json")) {
       return [pscustomobject]@{
-        Kind = "pack"
-        Root = $extra
-        Dest = (Join-Path $extra "app")
+        Kind  = "pack"
+        Root  = $extra
+        Dest  = (Join-Path $extra "app")
         Stamp = (Join-Path $extra ".plancia-commit")
       }
     }
@@ -98,18 +99,26 @@ try {
   Write-Log ("Tipo installazione: " + $install.Kind)
   Write-Log ("Destinazione: " + $install.Dest)
 
-  $headers = @{ "User-Agent" = "plancia-forza-aggiornamento"; "Accept" = "application/vnd.github+json" }
+  $headers = @{
+    "User-Agent" = "plancia-forza-aggiornamento"
+    "Accept"     = "application/vnd.github+json"
+  }
   Write-Log "Controllo commit su GitHub main..."
   $sha = [string](Invoke-RestMethod -Uri "https://api.github.com/repos/$RepoSlug/commits/$Branch" -Headers $headers -TimeoutSec 30).sha
   if (-not $sha) { throw "SHA remoto assente" }
   Write-Log "Commit remoto: $sha"
 
-  $prev = if (Test-Path -LiteralPath $install.Stamp) { (Get-Content -LiteralPath $install.Stamp -Raw).Trim() } else { "" }
-  if ($Interactive -and $prev -eq $sha) {
-    Write-Log "Gia' al commit corrente — forzo comunque il download perche' hai chiesto FORZA-AGGIORNAMENTO."
-  } elseif (-not $Interactive -and $prev -eq $sha) {
-    Show-Banner "GIA' AGGIORNATO" "Green"
-    Write-Log "Nessun download: locale gia' = $sha"
+  $prev = ""
+  if (Test-Path -LiteralPath $install.Stamp) {
+    $prev = (Get-Content -LiteralPath $install.Stamp -Raw).Trim()
+  }
+
+  if ($Interactive -and ($prev -eq $sha)) {
+    Write-Log "Gia al commit corrente - forzo comunque il download (FORZA-AGGIORNAMENTO)."
+  }
+  elseif ((-not $Interactive) -and ($prev -eq $sha)) {
+    Show-Banner "GIA AGGIORNATO" "Green"
+    Write-Log "Nessun download: locale gia = $sha"
     Write-Host "Puoi aprire la plancia normalmente." -ForegroundColor Green
     exit 0
   }
@@ -117,7 +126,7 @@ try {
   $tmp = Join-Path $env:TEMP ("plancia-force-" + [guid]::NewGuid().ToString("n"))
   New-Item -ItemType Directory -Force -Path $tmp | Out-Null
   $zip = Join-Path $tmp "main.zip"
-  Write-Log "Download ZIP main in corso (puo' richiedere un minuto)..."
+  Write-Log "Download ZIP main in corso (puo richiedere un minuto)..."
   Invoke-WebRequest -Uri "https://api.github.com/repos/$RepoSlug/zipball/$Branch" -Headers $headers -OutFile $zip -TimeoutSec 600
   Write-Log "Estrazione ZIP..."
   Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
@@ -141,7 +150,9 @@ try {
 
   if ($null -ne $envBackup) {
     $bd = Join-Path $install.Dest "backend"
-    if (-not (Test-Path -LiteralPath $bd)) { New-Item -ItemType Directory -Force -Path $bd | Out-Null }
+    if (-not (Test-Path -LiteralPath $bd)) {
+      New-Item -ItemType Directory -Force -Path $bd | Out-Null
+    }
     Set-Content -LiteralPath $envPath -Value $envBackup -NoNewline
     Write-Log "Conservato backend\.env locale."
   }
@@ -156,8 +167,9 @@ try {
   }
   if ($hasBrain) {
     Write-Log "Verifica OK: trovato cervello neurale / layoutBrainShape nel file aggiornato."
-  } else {
-    Write-Log "AVVISO: file aggiornato ma layoutBrainShape non trovato — controlla il percorso."
+  }
+  else {
+    Write-Log "AVVISO: file aggiornato ma layoutBrainShape non trovato - controlla il percorso."
   }
 
   Show-Banner "AGGIORNAMENTO RIUSCITO" "Green"
@@ -174,8 +186,8 @@ try {
 catch {
   Show-Banner "AGGIORNAMENTO FALLITO" "Red"
   Write-Log ("ERRORE: " + $_.Exception.Message)
-  Write-Host "La plancia usera' i file locali vecchi finche' l'aggiornamento non riesce." -ForegroundColor Yellow
-  Write-Host "Serve internet. Se il repo e' privato, serve accesso GitHub." -ForegroundColor Yellow
+  Write-Host "La plancia usera i file locali vecchi finche l aggiornamento non riesce." -ForegroundColor Yellow
+  Write-Host "Serve internet. Se il repo e privato, serve accesso GitHub." -ForegroundColor Yellow
   Write-Host ("Log: " + $LogFile) -ForegroundColor DarkGray
   Write-Host ("Log: " + $TempLog) -ForegroundColor DarkGray
   if ($Interactive) {

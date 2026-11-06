@@ -79,7 +79,7 @@ function Get-RemoteMainSha {
   return [string]$resp.sha
 }
 
-# Returns: "updated" | "current" | "skip" (try next method) | never throws for network — caller wraps ZIP.
+# Returns: "updated" | "current" | "skip" (try next method) | never throws for network - caller wraps ZIP.
 function Update-WithGit([string]$Root) {
   if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return "skip" }
   if (-not (Test-Path -LiteralPath (Join-Path $Root ".git"))) { return "skip" }
@@ -119,7 +119,7 @@ function Update-WithGit([string]$Root) {
   }
 }
 
-# Returns: "updated" | "current" — throws on network/download failure (caller soft-fails).
+# Returns: "updated" | "current" - throws on network/download failure (caller soft-fails).
 function Update-WithZip([string]$Root) {
   Write-Host "Aggiornamento via ZIP GitHub..." -ForegroundColor Cyan
   $sha = Get-RemoteMainSha
@@ -210,7 +210,7 @@ function Ensure-Updated([string]$Root) {
       $result = Update-WithZip -Root $Root
     }
   } catch {
-    Write-UpdateBanner "AGGIORNAMENTO FALLITO — uso file locali" "Red"
+    Write-UpdateBanner "AGGIORNAMENTO FALLITO - uso file locali" "Red"
     Write-Host "Dettaglio: $($_.Exception.Message)" -ForegroundColor Yellow
     Write-Host "Per riprovare: doppio clic su FORZA-AGGIORNAMENTO.bat" -ForegroundColor Cyan
     Write-UpdateLog ("FALLITO: " + $_.Exception.Message)
@@ -230,10 +230,10 @@ function Ensure-Updated([string]$Root) {
   }
 
   if ($result -eq "current") {
-    Write-UpdateBanner "GIA' AGGIORNATO — avvio locale" "Green"
+    Write-UpdateBanner "GIA' AGGIORNATO - avvio locale" "Green"
     Write-UpdateLog "GIA AGGIORNATO (current)"
   } else {
-    Write-UpdateBanner "AGGIORNAMENTO NON ESEGUITO — avvio file locali" "Yellow"
+    Write-UpdateBanner "AGGIORNAMENTO NON ESEGUITO - avvio file locali" "Yellow"
     Write-Host "Per forzare: doppio clic su FORZA-AGGIORNAMENTO.bat" -ForegroundColor Cyan
     Write-UpdateLog "NON ESEGUITO (result=$result)"
     Start-Sleep -Seconds 3
@@ -261,7 +261,7 @@ try {
   }
 
   Write-Host "============================================================"
-  Write-Host " Atlas Plancia Locale — auto-update GitHub + avvio"
+  Write-Host " Atlas Plancia Locale - auto-update GitHub + avvio"
   Write-Host " Cartella: $ScriptDir"
   Write-Host "============================================================"
   Write-Host ""
@@ -327,7 +327,7 @@ try {
   $envExample = Join-Path $Root "DEPLOY_PIANCIA\PROGETTO_LOCALE\env.plancia-locale.example"
   if ((-not (Test-Path -LiteralPath ".env")) -and (Test-Path -LiteralPath $envExample)) {
     Copy-Item -LiteralPath $envExample -Destination ".env" -Force
-    Write-Host "Creato backend\.env da PROGETTO_LOCALE — modifica SITE_PASSWORD se serve." -ForegroundColor Yellow
+    Write-Host "Creato backend\.env da PROGETTO_LOCALE - modifica SITE_PASSWORD se serve." -ForegroundColor Yellow
   }
 
   Write-Host ""
