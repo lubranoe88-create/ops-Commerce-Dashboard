@@ -52,7 +52,7 @@ import {
   mountMemoryBrainPage,
   unmountMemoryBrainPage,
   wireMemoryGraphUi,
-} from "./atlasMemoryGraphUi.js?v=rail-45-cervello";
+} from "./atlasMemoryGraphUi.js?v=rail-46-lagfix";
 import { normalizeSpeakText } from "./atlasSpeak.js?v=rail-44-memory-still";
 import { VOICE_DUPLEX, reduceCall, shouldYieldToCall, wakeWordStatus } from "./atlasCall.js?v=rail-44-memory-still";
 import {

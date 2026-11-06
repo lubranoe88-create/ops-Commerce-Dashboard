@@ -5,8 +5,11 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-const POLL_MS = 2000;
+/** Live poll: slow on purpose — each spawn used to keep a 27k-line RAF loop alive. */
+const POLL_MS = 20000;
 const FETCH_LIMIT = 500;
+const MAX_PACKETS = 8;
+const EDGE_CURVE_POINTS = 8;
 /** Minimum center-to-center gap so N neurons stay countable and non-overlapping. */
 const MIN_SEP = 0.72;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -351,6 +354,8 @@ function buildSceneGraph(live) {
   runtime.edges = edges;
   const points = layoutBrainShape(nodes, edges);
 
+  // One LineSegments mesh for all synapses (keeps every edge visible, ~1 draw call).
+  const segPositions = [];
   for (const edge of edges) {
     const a = points.get(String(edge.from));
     const b = points.get(String(edge.to));
@@ -359,21 +364,29 @@ function buildSceneGraph(live) {
     const mid = a.clone().lerp(b, 0.5);
     mid.y += 0.12 + hash01(key) * 0.22;
     const curve = new THREE.QuadraticBezierCurve3(a, mid, b);
-    const pts = curve.getPoints(20);
-    const geo = new THREE.BufferGeometry().setFromPoints(pts);
-    const recall = String(edge.reason || "").startsWith("recall:");
-    const line = new THREE.Line(
-      geo,
-      new THREE.LineBasicMaterial({
-        color: recall ? 0x9ad8ff : 0x3a7088,
-        transparent: true,
-        opacity: recall ? 0.38 : 0.2,
-      }),
-    );
-    line.userData = { key, kind: "edge" };
-    root.add(line);
-    runtime.edgeCurves.push({ curve, key, line });
+    const pts = curve.getPoints(EDGE_CURVE_POINTS);
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      segPositions.push(pts[i].x, pts[i].y, pts[i].z, pts[i + 1].x, pts[i + 1].y, pts[i + 1].z);
+    }
+    runtime.edgeCurves.push({ curve, key });
     if (!edgeHealth.has(key)) edgeHealth.set(key, { lastPulse: Date.now(), alive: true });
+  }
+  if (segPositions.length) {
+    const edgeGeo = new THREE.BufferGeometry();
+    edgeGeo.setAttribute("position", new THREE.Float32BufferAttribute(segPositions, 3));
+    const edgeMat = new THREE.LineBasicMaterial({
+      color: 0x5eb0c8,
+      transparent: true,
+      opacity: 0.28,
+      depthWrite: false,
+    });
+    const edgeMesh = new THREE.LineSegments(edgeGeo, edgeMat);
+    edgeMesh.frustumCulled = false;
+    edgeMesh.userData = { kind: "edge-batch" };
+    root.add(edgeMesh);
+    runtime.edgeMesh = edgeMesh;
+  } else {
+    runtime.edgeMesh = null;
   }
 
   for (const node of nodes) {
@@ -444,23 +457,27 @@ function buildSceneGraph(live) {
       .join(" · "),
   );
 
-  spawnPackets(10);
+  // Tiny optional burst on full rebuild only — not on every poll (that kept RAF spinning).
+  spawnPackets(2);
   if (selectedId && nodeById.has(selectedId)) focusNeuron(selectedId, { toast: false });
   if (runtime) runtime.needsMaterialSync = true;
   requestRender();
 }
 
-function spawnPackets(burst = 6) {
+function spawnPackets(burst = 2) {
   if (!runtime?.edgeCurves?.length) return;
+  const room = Math.max(0, MAX_PACKETS - packets.length);
+  const n = Math.min(burst, room);
+  if (n <= 0) return;
   const pick = [...runtime.edgeCurves]
     .sort(() => hash01(String(Date.now() + Math.random())) - 0.5)
-    .slice(0, burst);
+    .slice(0, n);
   for (const edge of pick) {
     const health = edgeHealth.get(edge.key);
     const failed = health ? !health.alive : false;
     const color = failed ? 0xff5555 : 0xd8f7ff;
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.035, 10, 10),
+      new THREE.SphereGeometry(0.03, 8, 8),
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }),
     );
     runtime.packetGroup.add(mesh);
@@ -468,18 +485,10 @@ function spawnPackets(burst = 6) {
       mesh,
       curve: edge.curve,
       t: 0,
-      speed: 0.28 + hash01(edge.key) * 0.45,
+      speed: 0.35 + hash01(edge.key) * 0.4,
       failed,
       key: edge.key,
     });
-  }
-  if (packets.length > 56) {
-    const drop = packets.splice(0, packets.length - 56);
-    for (const p of drop) {
-      runtime.packetGroup.remove(p.mesh);
-      p.mesh.geometry.dispose();
-      p.mesh.material.dispose();
-    }
   }
   requestRender();
 }
@@ -503,13 +512,11 @@ function syncNeuronPulses() {
 }
 
 function syncEdgeMaterials() {
-  if (!runtime) return;
-  for (const { key, line } of runtime.edgeCurves) {
-    const h = edgeHealth.get(key);
-    const dead = !lastFetchOk || (h && !h.alive);
-    line.material.opacity = dead ? 0.12 : 0.32;
-    line.material.color.set(dead ? 0x556066 : 0x5eb0c8);
-  }
+  if (!runtime?.edgeMesh?.material) return;
+  const anyDead = !lastFetchOk || [...edgeHealth.values()].some((h) => h && !h.alive);
+  runtime.edgeMesh.material.opacity = anyDead ? 0.14 : 0.28;
+  runtime.edgeMesh.material.color.set(anyDead ? 0x556066 : 0x5eb0c8);
+  runtime.edgeMesh.material.needsUpdate = true;
 }
 
 function requestRender() {
@@ -606,7 +613,20 @@ export async function refreshMemoryGraph({ force = false } = {}) {
     lastFetchOk = true;
     const changed = force || !live.revision || live.revision !== lastRevision;
     if (!changed) {
-      spawnPackets(4);
+      // Idle poll: update HUD only — do NOT spawn packets (avoids continuous 27k-line redraw).
+      if (runtime) {
+        const dead = [...edgeHealth.values()].filter((h) => !h.alive).length;
+        setHud(
+          [
+            `${runtime.nodes.length} neuroni`,
+            `${runtime.edges.length} sinapsi`,
+            "flusso live",
+            dead ? `${dead} archi spenti` : null,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        );
+      }
       return live;
     }
     lastRevision = live.revision || "";
@@ -629,7 +649,8 @@ export function startMemoryLivePolling(intervalMs = POLL_MS) {
   stopMemoryLivePolling();
   pollTimer = setInterval(() => {
     if (!pageOpen) return;
-    refreshMemoryGraph().catch((err) => console.warn("[memory-live]", err?.message || err));
+    // Non-blocking: fire-and-forget; never spawn animation on quiet polls.
+    void refreshMemoryGraph().catch((err) => console.warn("[memory-live]", err?.message || err));
   }, intervalMs);
 }
 
@@ -678,7 +699,8 @@ export async function mountMemoryBrainPage(container) {
   camera.position.set(8, 7, 10);
   camera.lookAt(0, 0, 0);
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+  // Cap DPR — 27k synapses are heavy; 1.5 is enough on retina without melting the GPU.
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.setSize(w, h, false);
   renderer.setClearColor(0x000000, 1);
   container.appendChild(renderer.domElement);
@@ -765,6 +787,7 @@ export async function mountMemoryBrainPage(container) {
     nodeById: new Map(),
     labelById: new Map(),
     edgeCurves: [],
+    edgeMesh: null,
     nodes: [],
     edges: [],
     container,
