@@ -1,6 +1,15 @@
-# Plancia locale — solo PC. Nessuna rete / aggiornamento remoto.
-# Doppio clic su start-plancia.bat oppure icona Desktop "Plancia".
+# Plancia locale launcher (Windows).
+# Controlla GitHub main, aggiorna se serve, poi avvia. Se la rete fallisce, usa i file locali.
+# Doppio clic su AVVIA-PLANCIA.bat / start-plancia.bat oppure icona Desktop "Plancia".
+param(
+  [switch]$SkipUpdate
+)
+
 $ErrorActionPreference = "Stop"
+$RepoSlug = "lubranoe88-create/ops-Commerce-Dashboard"
+$RepoHttps = "https://github.com/$RepoSlug.git"
+$Branch = "main"
+$PreferredRoot = "C:\Atlas\ops-Commerce-Dashboard"
 
 function Wait-Key([string]$Message, [string]$Color = "Yellow") {
   Write-Host ""
@@ -13,7 +22,7 @@ function Wait-Key([string]$Message, [string]$Color = "Yellow") {
 function Fail([string]$Message) {
   Write-Host ""
   Write-Host "ERRORE: $Message" -ForegroundColor Red
-  Wait-Key "Sistemato il problema, richiudi e rilancia start-plancia.bat (o l'icona Plancia)." "Yellow"
+  Wait-Key "Sistemato il problema, richiudi e rilancia AVVIA-PLANCIA.bat (o l'icona Plancia)." "Yellow"
   exit 1
 }
 
@@ -36,28 +45,167 @@ function Find-RepoRoot([string]$StartDir) {
 }
 
 function Ensure-DesktopShortcut([string]$AvvioDir) {
-  $bat = Join-Path $AvvioDir "start-plancia.bat"
+  $bat = Join-Path $AvvioDir "AVVIA-PLANCIA.bat"
+  if (-not (Test-Path -LiteralPath $bat)) { $bat = Join-Path $AvvioDir "start-plancia.bat" }
   if (-not (Test-Path -LiteralPath $bat)) { return }
   try {
     $desktop = [Environment]::GetFolderPath("Desktop")
     if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE "Desktop" }
     $lnkPath = Join-Path $desktop "Plancia.lnk"
-    if (Test-Path -LiteralPath $lnkPath) {
-      Write-Host "Icona Desktop gia' presente: $lnkPath" -ForegroundColor DarkGray
-      return
-    }
     $w = New-Object -ComObject WScript.Shell
     $s = $w.CreateShortcut($lnkPath)
     $s.TargetPath = $bat
     $s.WorkingDirectory = $AvvioDir
     $s.WindowStyle = 1
-    $s.Description = "Atlas Plancia Locale (solo PC)"
+    $s.Description = "Atlas Plancia Locale (auto-update GitHub)"
     $s.IconLocation = "$env:SystemRoot\System32\shell32.dll,14"
     $s.Save()
-    Write-Host "Creata icona Desktop: $lnkPath" -ForegroundColor Green
+    Write-Host "Icona Desktop: $lnkPath" -ForegroundColor Green
   } catch {
     Write-Host "AVVISO: icona Desktop non creata: $($_.Exception.Message)" -ForegroundColor Yellow
   }
+}
+
+function Get-GhHeaders {
+  $headers = @{ "User-Agent" = "plancia-avvio"; "Accept" = "application/vnd.github+json" }
+  if ($env:PLANCIA_GH_TOKEN) { $headers["Authorization"] = "Bearer $($env:PLANCIA_GH_TOKEN)" }
+  elseif ($env:GH_TOKEN) { $headers["Authorization"] = "Bearer $($env:GH_TOKEN)" }
+  return $headers
+}
+
+function Get-RemoteMainSha {
+  $url = "https://api.github.com/repos/$RepoSlug/commits/$Branch"
+  $resp = Invoke-RestMethod -Uri $url -Headers (Get-GhHeaders) -TimeoutSec 20
+  return [string]$resp.sha
+}
+
+# Returns: "updated" | "current" | "skip" (try next method) | never throws for network — caller wraps ZIP.
+function Update-WithGit([string]$Root) {
+  if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return "skip" }
+  if (-not (Test-Path -LiteralPath (Join-Path $Root ".git"))) { return "skip" }
+
+  Push-Location -LiteralPath $Root
+  try {
+    Write-Host "Aggiornamento via git (origin/$Branch)..." -ForegroundColor Cyan
+    git fetch origin $Branch 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "AVVISO: git fetch non riuscito. Provo ZIP o file locali." -ForegroundColor Yellow
+      return "skip"
+    }
+    $local = (git rev-parse HEAD).Trim()
+    $remote = (git rev-parse "origin/$Branch").Trim()
+    Write-Host "Locale:  $local"
+    Write-Host "Remoto:  $remote"
+    if ($local -eq $remote) {
+      Write-Host "Gia' aggiornato." -ForegroundColor Green
+      $stampFile = Join-Path $Root ".plancia-commit"
+      Set-Content -LiteralPath $stampFile -Value $local -NoNewline
+      return "current"
+    }
+    git pull --ff-only origin $Branch 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "AVVISO: git pull non riuscito. Provo ZIP o file locali." -ForegroundColor Yellow
+      return "skip"
+    }
+    $head = (git rev-parse HEAD).Trim()
+    Set-Content -LiteralPath (Join-Path $Root ".plancia-commit") -Value $head -NoNewline
+    Write-Host "Aggiornamento git completato." -ForegroundColor Green
+    return "updated"
+  } catch {
+    Write-Host "AVVISO: git update fallito ($($_.Exception.Message))." -ForegroundColor Yellow
+    return "skip"
+  } finally {
+    Pop-Location
+  }
+}
+
+# Returns: "updated" | "current" — throws on network/download failure (caller soft-fails).
+function Update-WithZip([string]$Root) {
+  Write-Host "Aggiornamento via ZIP GitHub..." -ForegroundColor Cyan
+  $sha = Get-RemoteMainSha
+  if (-not $sha) { throw "SHA remoto assente" }
+
+  $stampFile = Join-Path $Root ".plancia-commit"
+  $localSha = if (Test-Path -LiteralPath $stampFile) { (Get-Content -LiteralPath $stampFile -Raw).Trim() } else { "" }
+  if ($localSha -and $localSha -eq $sha) {
+    Write-Host "Gia' aggiornato (SHA $sha)." -ForegroundColor Green
+    return "current"
+  }
+
+  $zipUrl = "https://api.github.com/repos/$RepoSlug/zipball/$Branch"
+  $tmpDir = Join-Path $env:TEMP ("plancia-update-" + [guid]::NewGuid().ToString("N"))
+  $zipPath = Join-Path $env:TEMP "plancia-main.zip"
+  New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+
+  Write-Host "Download $Branch ..."
+  Invoke-WebRequest -Uri $zipUrl -Headers (Get-GhHeaders) -OutFile $zipPath -TimeoutSec 600
+
+  Write-Host "Estrazione..."
+  Expand-Archive -LiteralPath $zipPath -DestinationPath $tmpDir -Force
+  $extracted = Get-ChildItem -LiteralPath $tmpDir -Directory | Select-Object -First 1
+  if (-not $extracted) { throw "ZIP estratto ma cartella vuota." }
+
+  # Conserva backend\.env locale
+  $envPath = Join-Path $Root "backend\.env"
+  $envBackup = $null
+  if (Test-Path -LiteralPath $envPath) {
+    $envBackup = Get-Content -LiteralPath $envPath -Raw -ErrorAction SilentlyContinue
+  }
+
+  Write-Host "Copia file su $Root ..."
+  $src = $extracted.FullName
+  Get-ChildItem -LiteralPath $src -Force | ForEach-Object {
+    if ($_.Name -eq ".git" -or $_.Name -eq "node_modules") { return }
+    $dest = Join-Path $Root $_.Name
+    if ($_.PSIsContainer) {
+      Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force
+    } else {
+      Copy-Item -LiteralPath $_.FullName -Destination $dest -Force
+    }
+  }
+
+  if ($null -ne $envBackup) {
+    $backendDir = Join-Path $Root "backend"
+    if (-not (Test-Path -LiteralPath $backendDir)) { New-Item -ItemType Directory -Force -Path $backendDir | Out-Null }
+    Set-Content -LiteralPath $envPath -Value $envBackup -NoNewline
+  }
+
+  Set-Content -LiteralPath $stampFile -Value $sha -NoNewline
+  try { Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue } catch {}
+  try { Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+  Write-Host "Aggiornamento ZIP completato (SHA $sha)." -ForegroundColor Green
+  return "updated"
+}
+
+function Ensure-Updated([string]$Root) {
+  if ($SkipUpdate) {
+    Write-Host "SkipUpdate: nessun controllo aggiornamenti." -ForegroundColor DarkGray
+    return
+  }
+
+  Write-Host "Controllo aggiornamenti GitHub ($RepoSlug / $Branch)..." -ForegroundColor Cyan
+  $result = "skip"
+  try {
+    $result = Update-WithGit -Root $Root
+    if ($result -eq "skip") {
+      $result = Update-WithZip -Root $Root
+    }
+  } catch {
+    Write-Host "AVVISO: aggiornamento GitHub non disponibile ($($_.Exception.Message)). Uso i file locali." -ForegroundColor Yellow
+    return
+  }
+
+  if ($result -ne "updated") {
+    Write-Host "Avvio con i file locali." -ForegroundColor DarkGray
+    return
+  }
+
+  $newPs1 = Join-Path $Root "DEPLOY_PIANCIA\AVVIO_PC\start-plancia.ps1"
+  if (-not (Test-Path -LiteralPath $newPs1)) { $newPs1 = Join-Path $ScriptDir "start-plancia.ps1" }
+  Write-Host "Rilancio launcher aggiornato..." -ForegroundColor Cyan
+  $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$newPs1`" -SkipUpdate"
+  Start-Process -FilePath "powershell.exe" -ArgumentList $argList -WorkingDirectory (Split-Path -Parent $newPs1) -Wait
+  exit $LASTEXITCODE
 }
 
 try {
@@ -69,22 +217,23 @@ try {
   if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Riavvio come amministratore (UAC)..." -ForegroundColor Cyan
     $ps = Join-Path $ScriptDir "start-plancia.ps1"
-    $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$ps`""
+    $extra = @()
+    if ($SkipUpdate) { $extra += "-SkipUpdate" }
+    $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$ps`" " + ($extra -join " ")
     try {
-      Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $argList -WorkingDirectory $ScriptDir | Out-Null
+      Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $argList.Trim() -WorkingDirectory $ScriptDir | Out-Null
       exit 0
     } catch {
-      Fail "Impossibile elevare i privilegi. Tasto destro su start-plancia.bat -> Esegui come amministratore."
+      Fail "Impossibile elevare i privilegi. Tasto destro su AVVIA-PLANCIA.bat -> Esegui come amministratore."
     }
   }
 
   Write-Host "============================================================"
-  Write-Host " Atlas Plancia Locale — SOLO PC (nessuna rete)"
+  Write-Host " Atlas Plancia Locale — auto-update GitHub + avvio"
   Write-Host " Cartella: $ScriptDir"
   Write-Host "============================================================"
   Write-Host ""
 
-  # Sblocca Mark-of-the-Web su tutti i file in questa cartella
   Get-ChildItem -LiteralPath $ScriptDir -File -ErrorAction SilentlyContinue | ForEach-Object {
     try { Unblock-File -LiteralPath $_.FullName -ErrorAction SilentlyContinue } catch {}
   }
@@ -101,6 +250,8 @@ try {
   $avvioDir = Join-Path $Root "DEPLOY_PIANCIA\AVVIO_PC"
   if (-not (Test-Path -LiteralPath (Join-Path $avvioDir "start-plancia.bat"))) { $avvioDir = $ScriptDir }
   Ensure-DesktopShortcut -AvvioDir $avvioDir
+
+  Ensure-Updated -Root $Root
 
   $Backend = Join-Path $Root "backend"
   Write-Host "Progetto: $Root"
