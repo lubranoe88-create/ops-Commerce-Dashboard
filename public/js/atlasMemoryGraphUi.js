@@ -484,6 +484,8 @@ function buildSceneGraph(live) {
 
   spawnPackets(10);
   if (selectedId && nodeById.has(selectedId)) focusNeuron(selectedId, { toast: false });
+  if (runtime) runtime.needsMaterialSync = true;
+  requestRender();
 }
 
 function spawnPackets(burst = 6) {
@@ -517,20 +519,56 @@ function spawnPackets(burst = 6) {
       p.mesh.material.dispose();
     }
   }
+  requestRender();
+}
+
+/**
+ * Demand-driven render: redraw only when the camera moves, packets move,
+ * or the scene graph changes — not a continuous 60fps burn with ~27k lines.
+ */
+let controlsActive = false;
+let dampFramesLeft = 0;
+
+function syncNeuronPulses() {
+  if (!runtime) return;
+  const now = Date.now();
+  for (const [id, group] of runtime.nodeById) {
+    const mesh = group.children.find((c) => c.userData?.pickable);
+    if (!mesh) continue;
+    const pulse = 1 + Math.sin(now / 380 + hash01(id) * 6) * 0.07;
+    mesh.scale.setScalar((selectedId === id ? 1.35 : 1) * pulse);
+  }
+}
+
+function syncEdgeMaterials() {
+  if (!runtime) return;
+  for (const { key, line } of runtime.edgeCurves) {
+    const h = edgeHealth.get(key);
+    const dead = !lastFetchOk || (h && !h.alive);
+    line.material.opacity = dead ? 0.12 : 0.32;
+    line.material.color.set(dead ? 0x556066 : 0x5eb0c8);
+  }
+}
+
+function requestRender() {
+  if (!pageOpen || !runtime) return;
+  if (animId) return;
+  animId = requestAnimationFrame(tick);
 }
 
 function tick(ts) {
-  if (!runtime || !pageOpen) {
-    animId = 0;
-    return;
-  }
+  animId = 0;
+  if (!runtime || !pageOpen) return;
+
   const dt = Math.min(0.05, tick._last ? (ts - tick._last) / 1000 : 0.016);
   tick._last = ts;
-  const { controls, renderer, scene, camera, root, nodeById } = runtime;
+  const { controls, renderer, scene, camera } = runtime;
   controls.update();
 
+  let packetsMoved = false;
   const next = [];
   for (const pkt of packets) {
+    packetsMoved = true;
     pkt.t += pkt.speed * dt * (pkt.failed ? 0.55 : 1);
     if (pkt.t >= 1) {
       const h = edgeHealth.get(pkt.key) || { lastPulse: 0, alive: true };
@@ -543,6 +581,7 @@ function tick(ts) {
       runtime.packetGroup.remove(pkt.mesh);
       pkt.mesh.geometry.dispose();
       pkt.mesh.material.dispose();
+      runtime.needsMaterialSync = true;
       continue;
     }
     pkt.mesh.position.copy(pkt.curve.getPoint(pkt.t));
@@ -550,34 +589,34 @@ function tick(ts) {
   }
   packets = next;
 
-  const now = Date.now();
-  for (const [id, group] of nodeById) {
-    const mesh = group.children.find((c) => c.userData?.pickable);
-    if (!mesh) continue;
-    const pulse = 1 + Math.sin(now / 380 + hash01(id) * 6) * 0.07;
-    mesh.scale.setScalar((selectedId === id ? 1.35 : 1) * pulse);
+  if (runtime.needsMaterialSync) {
+    syncEdgeMaterials();
+    runtime.needsMaterialSync = false;
   }
-  for (const { key, line } of runtime.edgeCurves) {
-    const h = edgeHealth.get(key);
-    const dead = !lastFetchOk || (h && !h.alive);
-    line.material.opacity = dead ? 0.12 : 0.32;
-    line.material.color.set(dead ? 0x556066 : 0x5eb0c8);
+  if (packetsMoved || controlsActive || dampFramesLeft > 0) {
+    syncNeuronPulses();
   }
 
   renderer.render(scene, camera);
-  animId = requestAnimationFrame(tick);
+
+  if (dampFramesLeft > 0) dampFramesLeft -= 1;
+  // Keep the loop alive only while something is still changing.
+  if (packets.length > 0 || controlsActive || dampFramesLeft > 0) {
+    requestRender();
+  }
 }
 tick._last = 0;
 
 function startAnim() {
-  if (animId) return;
-  tick._last = 0;
-  animId = requestAnimationFrame(tick);
+  // Initial paint + idle thereafter (OrbitControls "change" drives further frames).
+  requestRender();
 }
 
 function stopAnim() {
   if (animId) cancelAnimationFrame(animId);
   animId = 0;
+  controlsActive = false;
+  dampFramesLeft = 0;
 }
 
 export function focusNeuron(id, { toast = true } = {}) {
@@ -596,6 +635,7 @@ export function focusNeuron(id, { toast = true } = {}) {
       new CustomEvent("atlas:memory-focus", { detail: { id: selectedId, title: neuronTitle(node), kind: kindOf(node) } }),
     );
   }
+  requestRender();
 }
 
 export async function refreshMemoryGraph({ force = false } = {}) {
@@ -616,6 +656,8 @@ export async function refreshMemoryGraph({ force = false } = {}) {
       h.alive = false;
       edgeHealth.set(key, h);
     }
+    if (runtime) runtime.needsMaterialSync = true;
+    requestRender();
     setHud(`segnale assente · ${escapeHtml(err.message || "errore")}`);
     throw err;
   }
@@ -697,6 +739,18 @@ export async function mountMemoryBrainPage(container) {
   controls.target.set(0, 0, 0);
   controls.addEventListener("start", () => {
     if (runtime) runtime.userOrbiting = true;
+    controlsActive = true;
+    requestRender();
+  });
+  controls.addEventListener("end", () => {
+    if (runtime) runtime.userOrbiting = false;
+    controlsActive = false;
+    // Finish OrbitControls damping without a permanent 60fps loop.
+    dampFramesLeft = Math.max(dampFramesLeft, 48);
+    requestRender();
+  });
+  controls.addEventListener("change", () => {
+    requestRender();
   });
 
   scene.add(new THREE.AmbientLight(0x7a93a8, 0.55));
@@ -721,6 +775,7 @@ export async function mountMemoryBrainPage(container) {
     camera.aspect = nw / Math.max(nh, 1);
     camera.updateProjectionMatrix();
     renderer.setSize(nw, nh, false);
+    requestRender();
   };
 
   const raycaster = new THREE.Raycaster();
@@ -755,6 +810,7 @@ export async function mountMemoryBrainPage(container) {
     onPointer,
     cameraFitted: false,
     userOrbiting: false,
+    needsMaterialSync: true,
   };
 
   lastRevision = "";
