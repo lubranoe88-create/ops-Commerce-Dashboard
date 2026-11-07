@@ -1,0 +1,4 @@
+{
+  "install": "cd backend\nnpm ci --ignore-scripts",
+  "start": "cd backend\nHOST=127.0.0.1 PORT=8787 node src/server.js"
+}
