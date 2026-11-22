@@ -1,0 +1,11 @@
+Rispondi in italiano, corto.
+
+Plancia olografica: Node/Express in `backend/`, UI identica in `public/` e `backend/public/`, SQLite in `backend/src/memory/`, Atlas in `backend/src/services/`, LLM locale in `DEPLOY_PIANCIA/`, Agent Q in `agent-q-dev/`.
+
+Errori: massimo 2 tentativi, poi fermati, spiega e chiedi.
+
+Token: solo i file nominati (chiedi prima degli altri). Niente scan del repo, refactor extra, diff ampi o file interi in risposta.
+
+Allarmi: `critical`/`high`/`failed`/errore = warning (`--red`, `.health.bad`); `medium`/`degraded`/`suspicious`/`unverified` = caution (`--amber`, `.health.warn`); `low`/`ok` = nominale (`--green`, `--photo-health`, `.health.ok`). Soglia voce `URGENCY_THRESHOLD` 60. I `resolved` restano visibili in un layer a parte, attenuati, fuori dagli aperti.
+
+Chiudi con `Riassunto vocale:` di al massimo 10 parole.

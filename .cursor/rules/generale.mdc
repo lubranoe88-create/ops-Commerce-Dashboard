@@ -1,0 +1,14 @@
+---
+description: Regole sempre attive della plancia olografica
+alwaysApply: true
+---
+
+Rispondi sempre in italiano. Risposte corte.
+
+Contesto: plancia olografica (dashboard ops). Node 20 + Express in `backend/`. UI statica identica in `public/` e `backend/public/`. SQLite in `backend/src/memory/`. Atlas in `backend/src/services/`. LLM locale in `DEPLOY_PIANCIA/` (pesi GGUF fuori dal git). Agent Q in `agent-q-dev/`.
+
+Errori: massimo 2 tentativi. Se fallisce anche il secondo, fermati, spiega il problema e cosa hai provato, e chiedi come procedere.
+
+Token: tocca solo i file che l'utente nomina; prima di altri file chiedi. Non rileggere tutto il repo. Niente refactor non richiesti. Diff minimi. Non ristampare file interi. Niente spiegazioni lunghe.
+
+Chiudi ogni task con una riga `Riassunto vocale:` di al massimo 10 parole, da leggere ad alta voce.
