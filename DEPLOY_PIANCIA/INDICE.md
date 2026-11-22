@@ -2,6 +2,8 @@
 
 Pacchetto da copiare sul PC Windows. Nessuna esecuzione automatica.
 
+> **Hub struttura intero progetto:** [`docs/CHECKPOINT-PLANCIA.md`](../docs/CHECKPOINT-PLANCIA.md) — da lì accedi a UI, backend, moduli, Agent Q e questa cartella.
+
 | File / cartella | Contenuto |
 |-----------------|-----------|
 | `RIEPILOGO.md` | Tutta la chiamata: hardware, problema, top 5, verdetto, stack, cosa non usare |
