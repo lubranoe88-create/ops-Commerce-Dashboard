@@ -20,6 +20,42 @@ yarn-error.log*
 pnpm-debug.log*
 logs/
 
-# Generati in questo repo (bytecode Python, venv e browser Playwright)
+# Segreti locali (i file *.example restano indicizzati)
+.env
+.env.local
+.env.production
+.env.development
+
+# Dati runtime e database (backend/data, data/)
+data/
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+
+# Python: bytecode, cache dei test, ambienti virtuali
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Runtime browser (postinstall backend e Playwright di Agent Q)
 .browser-use-runtime/
+ms-playwright/
+browser-use-audit/
+playwright-report/
+test-results/
+
+# Pesi modello e archivio di deploy (il sorgente e la foto di riferimento restano)
+*.gguf
+*.safetensors
+*.onnx
+*.pt
+*.pth
+DEPLOY_PIANCIA/Plancia-Locale.zip
+
+# File di sistema
+.DS_Store
+Thumbs.db

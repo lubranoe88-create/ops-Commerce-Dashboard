@@ -1,0 +1,17 @@
+---
+description: Allarmi della plancia, colori aerospace e layer degli errori chiusi
+globs: public/css/app.css,public/js/app.js,public/js/functionBoardUi.js,backend/public/css/app.css,backend/public/js/app.js,backend/public/js/functionBoardUi.js,backend/src/services/atlasUrgency.js,backend/src/memory/store.js,docs/pipeline-graph-module-design.md
+alwaysApply: false
+---
+
+`public/` e `backend/public/` sono la stessa UI. Se ne modifichi una copia, chiedi se aggiornare l'altra.
+
+Classificazione sul modello già in codice (convenzione caution & warning):
+
+- Warning / emergenza, azione immediata. `SEVERITY` in `atlasUrgency.js`: `critical` 95, `high` 80. Anche kind `integrity` (piano 90), salute `bad` / `error` / `down`, `pipeline_errors.severity` `failed`, quadro `status=error`. UI: `--red`, `.health.bad`, `.toast.bad`, `.err`, `.fn-cell--error`, `.fn-wire--bad`. Con score ≥ `URGENCY_THRESHOLD` (60) l'agente parla e interrompe.
+- Caution, attenzione a breve. `medium` 55. Salute `degraded` (score 50–74 in `store.js`, classe `warn`). Pipeline `suspicious` o nodo `warn`. Quadro `unverified`. UI: `--amber`, `.health.warn`, `.toast.warn`, `.fn-cell--unverified`.
+- Nominale / advisory. `low` 25. Salute `ok` (score ≥ 75). Quadro `ok`. UI: `--green`, in testata `--photo-health`, `.health.ok`, `.toast.ok`, `.fn-cell--ok`, `.fn-wire--ok`.
+
+Token in `:root` di `app.css`: `--red` emergenza, `--amber` caution, `--green` nominale, `--photo-health` nominale in testata. Il quadro usa anche i letterali `#ff4d3a`, `#e0c56a`, `#3dce8a` sulle classi `fn-cell--*`.
+
+Errori chiusi: `status` `resolved` resta sempre visibile, in un layer distinto da `open` e `acknowledged`, attenuato con `--muted` e senza allarme rosso. Non entra in `openErrors` né nel layer attivo.
